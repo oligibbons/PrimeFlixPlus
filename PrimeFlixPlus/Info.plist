@@ -34,5 +34,6 @@
         <string>arm64</string>
     </array>
     <key>UIUserInterfaceStyle</key>
-    <string>Dark</string> </dict>
+    <string>Dark</string>
+</dict>
 </plist>

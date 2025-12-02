@@ -2,13 +2,10 @@ import Foundation
 import CoreData
 import Combine
 
-@MainActor // FIXED: Entire class runs on Main Actor
+@MainActor
 class SettingsViewModel: ObservableObject {
     
     @Published var playlists: [Playlist] = []
-    @Published var isLoading: Bool = false
-    @Published var message: String? = nil
-    
     private var repository: PrimeFlixRepository?
     
     init() {}
@@ -25,21 +22,15 @@ class SettingsViewModel: ObservableObject {
     
     func syncPlaylist(_ playlist: Playlist) async {
         guard let repo = repository else { return }
-        self.message = "Syncing \(playlist.title)..."
-        self.isLoading = true
+        guard let source = DataSourceType(rawValue: playlist.source) else { return }
         
-        await repo.syncPlaylist(playlistTitle: playlist.title, playlistUrl: playlist.url, source: DataSourceType(rawValue: playlist.source) ?? .m3u)
-        
-        self.isLoading = false
-        self.message = "Sync Complete!"
-        try? await Task.sleep(nanoseconds: 3 * 1_000_000_000)
-        self.message = nil
+        // Triggers the repo's global sync logic which updates the overlay
+        await repo.syncPlaylist(playlistTitle: playlist.title, playlistUrl: playlist.url, source: source)
     }
     
     func deletePlaylist(_ playlist: Playlist) {
-        guard let context = playlist.managedObjectContext else { return }
-        context.delete(playlist)
-        try? context.save()
+        repository?.deletePlaylist(playlist)
+        // Refresh local list
         loadPlaylists()
     }
 }

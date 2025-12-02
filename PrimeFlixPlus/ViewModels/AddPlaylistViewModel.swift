@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 
 @MainActor
 class AddPlaylistViewModel: ObservableObject {
@@ -24,37 +25,31 @@ class AddPlaylistViewModel: ObservableObject {
             return
         }
         
-        self.isLoading = true
-        self.errorMessage = nil
+        withAnimation {
+            self.isLoading = true
+            self.errorMessage = nil
+        }
         
-        // 1. Clean URL
         var cleanUrl = serverUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         if cleanUrl.hasSuffix("/") { cleanUrl.removeLast() }
         if !cleanUrl.lowercased().hasPrefix("http") {
             cleanUrl = "http://\(cleanUrl)"
         }
         
-        // 2. Pack Credentials (Internal Format)
-        // Format: server|username|password
         let combinedUrl = "\(cleanUrl)|\(username)|\(password)"
-        
-        // 3. Determine Title (Host)
         let title = URL(string: cleanUrl)?.host ?? "Xtream Playlist"
         
-        // 4. Call Repository
         guard let repo = repository else { return }
         
-        // We use the repo's sync logic to verify if it works
-        // Note: In a real app, you might want a simple "check auth" call first.
-        // Here we blindly add and sync.
+        // This will trigger the sync logic in Repository, which updates the global Overlay
         repo.addPlaylist(title: title, url: combinedUrl, source: .xtream)
         
-        // Simulate success delay/check
-        // In the repo, addPlaylist triggers a background sync task.
-        // We assume success for the UI flow to proceed.
+        // Allow UI to update
         try? await Task.sleep(nanoseconds: 1 * 1_000_000_000)
         
-        self.isLoading = false
-        self.isSuccess = true
+        withAnimation {
+            self.isLoading = false
+            self.isSuccess = true
+        }
     }
 }

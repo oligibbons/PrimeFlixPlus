@@ -15,40 +15,64 @@ struct AddPlaylistView: View {
         case connectButton
     }
     
+    // Bind focus state to the view
     @FocusState private var focusedField: Field?
-    @State private var hasAppeared = false // Safety Flag
     
     var body: some View {
         HStack(spacing: 50) {
             
             // Left: Branding & Instructions
             VStack(alignment: .leading, spacing: 20) {
-                Image(systemName: "person.crop.circle.badge.plus")
-                    .font(.system(size: 100))
-                    .foregroundColor(.cyan)
+                ZStack {
+                    Circle()
+                        .fill(Color.cyan.opacity(0.1))
+                        .frame(width: 150, height: 150)
+                        .blur(radius: 20)
+                    
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .font(.system(size: 100))
+                        .foregroundColor(.cyan)
+                }
                 
-                Text("Connect Xtream Codes")
-                    .font(.largeTitle)
+                Text("Connect Provider")
+                    .font(.custom("Exo2-Bold", size: 48)) // Custom Font
                     .fontWeight(.bold)
+                    .foregroundColor(.white)
                 
-                Text("Enter your IPTV provider details.\nYour credentials are saved locally.")
+                Text("Enter your Xtream Codes API details.\nCredentials are encrypted and stored locally.")
+                    .font(.headline)
                     .foregroundColor(.gray)
+                    .multilineTextAlignment(.leading)
                 
                 Spacer()
                 
-                Button("Cancel", action: onBack)
+                Button(action: onBack) {
+                    HStack {
+                        Image(systemName: "arrow.left")
+                        Text("Cancel")
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.white.opacity(0.7))
             }
-            .frame(width: 400)
+            .frame(width: 500)
             
             // Right: Form
             VStack(spacing: 24) {
                 if viewModel.isLoading {
-                    ProgressView("Verifying Credentials...")
-                        .scaleEffect(1.5)
+                    VStack(spacing: 20) {
+                        ProgressView()
+                            .scaleEffect(2.0)
+                        Text("Authenticating...")
+                            .font(.headline)
+                            .foregroundColor(.cyan)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     // 1. Server URL
                     neonInput(
                         title: "SERVER URL",
+                        placeholder: "http://line.example.com",
                         text: $viewModel.serverUrl,
                         field: .url,
                         nextField: .username
@@ -57,6 +81,7 @@ struct AddPlaylistView: View {
                     // 2. Username
                     neonInput(
                         title: "USERNAME",
+                        placeholder: "User123",
                         text: $viewModel.username,
                         field: .username,
                         nextField: .password
@@ -65,6 +90,7 @@ struct AddPlaylistView: View {
                     // 3. Password
                     neonInput(
                         title: "PASSWORD",
+                        placeholder: "••••••",
                         text: $viewModel.password,
                         field: .password,
                         nextField: .connectButton,
@@ -72,10 +98,17 @@ struct AddPlaylistView: View {
                     )
                     
                     if let error = viewModel.errorMessage {
-                        Text(error)
-                            .foregroundColor(.red)
-                            .fontWeight(.semibold)
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                            Text(error)
+                        }
+                        .font(.headline)
+                        .foregroundColor(.red)
+                        .padding(.top, 10)
+                        .transition(.opacity)
                     }
+                    
+                    Spacer().frame(height: 10)
                     
                     // 4. Connect Button
                     Button(action: {
@@ -87,32 +120,36 @@ struct AddPlaylistView: View {
                         }
                     }) {
                         Text("Connect Account")
+                            .font(.headline)
+                            .fontWeight(.bold)
                             .frame(maxWidth: .infinity)
-                            .padding()
+                            .padding(.vertical, 12)
                     }
                     .buttonStyle(.card)
                     .focused($focusedField, equals: .connectButton)
-                    .padding(.top, 10)
+                    .disabled(viewModel.serverUrl.isEmpty || viewModel.username.isEmpty || viewModel.password.isEmpty)
                 }
             }
-            .padding(50)
-            .background(Color(white: 0.1))
-            .cornerRadius(20)
+            .padding(60)
+            .background(Color(white: 0.1).blur(radius: 20)) // Fallback for material
+            .cornerRadius(30)
+            .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 10)
         }
-        .background(Color.black.ignoresSafeArea())
+        .padding(50)
+        .background(
+            ZStack {
+                Color.black
+                // Optional: Background Image here
+            }
+            .ignoresSafeArea()
+        )
         .onAppear {
             viewModel.configure(repository: repository)
-            
-            // CRITICAL FIX: Only force focus ONCE.
-            // If you are fast and click before 0.5s, this block won't run or won't reset active focus.
-            if !hasAppeared {
-                hasAppeared = true
-                
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    // Only reset focus if NOTHING is focused
-                    if self.focusedField == nil {
-                        self.focusedField = .url
-                    }
+            // Fix for initial focus on tvOS 15
+            // Only set focus if nothing is currently focused
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if self.focusedField == nil {
+                    self.focusedField = .url
                 }
             }
         }
@@ -120,45 +157,48 @@ struct AddPlaylistView: View {
     
     // MARK: - Helper for Consistent Styling
     @ViewBuilder
-    private func neonInput(title: String, text: Binding<String>, field: Field, nextField: Field, isSecure: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func neonInput(title: String, placeholder: String, text: Binding<String>, field: Field, nextField: Field, isSecure: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.caption)
                 .fontWeight(.bold)
                 .foregroundColor(focusedField == field ? .cyan : .gray)
                 .padding(.leading, 4)
+                .animation(.easeInOut, value: focusedField)
             
-            ZStack {
-                // Background
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(white: 0.15))
-                
-                // Input Field
-                if isSecure {
-                    SecureField(title, text: text)
-                        .focused($focusedField, equals: field)
-                        .submitLabel(.next)
-                        .onSubmit { focusedField = nextField }
-                        .padding(16)
-                } else {
-                    TextField(title, text: text)
-                        .focused($focusedField, equals: field)
-                        .submitLabel(.next)
-                        .onSubmit { focusedField = nextField }
-                        .padding(16)
-                        .keyboardType(.URL)
-                }
-                
-                // Neon Glow Border
-                if focusedField == field {
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.cyan, lineWidth: 3)
-                        .shadow(color: Color.cyan.opacity(0.8), radius: 10, x: 0, y: 0)
-                }
+            if isSecure {
+                SecureField(placeholder, text: text)
+                    .focused($focusedField, equals: field)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = nextField }
+                    .padding(20)
+                    .background(Color(white: 0.15))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(focusedField == field ? Color.cyan : Color.clear, lineWidth: 3)
+                            .shadow(color: focusedField == field ? .cyan.opacity(0.6) : .clear, radius: 15, x: 0, y: 0)
+                    )
+                    .scaleEffect(focusedField == field ? 1.02 : 1.0)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.4), value: focusedField)
+            } else {
+                TextField(placeholder, text: text)
+                    .focused($focusedField, equals: field)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = nextField }
+                    .keyboardType(.URL)
+                    .disableAutocorrection(true)
+                    .padding(20)
+                    .background(Color(white: 0.15))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(focusedField == field ? Color.cyan : Color.clear, lineWidth: 3)
+                            .shadow(color: focusedField == field ? .cyan.opacity(0.6) : .clear, radius: 15, x: 0, y: 0)
+                    )
+                    .scaleEffect(focusedField == field ? 1.02 : 1.0)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.4), value: focusedField)
             }
-            .frame(height: 60)
-            .scaleEffect(focusedField == field ? 1.02 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focusedField)
         }
     }
 }

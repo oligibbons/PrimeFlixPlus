@@ -5,6 +5,12 @@ import Combine
 @MainActor
 class PrimeFlixRepository: ObservableObject {
     
+    // MARK: - Global Sync State
+    @Published var isSyncing: Bool = false
+    @Published var syncStatusMessage: String? = nil
+    @Published var lastSyncDate: Date? = nil
+    @Published var isErrorState: Bool = false // New flag for red text
+    
     private let container: NSPersistentContainer
     private let tmdbClient = TmdbClient()
     private let xtreamClient = XtreamClient()
@@ -15,7 +21,8 @@ class PrimeFlixRepository: ObservableObject {
         self.channelRepo = ChannelRepository(context: container.viewContext)
     }
     
-    // MARK: - Playlist
+    // MARK: - Playlist Management
+    
     func getAllPlaylists() -> [Playlist] {
         let request: NSFetchRequest<Playlist> = NSFetchRequest(entityName: "Playlist")
         return (try? container.viewContext.fetch(request)) ?? []
@@ -23,15 +30,69 @@ class PrimeFlixRepository: ObservableObject {
     
     func addPlaylist(title: String, url: String, source: DataSourceType) {
         let context = container.viewContext
-        _ = Playlist(context: context, title: title, url: url, source: source)
-        try? context.save()
+        // Check duplicates first
+        let req: NSFetchRequest<Playlist> = NSFetchRequest(entityName: "Playlist")
+        req.predicate = NSPredicate(format: "url == %@", url)
         
-        Task { await syncPlaylist(playlistTitle: title, playlistUrl: url, source: source) }
+        if (try? context.fetch(req).count) ?? 0 == 0 {
+            _ = Playlist(context: context, title: title, url: url, source: source)
+            try? context.save()
+            
+            // Trigger Sync immediately
+            Task { await syncPlaylist(playlistTitle: title, playlistUrl: url, source: source) }
+        }
+    }
+    
+    func deletePlaylist(_ playlist: Playlist) {
+        let context = container.viewContext
+        // 1. Delete associated channels first
+        let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
+        fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlist.url)
+        let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
+        _ = try? context.execute(deleteReq)
+        
+        // 2. Delete Playlist
+        context.delete(playlist)
+        try? context.save()
+        self.objectWillChange.send()
     }
     
     // MARK: - Sync Logic
-    func syncPlaylist(playlistTitle: String, playlistUrl: String, source: DataSourceType) async {
+    
+    func syncAll() async {
+        guard !isSyncing else { return }
+        
+        let playlists = getAllPlaylists()
+        guard !playlists.isEmpty else { return }
+        
+        self.isSyncing = true
+        self.isErrorState = false
+        self.syncStatusMessage = "Starting Auto-Sync..."
+        
+        for playlist in playlists {
+            guard let source = DataSourceType(rawValue: playlist.source) else { continue }
+            await syncPlaylist(playlistTitle: playlist.title, playlistUrl: playlist.url, source: source, isAutoSync: true)
+        }
+        
+        self.isSyncing = false
+        
+        // Only show "Complete" if we didn't end in an error state
+        if !self.isErrorState {
+            self.syncStatusMessage = "Sync Complete"
+            self.lastSyncDate = Date()
+            try? await Task.sleep(nanoseconds: 3 * 1_000_000_000)
+            self.syncStatusMessage = nil
+        }
+    }
+    
+    func syncPlaylist(playlistTitle: String, playlistUrl: String, source: DataSourceType, isAutoSync: Bool = false) async {
+        if !isAutoSync {
+            self.isSyncing = true
+            self.isErrorState = false
+        }
+        
         print("Syncing: \(playlistTitle)")
+        self.syncStatusMessage = "Connecting to \(playlistTitle)..."
         
         // 1. Delete Old Data
         await container.performBackgroundTask { context in
@@ -44,32 +105,69 @@ class PrimeFlixRepository: ObservableObject {
         // 2. Fetch & Parse
         var channels: [ChannelStruct] = []
         
-        if source == .xtream {
-            let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
-            if let live = try? await xtreamClient.getLiveStreams(input: input) {
+        do {
+            if source == .xtream {
+                let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
+                
+                self.syncStatusMessage = "Fetching Live Channels..."
+                let live = try await xtreamClient.getLiveStreams(input: input)
                 channels += live.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
-            }
-            if let vod = try? await xtreamClient.getVodStreams(input: input) {
+                
+                self.syncStatusMessage = "Fetching Movies..."
+                let vod = try await xtreamClient.getVodStreams(input: input)
                 channels += vod.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
-            }
-        } else if source == .m3u {
-            guard let url = URL(string: playlistUrl) else { return }
-            if let (data, _) = try? await URLSession.shared.data(from: url),
-               let content = String(data: data, encoding: .utf8) {
-                channels = await M3UParser.parse(content: content, playlistUrl: playlistUrl)
-            }
-        }
-        
-        // 3. Batch Insert
-        if !channels.isEmpty {
-            await container.performBackgroundTask { context in
-                context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
-                for item in channels {
-                    _ = item.toManagedObject(context: context)
+                
+                self.syncStatusMessage = "Fetching Series..."
+                let series = try await xtreamClient.getSeries(input: input)
+                channels += series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) }
+                
+            } else if source == .m3u {
+                self.syncStatusMessage = "Downloading Playlist..."
+                guard let url = URL(string: playlistUrl) else { throw URLError(.badURL) }
+                let (data, response) = try await URLSession.shared.data(from: url)
+                
+                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                    throw URLError(.badServerResponse)
                 }
-                try? context.save()
+                
+                if let content = String(data: data, encoding: .utf8) {
+                    self.syncStatusMessage = "Parsing M3U..."
+                    channels = await M3UParser.parse(content: content, playlistUrl: playlistUrl)
+                }
             }
-            self.objectWillChange.send()
+            
+            // 3. Batch Insert
+            self.syncStatusMessage = "Saving \(channels.count) items..."
+            if !channels.isEmpty {
+                await container.performBackgroundTask { context in
+                    context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+                    for (index, item) in channels.enumerated() {
+                        _ = item.toManagedObject(context: context)
+                        if index % 1000 == 0 { try? context.save() }
+                    }
+                    try? context.save()
+                }
+                await MainActor.run { self.objectWillChange.send() }
+            }
+            
+            if !isAutoSync {
+                self.syncStatusMessage = "Sync Finished!"
+                self.isSyncing = false
+                self.lastSyncDate = Date()
+                try? await Task.sleep(nanoseconds: 3 * 1_000_000_000)
+                self.syncStatusMessage = nil
+            }
+            
+        } catch {
+            print("Sync Failed: \(error.localizedDescription)")
+            self.isErrorState = true
+            self.isSyncing = false
+            self.syncStatusMessage = "Sync Failed: \(error.localizedDescription)"
+            
+            // Keep the error message visible longer (5 seconds)
+            try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+            self.syncStatusMessage = nil
+            self.isErrorState = false
         }
     }
     
@@ -79,21 +177,22 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     func getBrowsingContent(playlistUrl: String, type: StreamType, group: String) -> [Channel] {
-        // Call the new method in ChannelRepository directly
         return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type.rawValue, group: group)
     }
     
     func getRecentAdded(playlistUrl: String, type: StreamType) -> [Channel] {
-        let request: NSFetchRequest<Channel> = Channel.fetchRequest()
-        request.predicate = NSPredicate(format: "playlistUrl == %@ AND type == %@", playlistUrl, type.rawValue)
-        request.sortDescriptors = [NSSortDescriptor(key: "addedAt", ascending: false)]
-        request.fetchLimit = 20
-        return (try? container.viewContext.fetch(request)) ?? []
+        return repositoryFetch(predicate: NSPredicate(format: "playlistUrl == %@ AND type == %@", playlistUrl, type.rawValue), sort: [NSSortDescriptor(key: "addedAt", ascending: false)], limit: 20)
     }
     
     func getFavorites() -> [Channel] {
+        return repositoryFetch(predicate: NSPredicate(format: "isFavorite == YES"))
+    }
+    
+    private func repositoryFetch(predicate: NSPredicate? = nil, sort: [NSSortDescriptor]? = nil, limit: Int? = nil) -> [Channel] {
         let request: NSFetchRequest<Channel> = Channel.fetchRequest()
-        request.predicate = NSPredicate(format: "isFavorite == YES")
+        request.predicate = predicate
+        request.sortDescriptors = sort
+        if let limit = limit { request.fetchLimit = limit }
         return (try? container.viewContext.fetch(request)) ?? []
     }
     
@@ -108,11 +207,9 @@ class PrimeFlixRepository: ObservableObject {
         request.predicate = NSPredicate(format: "channelUrl == %@", url)
         
         let progress: WatchProgress = (try? context.fetch(request))?.first ?? WatchProgress(context: context, channelUrl: url, position: pos, duration: dur)
-        
         progress.position = pos
         progress.duration = dur
         progress.lastPlayed = Date()
-        
         try? context.save()
     }
 }

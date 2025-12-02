@@ -12,6 +12,7 @@
 		D228AD112EDF6682007C6114 /* AddPlaylistViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D228AD102EDF6682007C6114 /* AddPlaylistViewModel.swift */; };
 		D228AD132EDF66A3007C6114 /* AddPlaylistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D228AD122EDF66A3007C6114 /* AddPlaylistView.swift */; };
 		D228AD152EDF67FB007C6114 /* NeonTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = D228AD142EDF67FB007C6114 /* NeonTextField.swift */; };
+		D228AD172EDF7311007C6114 /* SyncStatusOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D228AD162EDF7311007C6114 /* SyncStatusOverlay.swift */; };
 		D292D6272EDF458100E8845A /* PrimeFlixPlusApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6262EDF458100E8845A /* PrimeFlixPlusApp.swift */; };
 		D292D6292EDF458100E8845A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6282EDF458100E8845A /* ContentView.swift */; };
 		D292D62B2EDF458300E8845A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D292D62A2EDF458300E8845A /* Assets.xcassets */; };
@@ -68,6 +69,8 @@
 		D228AD102EDF6682007C6114 /* AddPlaylistViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddPlaylistViewModel.swift; sourceTree = "<group>"; };
 		D228AD122EDF66A3007C6114 /* AddPlaylistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddPlaylistView.swift; sourceTree = "<group>"; };
 		D228AD142EDF67FB007C6114 /* NeonTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeonTextField.swift; sourceTree = "<group>"; };
+		D228AD162EDF7311007C6114 /* SyncStatusOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusOverlay.swift; sourceTree = "<group>"; };
+		D228AD182EDF7430007C6114 /* PrimeFlixPlus */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PrimeFlixPlus; sourceTree = "<group>"; };
 		D292D6232EDF458100E8845A /* PrimeFlixPlus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrimeFlixPlus.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D292D6262EDF458100E8845A /* PrimeFlixPlusApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimeFlixPlusApp.swift; sourceTree = "<group>"; };
 		D292D6282EDF458100E8845A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -132,6 +135,7 @@
 			isa = PBXGroup;
 			children = (
 				D292D6252EDF458100E8845A /* PrimeFlixPlus */,
+				D228AD182EDF7430007C6114 /* PrimeFlixPlus */,
 				D292D6362EDF458300E8845A /* PrimeFlixPlusTests */,
 				D292D6402EDF458300E8845A /* PrimeFlixPlusUITests */,
 				D292D6242EDF458100E8845A /* Products */,
@@ -265,6 +269,7 @@
 				D292D6832EDF576500E8845A /* PlayerView.swift */,
 				D228AD122EDF66A3007C6114 /* AddPlaylistView.swift */,
 				D228AD142EDF67FB007C6114 /* NeonTextField.swift */,
+				D228AD162EDF7311007C6114 /* SyncStatusOverlay.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -418,6 +423,7 @@
 				D292D6752EDF4C1800E8845A /* MovieCard.swift in Sources */,
 				D292D65A2EDF46EA00E8845A /* WatchProgress.swift in Sources */,
 				D292D6542EDF45FE00E8845A /* XtreamModels.swift in Sources */,
+				D228AD172EDF7311007C6114 /* SyncStatusOverlay.swift in Sources */,
 				D228AD152EDF67FB007C6114 /* NeonTextField.swift in Sources */,
 				D292D6622EDF494900E8845A /* ChannelRepository.swift in Sources */,
 				D228AD0F2EDF6061007C6114 /* IntermediateModels.swift in Sources */,
