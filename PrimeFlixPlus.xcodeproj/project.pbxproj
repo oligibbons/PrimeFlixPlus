@@ -1,0 +1,576 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 55;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		D292D6272EDF458100E8845A /* PrimeFlixPlusApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6262EDF458100E8845A /* PrimeFlixPlusApp.swift */; };
+		D292D6292EDF458100E8845A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6282EDF458100E8845A /* ContentView.swift */; };
+		D292D62B2EDF458300E8845A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D292D62A2EDF458300E8845A /* Assets.xcassets */; };
+		D292D62E2EDF458300E8845A /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D292D62D2EDF458300E8845A /* Preview Assets.xcassets */; };
+		D292D6382EDF458300E8845A /* PrimeFlixPlusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6372EDF458300E8845A /* PrimeFlixPlusTests.swift */; };
+		D292D6422EDF458300E8845A /* PrimeFlixPlusUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6412EDF458300E8845A /* PrimeFlixPlusUITests.swift */; };
+		D292D6442EDF458300E8845A /* PrimeFlixPlusUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6432EDF458300E8845A /* PrimeFlixPlusUITestsLaunchTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D292D6342EDF458300E8845A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D292D61B2EDF458100E8845A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D292D6222EDF458100E8845A;
+			remoteInfo = PrimeFlixPlus;
+		};
+		D292D63E2EDF458300E8845A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D292D61B2EDF458100E8845A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D292D6222EDF458100E8845A;
+			remoteInfo = PrimeFlixPlus;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		D292D6232EDF458100E8845A /* PrimeFlixPlus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrimeFlixPlus.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D292D6262EDF458100E8845A /* PrimeFlixPlusApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimeFlixPlusApp.swift; sourceTree = "<group>"; };
+		D292D6282EDF458100E8845A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		D292D62A2EDF458300E8845A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		D292D62D2EDF458300E8845A /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		D292D6332EDF458300E8845A /* PrimeFlixPlusTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrimeFlixPlusTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D292D6372EDF458300E8845A /* PrimeFlixPlusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimeFlixPlusTests.swift; sourceTree = "<group>"; };
+		D292D63D2EDF458300E8845A /* PrimeFlixPlusUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrimeFlixPlusUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D292D6412EDF458300E8845A /* PrimeFlixPlusUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimeFlixPlusUITests.swift; sourceTree = "<group>"; };
+		D292D6432EDF458300E8845A /* PrimeFlixPlusUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimeFlixPlusUITestsLaunchTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		D292D6202EDF458100E8845A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D292D6302EDF458300E8845A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D292D63A2EDF458300E8845A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D292D61A2EDF458100E8845A = {
+			isa = PBXGroup;
+			children = (
+				D292D6252EDF458100E8845A /* PrimeFlixPlus */,
+				D292D6362EDF458300E8845A /* PrimeFlixPlusTests */,
+				D292D6402EDF458300E8845A /* PrimeFlixPlusUITests */,
+				D292D6242EDF458100E8845A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D292D6242EDF458100E8845A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D292D6232EDF458100E8845A /* PrimeFlixPlus.app */,
+				D292D6332EDF458300E8845A /* PrimeFlixPlusTests.xctest */,
+				D292D63D2EDF458300E8845A /* PrimeFlixPlusUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D292D6252EDF458100E8845A /* PrimeFlixPlus */ = {
+			isa = PBXGroup;
+			children = (
+				D292D6262EDF458100E8845A /* PrimeFlixPlusApp.swift */,
+				D292D6282EDF458100E8845A /* ContentView.swift */,
+				D292D62A2EDF458300E8845A /* Assets.xcassets */,
+				D292D62C2EDF458300E8845A /* Preview Content */,
+			);
+			path = PrimeFlixPlus;
+			sourceTree = "<group>";
+		};
+		D292D62C2EDF458300E8845A /* Preview Content */ = {
+			isa = PBXGroup;
+			children = (
+				D292D62D2EDF458300E8845A /* Preview Assets.xcassets */,
+			);
+			path = "Preview Content";
+			sourceTree = "<group>";
+		};
+		D292D6362EDF458300E8845A /* PrimeFlixPlusTests */ = {
+			isa = PBXGroup;
+			children = (
+				D292D6372EDF458300E8845A /* PrimeFlixPlusTests.swift */,
+			);
+			path = PrimeFlixPlusTests;
+			sourceTree = "<group>";
+		};
+		D292D6402EDF458300E8845A /* PrimeFlixPlusUITests */ = {
+			isa = PBXGroup;
+			children = (
+				D292D6412EDF458300E8845A /* PrimeFlixPlusUITests.swift */,
+				D292D6432EDF458300E8845A /* PrimeFlixPlusUITestsLaunchTests.swift */,
+			);
+			path = PrimeFlixPlusUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D292D6222EDF458100E8845A /* PrimeFlixPlus */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D292D6472EDF458300E8845A /* Build configuration list for PBXNativeTarget "PrimeFlixPlus" */;
+			buildPhases = (
+				D292D61F2EDF458100E8845A /* Sources */,
+				D292D6202EDF458100E8845A /* Frameworks */,
+				D292D6212EDF458100E8845A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PrimeFlixPlus;
+			productName = PrimeFlixPlus;
+			productReference = D292D6232EDF458100E8845A /* PrimeFlixPlus.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D292D6322EDF458300E8845A /* PrimeFlixPlusTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D292D64A2EDF458300E8845A /* Build configuration list for PBXNativeTarget "PrimeFlixPlusTests" */;
+			buildPhases = (
+				D292D62F2EDF458300E8845A /* Sources */,
+				D292D6302EDF458300E8845A /* Frameworks */,
+				D292D6312EDF458300E8845A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D292D6352EDF458300E8845A /* PBXTargetDependency */,
+			);
+			name = PrimeFlixPlusTests;
+			productName = PrimeFlixPlusTests;
+			productReference = D292D6332EDF458300E8845A /* PrimeFlixPlusTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		D292D63C2EDF458300E8845A /* PrimeFlixPlusUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D292D64D2EDF458300E8845A /* Build configuration list for PBXNativeTarget "PrimeFlixPlusUITests" */;
+			buildPhases = (
+				D292D6392EDF458300E8845A /* Sources */,
+				D292D63A2EDF458300E8845A /* Frameworks */,
+				D292D63B2EDF458300E8845A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D292D63F2EDF458300E8845A /* PBXTargetDependency */,
+			);
+			name = PrimeFlixPlusUITests;
+			productName = PrimeFlixPlusUITests;
+			productReference = D292D63D2EDF458300E8845A /* PrimeFlixPlusUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D292D61B2EDF458100E8845A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1340;
+				LastUpgradeCheck = 1340;
+				TargetAttributes = {
+					D292D6222EDF458100E8845A = {
+						CreatedOnToolsVersion = 13.4.1;
+					};
+					D292D6322EDF458300E8845A = {
+						CreatedOnToolsVersion = 13.4.1;
+						TestTargetID = D292D6222EDF458100E8845A;
+					};
+					D292D63C2EDF458300E8845A = {
+						CreatedOnToolsVersion = 13.4.1;
+						TestTargetID = D292D6222EDF458100E8845A;
+					};
+				};
+			};
+			buildConfigurationList = D292D61E2EDF458100E8845A /* Build configuration list for PBXProject "PrimeFlixPlus" */;
+			compatibilityVersion = "Xcode 13.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = D292D61A2EDF458100E8845A;
+			productRefGroup = D292D6242EDF458100E8845A /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D292D6222EDF458100E8845A /* PrimeFlixPlus */,
+				D292D6322EDF458300E8845A /* PrimeFlixPlusTests */,
+				D292D63C2EDF458300E8845A /* PrimeFlixPlusUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D292D6212EDF458100E8845A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D292D62E2EDF458300E8845A /* Preview Assets.xcassets in Resources */,
+				D292D62B2EDF458300E8845A /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D292D6312EDF458300E8845A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D292D63B2EDF458300E8845A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		D292D61F2EDF458100E8845A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D292D6292EDF458100E8845A /* ContentView.swift in Sources */,
+				D292D6272EDF458100E8845A /* PrimeFlixPlusApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D292D62F2EDF458300E8845A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D292D6382EDF458300E8845A /* PrimeFlixPlusTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D292D6392EDF458300E8845A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D292D6422EDF458300E8845A /* PrimeFlixPlusUITests.swift in Sources */,
+				D292D6442EDF458300E8845A /* PrimeFlixPlusUITestsLaunchTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D292D6352EDF458300E8845A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D292D6222EDF458100E8845A /* PrimeFlixPlus */;
+			targetProxy = D292D6342EDF458300E8845A /* PBXContainerItemProxy */;
+		};
+		D292D63F2EDF458300E8845A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D292D6222EDF458100E8845A /* PrimeFlixPlus */;
+			targetProxy = D292D63E2EDF458300E8845A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		D292D6452EDF458300E8845A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = appletvos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				TVOS_DEPLOYMENT_TARGET = 15.4;
+			};
+			name = Debug;
+		};
+		D292D6462EDF458300E8845A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = appletvos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				TVOS_DEPLOYMENT_TARGET = 15.4;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		D292D6482EDF458300E8845A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"PrimeFlixPlus/Preview Content\"";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = App.PrimeFlixPlus;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+			};
+			name = Debug;
+		};
+		D292D6492EDF458300E8845A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"PrimeFlixPlus/Preview Content\"";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = App.PrimeFlixPlus;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+			};
+			name = Release;
+		};
+		D292D64B2EDF458300E8845A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = App.PrimeFlixPlusTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PrimeFlixPlus.app/PrimeFlixPlus";
+				TVOS_DEPLOYMENT_TARGET = 15.4;
+			};
+			name = Debug;
+		};
+		D292D64C2EDF458300E8845A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = App.PrimeFlixPlusTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PrimeFlixPlus.app/PrimeFlixPlus";
+				TVOS_DEPLOYMENT_TARGET = 15.4;
+			};
+			name = Release;
+		};
+		D292D64E2EDF458300E8845A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = App.PrimeFlixPlusUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TEST_TARGET_NAME = PrimeFlixPlus;
+			};
+			name = Debug;
+		};
+		D292D64F2EDF458300E8845A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = App.PrimeFlixPlusUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TEST_TARGET_NAME = PrimeFlixPlus;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		D292D61E2EDF458100E8845A /* Build configuration list for PBXProject "PrimeFlixPlus" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D292D6452EDF458300E8845A /* Debug */,
+				D292D6462EDF458300E8845A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D292D6472EDF458300E8845A /* Build configuration list for PBXNativeTarget "PrimeFlixPlus" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D292D6482EDF458300E8845A /* Debug */,
+				D292D6492EDF458300E8845A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D292D64A2EDF458300E8845A /* Build configuration list for PBXNativeTarget "PrimeFlixPlusTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D292D64B2EDF458300E8845A /* Debug */,
+				D292D64C2EDF458300E8845A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D292D64D2EDF458300E8845A /* Build configuration list for PBXNativeTarget "PrimeFlixPlusUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D292D64E2EDF458300E8845A /* Debug */,
+				D292D64F2EDF458300E8845A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = D292D61B2EDF458100E8845A /* Project object */;
+}
