@@ -68,7 +68,7 @@ struct HomeView: View {
                             } else {
                                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 40)], spacing: 40) {
                                     ForEach(viewModel.displayedChannels) { channel in
-                                        // Channel Card
+                                        // Channel Card (Inline for simplicity)
                                         Button(action: { onPlayChannel(channel) }) {
                                             AsyncImage(url: URL(string: channel.cover ?? "")) { img in
                                                 img.resizable().aspectRatio(contentMode: .fill)
@@ -90,7 +90,7 @@ struct HomeView: View {
         .onAppear { viewModel.configure(repository: repository) }
     }
     
-    // Fixed: Removed @Composable attribute
+    // Fixed: Removed @Composable
     private func tabButton(title: String, type: StreamType) -> some View {
         Button(action: { viewModel.selectTab(type) }) {
             Text(title).foregroundColor(viewModel.selectedTab == type ? .cyan : .gray)

@@ -3,7 +3,7 @@ import Foundation
 class M3UParser {
     static func parse(content: String, playlistUrl: String) async -> [ChannelStruct] {
         var channels: [ChannelStruct] = []
-        var currentData: M3UData? = nil // Fixed null -> nil
+        var currentData: M3UData? = nil // Fixed: null -> nil
         
         let lines = content.components(separatedBy: .newlines)
         
