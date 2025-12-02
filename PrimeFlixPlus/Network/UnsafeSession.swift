@@ -4,8 +4,11 @@ class UnsafeSession: NSObject, URLSessionDelegate {
     
     static let shared: URLSession = {
         let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 60
+        // Increased timeouts for slow IPTV servers
+        configuration.timeoutIntervalForRequest = 300 // 5 minutes
+        configuration.timeoutIntervalForResource = 600 // 10 minutes
+        
+        // Keep the delegate to bypass SSL errors
         return URLSession(configuration: configuration, delegate: UnsafeSession(), delegateQueue: nil)
     }()
     

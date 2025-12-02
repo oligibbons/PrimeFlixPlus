@@ -3,7 +3,7 @@ import Foundation
 /// Handles network communication with Xtream Codes APIs.
 actor XtreamClient {
     
-    // CHANGED: Use UnsafeSession.shared
+    // FIX: Use UnsafeSession.shared to bypass SSL checks
     private let session = UnsafeSession.shared
     
     private let decoder: JSONDecoder = {

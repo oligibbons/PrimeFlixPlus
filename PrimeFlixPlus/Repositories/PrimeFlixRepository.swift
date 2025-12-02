@@ -21,7 +21,6 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     // MARK: - Playlist Management
-    
     func getAllPlaylists() -> [Playlist] {
         let request: NSFetchRequest<Playlist> = NSFetchRequest(entityName: "Playlist")
         return (try? container.viewContext.fetch(request)) ?? []
@@ -52,10 +51,8 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     // MARK: - Sync Logic
-    
     func syncAll() async {
         guard !isSyncing else { return }
-        
         let playlists = getAllPlaylists()
         guard !playlists.isEmpty else { return }
         
@@ -115,7 +112,7 @@ class PrimeFlixRepository: ObservableObject {
                 self.syncStatusMessage = "Downloading Playlist..."
                 guard let url = URL(string: playlistUrl) else { throw URLError(.badURL) }
                 
-                // CHANGED: Use UnsafeSession.shared
+                // FIX: Use UnsafeSession to allow insecure M3U links
                 let (data, response) = try await UnsafeSession.shared.data(from: url)
                 
                 guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {

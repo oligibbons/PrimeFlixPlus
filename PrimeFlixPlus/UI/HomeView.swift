@@ -10,6 +10,11 @@ struct HomeView: View {
     
     @FocusState private var focusedCategory: String?
     
+    // Define the Grid Layout for Posters (200 width + spacing)
+    let columns = [
+        GridItem(.adaptive(minimum: 200, maximum: 220), spacing: 40)
+    ]
+    
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -17,70 +22,100 @@ struct HomeView: View {
             if viewModel.selectedPlaylist == nil {
                 // Playlist Selection View
                 VStack(spacing: 40) {
-                    Text("Who is watching?").font(.title).foregroundColor(.white)
+                    Text("Who is watching?")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
                     
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 300))], spacing: 40) {
+                    HStack(spacing: 40) {
                         Button(action: onAddPlaylist) {
                             VStack {
-                                Image(systemName: "plus").font(.system(size: 50))
+                                Image(systemName: "plus")
+                                    .font(.system(size: 50))
+                                    .padding()
                                 Text("Add Profile")
-                            }.frame(width: 300, height: 200)
-                        }.buttonStyle(.card)
+                            }
+                            .frame(width: 300, height: 200)
+                        }
+                        .buttonStyle(.card)
                         
                         ForEach(viewModel.playlists) { playlist in
                             Button(action: { viewModel.selectPlaylist(playlist) }) {
                                 VStack {
-                                    Image(systemName: "person.tv.fill").font(.system(size: 50))
+                                    Image(systemName: "person.tv.fill")
+                                        .font(.system(size: 50))
+                                        .padding()
                                     Text(playlist.title)
-                                }.frame(width: 300, height: 200)
-                            }.buttonStyle(.card)
+                                }
+                                .frame(width: 300, height: 200)
+                            }
+                            .buttonStyle(.card)
                         }
-                    }.padding(100)
+                    }
                 }
             } else {
                 // Dashboard View
-                HStack(alignment: .top, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
+                    
+                    // Header / Tabs
+                    HStack(spacing: 30) {
+                        tabButton(title: "SERIES", type: .series)
+                        tabButton(title: "MOVIES", type: .movie)
+                        tabButton(title: "LIVE TV", type: .live)
+                        Spacer()
+                        Button(action: onSettings) {
+                            Image(systemName: "gearshape")
+                                .font(.title2)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.top, 20)
+                    .padding(.horizontal, 60)
+                    .padding(.bottom, 20)
+                    .background(
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                    )
+                    
+                    // Main Content
                     ScrollView(.vertical, showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 20) {
-                            // Tabs
-                            HStack(spacing: 30) {
-                                tabButton(title: "SERIES", type: .series)
-                                tabButton(title: "MOVIES", type: .movie)
-                                tabButton(title: "LIVE TV", type: .live)
-                                Spacer()
-                                Button(action: onSettings) { Image(systemName: "gearshape") }.buttonStyle(.plain)
-                            }.padding(.top, 20).padding(.horizontal, 50)
+                        VStack(alignment: .leading, spacing: 30) {
                             
-                            // Categories
-                            ScrollView(.horizontal) {
+                            // Category Filter Chips
+                            ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 20) {
                                     ForEach(viewModel.categories, id: \.self) { category in
-                                        Button(category) { viewModel.selectCategory(category) }
-                                            .buttonStyle(.card)
-                                            .focused($focusedCategory, equals: category)
-                                    }
-                                }.padding(.horizontal, 50).padding(.vertical, 20)
-                            }
-                            
-                            // Grid
-                            if viewModel.isLoading {
-                                ProgressView().frame(maxWidth: .infinity)
-                            } else {
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 40)], spacing: 40) {
-                                    ForEach(viewModel.displayedChannels) { channel in
-                                        // Channel Card (Inline for simplicity)
-                                        Button(action: { onPlayChannel(channel) }) {
-                                            AsyncImage(url: URL(string: channel.cover ?? "")) { img in
-                                                img.resizable().aspectRatio(contentMode: .fill)
-                                            } placeholder: {
-                                                Color.gray
-                                            }
+                                        Button(action: { viewModel.selectCategory(category) }) {
+                                            Text(category)
+                                                .fontWeight(.semibold)
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 6)
                                         }
                                         .buttonStyle(.card)
-                                        .frame(width: 180, height: 270)
-                                        .overlay(Text(channel.title).lineLimit(1).font(.caption), alignment: .bottom)
+                                        .focused($focusedCategory, equals: category)
                                     }
-                                }.padding(.horizontal, 50)
+                                }
+                                .padding(.horizontal, 60)
+                                .padding(.vertical, 20)
+                            }
+                            
+                            // Content Grid
+                            if viewModel.isLoading {
+                                HStack {
+                                    Spacer()
+                                    ProgressView()
+                                    Spacer()
+                                }
+                                .frame(height: 300)
+                            } else {
+                                LazyVGrid(columns: columns, spacing: 60) {
+                                    ForEach(viewModel.displayedChannels) { channel in
+                                        MovieCard(channel: channel) {
+                                            onPlayChannel(channel)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 60)
+                                .padding(.bottom, 100)
                             }
                         }
                     }
@@ -90,10 +125,14 @@ struct HomeView: View {
         .onAppear { viewModel.configure(repository: repository) }
     }
     
-    // Fixed: Removed @Composable
     private func tabButton(title: String, type: StreamType) -> some View {
         Button(action: { viewModel.selectTab(type) }) {
-            Text(title).foregroundColor(viewModel.selectedTab == type ? .cyan : .gray)
-        }.buttonStyle(.plain)
+            Text(title)
+                .font(.headline)
+                .fontWeight(.bold)
+                .foregroundColor(viewModel.selectedTab == type ? .cyan : .gray)
+                .scaleEffect(viewModel.selectedTab == type ? 1.1 : 1.0)
+        }
+        .buttonStyle(.plain)
     }
 }

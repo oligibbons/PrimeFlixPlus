@@ -25,12 +25,18 @@ class ChannelRepository {
     // MARK: - Grouping
     
     func getGroups(playlistUrl: String, type: String) -> [String] {
-        let request: NSFetchRequest<Channel> = Channel.fetchRequest()
+        // CRITICAL FIX: Use NSFetchRequestResult (Generic), NOT Channel.
+        // When .dictionaryResultType is used, Core Data returns [String: Any], not [Channel].
+        let request = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
+        
         request.predicate = NSPredicate(format: "playlistUrl == %@ AND type == %@", playlistUrl, type)
         request.propertiesToFetch = ["group"]
         request.resultType = .dictionaryResultType
+        request.returnsDistinctResults = true // Let Database handle deduplication
         
+        // Safely cast to Array of Dictionaries
         guard let results = try? context.fetch(request) as? [[String: Any]] else { return [] }
+        
         let groups = results.compactMap { $0["group"] as? String }
         return Array(Set(groups)).sorted()
     }

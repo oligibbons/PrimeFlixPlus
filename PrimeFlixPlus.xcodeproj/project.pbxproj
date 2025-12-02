@@ -14,6 +14,8 @@
 		D228AD152EDF67FB007C6114 /* NeonTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = D228AD142EDF67FB007C6114 /* NeonTextField.swift */; };
 		D228AD172EDF7311007C6114 /* SyncStatusOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D228AD162EDF7311007C6114 /* SyncStatusOverlay.swift */; };
 		D228AD1B2EDF7952007C6114 /* UnsafeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D228AD1A2EDF7952007C6114 /* UnsafeSession.swift */; };
+		D228AD1D2EDFA8E3007C6114 /* DetailsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D228AD1C2EDFA8E3007C6114 /* DetailsViewModel.swift */; };
+		D228AD1F2EDFA961007C6114 /* DetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D228AD1E2EDFA961007C6114 /* DetailsView.swift */; };
 		D292D6272EDF458100E8845A /* PrimeFlixPlusApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6262EDF458100E8845A /* PrimeFlixPlusApp.swift */; };
 		D292D6292EDF458100E8845A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6282EDF458100E8845A /* ContentView.swift */; };
 		D292D62B2EDF458300E8845A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D292D62A2EDF458300E8845A /* Assets.xcassets */; };
@@ -73,6 +75,8 @@
 		D228AD162EDF7311007C6114 /* SyncStatusOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusOverlay.swift; sourceTree = "<group>"; };
 		D228AD182EDF7430007C6114 /* PrimeFlixPlus */ = {isa = PBXFileReference; lastKnownFileType = folder; path = PrimeFlixPlus; sourceTree = "<group>"; };
 		D228AD1A2EDF7952007C6114 /* UnsafeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnsafeSession.swift; sourceTree = "<group>"; };
+		D228AD1C2EDFA8E3007C6114 /* DetailsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailsViewModel.swift; sourceTree = "<group>"; };
+		D228AD1E2EDFA961007C6114 /* DetailsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailsView.swift; sourceTree = "<group>"; };
 		D292D6232EDF458100E8845A /* PrimeFlixPlus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrimeFlixPlus.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D292D6262EDF458100E8845A /* PrimeFlixPlusApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimeFlixPlusApp.swift; sourceTree = "<group>"; };
 		D292D6282EDF458100E8845A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -251,6 +255,7 @@
 				D292D67D2EDF568C00E8845A /* SettingsViewModel.swift */,
 				D292D6812EDF573F00E8845A /* PlayerViewModel.swift */,
 				D228AD102EDF6682007C6114 /* AddPlaylistViewModel.swift */,
+				D228AD1C2EDFA8E3007C6114 /* DetailsViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -273,6 +278,7 @@
 				D228AD122EDF66A3007C6114 /* AddPlaylistView.swift */,
 				D228AD142EDF67FB007C6114 /* NeonTextField.swift */,
 				D228AD162EDF7311007C6114 /* SyncStatusOverlay.swift */,
+				D228AD1E2EDFA961007C6114 /* DetailsView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -436,7 +442,9 @@
 				D292D6272EDF458100E8845A /* PrimeFlixPlusApp.swift in Sources */,
 				D292D6582EDF46CF00E8845A /* Playlist.swift in Sources */,
 				D292D65E2EDF47D500E8845A /* TitleNormalizer.swift in Sources */,
+				D228AD1D2EDFA8E3007C6114 /* DetailsViewModel.swift in Sources */,
 				D292D67E2EDF568C00E8845A /* SettingsViewModel.swift in Sources */,
+				D228AD1F2EDFA961007C6114 /* DetailsView.swift in Sources */,
 				D292D65C2EDF470300E8845A /* MediaMetadata.swift in Sources */,
 				D292D66C2EDF4B0500E8845A /* TmdbClient.swift in Sources */,
 			);
@@ -599,6 +607,7 @@
 				DEVELOPMENT_ASSET_PATHS = "\"PrimeFlixPlus/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PrimeFlixPlus/Info.plist;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -624,6 +633,7 @@
 				DEVELOPMENT_ASSET_PATHS = "\"PrimeFlixPlus/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PrimeFlixPlus/Info.plist;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIUserInterfaceStyle = Automatic;
 				LD_RUNPATH_SEARCH_PATHS = (

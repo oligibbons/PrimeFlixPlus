@@ -2,25 +2,25 @@ import SwiftUI
 
 struct MovieCard: View {
     let channel: Channel
-    let onClick: () -> Unit
+    let onClick: () -> Void
     
-    // Focus State for tvOS remote interaction
     @FocusState private var isFocused: Bool
     
     var body: some View {
         Button(action: onClick) {
             ZStack(alignment: .bottom) {
-                // 1. Background Image
+                
+                // 1. Image Layer
                 AsyncImage(url: URL(string: channel.cover ?? "")) { phase in
                     switch phase {
                     case .success(let image):
                         image
                             .resizable()
-                            .aspectRatio(contentMode: .fill)
+                            .aspectRatio(contentMode: .fill) // Fill the frame
                     case .failure, .empty:
-                        // Fallback Placeholder
+                        // Fallback
                         ZStack {
-                            Color(white: 0.1) // Dark Grey
+                            Color(white: 0.15)
                             Text(String(channel.title.prefix(1)))
                                 .font(.system(size: 50, weight: .bold, design: .rounded))
                                 .foregroundColor(.gray)
@@ -29,19 +29,22 @@ struct MovieCard: View {
                         EmptyView()
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(width: 200, height: 300) // STRICT POSTER SIZE
+                .clipped() // Cut off any image overflow
                 
-                // 2. Title Overlay (Visible on Focus or if image is missing)
+                // 2. Gradient Overlay (Readability)
                 if isFocused || channel.cover == nil {
                     LinearGradient(
                         colors: [.clear, .black.opacity(0.9)],
                         startPoint: .center,
                         endPoint: .bottom
                     )
-                    .frame(height: 120)
-                    
+                }
+                
+                // 3. Text Layer
+                if isFocused || channel.cover == nil {
                     Text(channel.title)
-                        .font(.custom("Exo2-Bold", size: 14)) // Fallback to system if font not loaded
+                        .font(.caption) // System font is safer for long titles
                         .fontWeight(.bold)
                         .foregroundColor(.white)
                         .lineLimit(2)
@@ -50,19 +53,16 @@ struct MovieCard: View {
                 }
             }
         }
-        .buttonStyle(.card) // Native tvOS parallax effect
+        .buttonStyle(.card)
         .focused($isFocused)
-        // Custom Neon Styling on top of the native card
+        .frame(width: 200, height: 300) // Ensure button takes same space
+        // Neon Glow Effect
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(isFocused ? Color.cyan : Color.clear, lineWidth: 3)
-                .shadow(color: isFocused ? Color.cyan.opacity(0.8) : .clear, radius: 10, x: 0, y: 0)
+                .shadow(color: isFocused ? Color.cyan.opacity(0.8) : .clear, radius: 15, x: 0, y: 0)
         )
-        .frame(width: 200, height: 300) // Standard Poster Size
-        .scaleEffect(isFocused ? 1.05 : 1.0)
+        .scaleEffect(isFocused ? 1.1 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isFocused)
     }
 }
-
-// Typealias to match Kotlin syntax in your mind, though usually Void in Swift
-typealias Unit = Void

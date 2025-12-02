@@ -2,9 +2,10 @@ import SwiftUI
 
 enum NavigationDestination: Equatable {
     case home
+    case details(Channel)
     case player(Channel)
     case settings
-    case addPlaylist // New Route
+    case addPlaylist
     
     static func == (lhs: NavigationDestination, rhs: NavigationDestination) -> Bool {
         switch (lhs, rhs) {
@@ -12,6 +13,7 @@ enum NavigationDestination: Equatable {
         case (.settings, .settings): return true
         case (.addPlaylist, .addPlaylist): return true
         case (.player(let c1), .player(let c2)): return c1.url == c2.url
+        case (.details(let c1), .details(let c2)): return c1.url == c2.url
         default: return false
         }
     }
@@ -27,42 +29,56 @@ struct ContentView: View {
             case .home:
                 HomeView(
                     onPlayChannel: { channel in
-                        currentDestination = .player(channel)
+                        if channel.type == "live" {
+                            // Live TV goes straight to player
+                            currentDestination = .player(channel)
+                        } else {
+                            // Movies/Series go to Details
+                            currentDestination = .details(channel)
+                        }
                     },
-                    onAddPlaylist: {
-                        currentDestination = .addPlaylist // Fixed: Now goes to Add Screen
-                    },
-                    onSettings: {
-                        currentDestination = .settings
-                    }
+                    onAddPlaylist: { currentDestination = .addPlaylist },
+                    onSettings: { currentDestination = .settings }
                 )
                 .transition(.opacity)
                 
-            case .player(let channel):
-                PlayerView(
+            case .details(let channel):
+                DetailsView(
                     channel: channel,
-                    onBack: {
-                        currentDestination = .home
-                    }
-                )
-                .transition(.move(edge: .bottom))
-                
-            case .settings:
-                SettingsView(
+                    onPlay: { playableChannel in
+                        currentDestination = .player(playableChannel)
+                    },
                     onBack: {
                         currentDestination = .home
                     }
                 )
                 .transition(.move(edge: .trailing))
                 
+            case .player(let channel):
+                PlayerView(
+                    channel: channel,
+                    onBack: {
+                        // Return to details if it was a movie/series, or home if live
+                        if channel.type == "live" {
+                            currentDestination = .home
+                        } else {
+                            // We actually just go back to home for simplicity in V1,
+                            // or you could pass a state to go back to details.
+                            // For now, going to Home is safer navigation flow.
+                            currentDestination = .home
+                        }
+                    }
+                )
+                .transition(.move(edge: .bottom))
+                
+            case .settings:
+                SettingsView(onBack: { currentDestination = .home })
+                    .transition(.move(edge: .trailing))
+                
             case .addPlaylist:
                 AddPlaylistView(
-                    onPlaylistAdded: {
-                        currentDestination = .home // Go back to home (which will reload playlists)
-                    },
-                    onBack: {
-                        currentDestination = .home
-                    }
+                    onPlaylistAdded: { currentDestination = .home },
+                    onBack: { currentDestination = .home }
                 )
                 .transition(.move(edge: .trailing))
             }
