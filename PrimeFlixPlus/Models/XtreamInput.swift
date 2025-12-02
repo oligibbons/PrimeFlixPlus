@@ -34,7 +34,9 @@ struct XtreamInput {
         let scheme = urlComponents.scheme ?? "http"
         let host = urlComponents.host ?? ""
         let portStr = (urlComponents.port != nil) ? ":\(urlComponents.port!)" : ""
-        let basicUrl = "\(scheme): //\(host)\(portStr)" // Note: Fix spacing in actual usage if needed, but keeping logic
+        
+        // CRITICAL FIX: Removed space between scheme and slash (was ": //")
+        let basicUrl = "\(scheme)://\(host)\(portStr)"
         
         // Extract query parameters
         var username = ""

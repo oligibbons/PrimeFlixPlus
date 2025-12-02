@@ -77,7 +77,8 @@ struct DetailsView: View {
                                 Label(String(format: "%.1f", rating), systemImage: "star.fill")
                                     .foregroundColor(.yellow)
                             }
-                            if let date = viewModel.tmdbDetails?.releaseDate?.prefix(4) {
+                            // FIXED: Use displayDate property
+                            if let date = viewModel.tmdbDetails?.displayDate?.prefix(4) {
                                 Text(String(date)).foregroundColor(.gray)
                             }
                             if let genres = viewModel.tmdbDetails?.genres {

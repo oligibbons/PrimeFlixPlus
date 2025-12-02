@@ -98,7 +98,14 @@ struct TmdbDetails: Decodable {
     let backdropPath: String?
     let seasons: [TmdbSeason]? // Only for TV
     
+    // NEW: Explicitly added properties for dates
+    let releaseDate: String?
+    let firstAirDate: String?
+    
     var displayTitle: String { title ?? name ?? "Unknown" }
+    
+    // Helper to get the correct date regardless of content type
+    var displayDate: String? { releaseDate ?? firstAirDate }
 }
 
 struct TmdbSeason: Decodable, Identifiable {

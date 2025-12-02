@@ -87,7 +87,8 @@ class DetailsViewModel: ObservableObject {
             
             // Select first season by default
             if let first = self.seasons.first {
-                await selectSeason(first)
+                // FIXED: Removed await
+                selectSeason(first)
             }
         } catch {
             print("Xtream Error: \(error)")

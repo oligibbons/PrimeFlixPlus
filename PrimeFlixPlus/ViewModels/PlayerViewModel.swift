@@ -48,11 +48,11 @@ class PlayerViewModel: ObservableObject {
         }
         
         // 2. CRITICAL FIX: Create Asset with Custom Headers
-        // Many IPTV providers block default AVPlayer User-Agent. We impersonate VLC/Browser.
         let headers: [String: Any] = [
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15"
         ]
         
+        // FIXED: Use String literal to avoid scope resolution errors with older Xcode/SDKs
         let asset = AVURLAsset(url: streamUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
         let item = AVPlayerItem(asset: asset)
         
@@ -64,7 +64,7 @@ class PlayerViewModel: ObservableObject {
                 case .failed:
                     self?.isError = true
                     self?.errorMessage = item.error?.localizedDescription ?? "Stream Error"
-                    print("❌ Player Error: \(String(describing: item.error))")
+                    print("❌ Player Error: \(String(describing: item.error)) for URL: \(url)")
                 case .readyToPlay:
                     self?.isError = false
                     self?.duration = item.duration.seconds
