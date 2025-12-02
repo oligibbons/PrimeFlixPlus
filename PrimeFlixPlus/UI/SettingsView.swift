@@ -6,27 +6,30 @@ struct SettingsView: View {
     
     var onBack: () -> Void
     
-    // We don't need complex focus state here anymore; tvOS handles it naturally.
-    @FocusState private var isBackFocused: Bool
+    // Explicit focus control for tvOS 15
+    @FocusState private var focusedField: String?
     
     var body: some View {
         HStack(alignment: .top, spacing: 50) {
             
-            // LEFT PANE: Navigation
-            VStack(alignment: .leading, spacing: 30) {
+            // LEFT PANE: Navigation & Info
+            VStack(alignment: .leading, spacing: 20) {
+                
                 // Back Button
                 Button(action: onBack) {
                     HStack {
                         Image(systemName: "arrow.left")
                         Text("Back to Home")
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.card)
-                .focused($isBackFocused) // Default focus landing pad
+                .focused($focusedField, equals: "back")
                 
-                // Info Panel
+                Spacer().frame(height: 20)
+                
+                // Branding
                 VStack(alignment: .leading, spacing: 10) {
                     Image(systemName: "gearshape.fill")
                         .font(.system(size: 60))
@@ -43,7 +46,6 @@ struct SettingsView: View {
                             .foregroundColor(.gray)
                     }
                 }
-                .padding(.top, 20)
                 
                 Spacer()
             }
@@ -55,19 +57,24 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 40) {
                     
-                    // SECTION 1: PLAYLISTS
-                    VStack(alignment: .leading, spacing: 20) {
+                    // SECTION: Playlists
+                    VStack(alignment: .leading, spacing: 15) {
                         Text("Manage Playlists")
                             .font(.title3)
                             .fontWeight(.bold)
                             .foregroundColor(.cyan)
                         
                         if viewModel.playlists.isEmpty {
-                            Text("No playlists found.")
-                                .foregroundColor(.gray)
-                                .padding()
+                            // Make this focusable so the user isn't trapped if list is empty
+                            Button(action: {}) {
+                                Text("No playlists found")
+                                    .foregroundColor(.gray)
+                                    .padding()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(true)
                         } else {
-                            // Using standard buttons instead of complex custom rows
                             ForEach(viewModel.playlists, id: \.self) { playlist in
                                 PlaylistRow(playlist: playlist, viewModel: viewModel)
                             }
@@ -76,15 +83,15 @@ struct SettingsView: View {
                     
                     Divider().background(Color.gray)
                     
-                    // SECTION 2: GENERAL
-                    VStack(alignment: .leading, spacing: 20) {
+                    // SECTION: General
+                    VStack(alignment: .leading, spacing: 15) {
                         Text("General")
                             .font(.title3)
                             .fontWeight(.bold)
                             .foregroundColor(.cyan)
                         
                         Button(action: {
-                            // Clear cache logic
+                            // Cache clear logic
                         }) {
                             HStack {
                                 Image(systemName: "photo.on.rectangle")
@@ -102,18 +109,22 @@ struct SettingsView: View {
         .background(Color.black.ignoresSafeArea())
         .onAppear {
             viewModel.configure(repository: repository)
+            // tvOS 15 Focus Fix: Force focus to back button after load
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                focusedField = "back"
+            }
         }
     }
 }
 
-// Simplified Row Component
+// Subview for Rows
 struct PlaylistRow: View {
     @ObservedObject var playlist: Playlist
     @ObservedObject var viewModel: SettingsViewModel
     
     var body: some View {
         HStack(spacing: 20) {
-            // Info (Not Focusable)
+            // Text Info
             VStack(alignment: .leading) {
                 Text(playlist.title)
                     .font(.headline)
@@ -131,8 +142,8 @@ struct PlaylistRow: View {
                 Task { await viewModel.syncPlaylist(playlist) }
             }) {
                 Label("Sync", systemImage: "arrow.triangle.2.circlepath")
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
             }
             .buttonStyle(.card)
             
@@ -141,13 +152,13 @@ struct PlaylistRow: View {
                 viewModel.deletePlaylist(playlist)
             }) {
                 Image(systemName: "trash")
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
                     .foregroundColor(.red)
             }
             .buttonStyle(.card)
         }
-        .padding(20)
+        .padding(16)
         .background(Color(white: 0.15))
         .cornerRadius(12)
     }

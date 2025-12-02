@@ -3,13 +3,11 @@ import Foundation
 /// Handles network communication with Xtream Codes APIs.
 actor XtreamClient {
     
-    private let session = URLSession.shared
+    // CHANGED: Use UnsafeSession.shared
+    private let session = UnsafeSession.shared
     
-    // JSON Decoder configured for lenient parsing (common issue with IPTV providers)
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
-        // Xtream APIs often return numbers as strings or vice versa
-        // Swift's Codable is strict, so we rely on our Model init logic to handle rough edges.
         return d
     }()
     
@@ -37,13 +35,9 @@ actor XtreamClient {
         
         let (data, _) = try await session.data(from: url)
         
-        // Series info response is a complex object: { "episodes": { "1": [...], "2": [...] } }
         let container = try decoder.decode(XtreamChannelInfo.SeriesInfoContainer.self, from: data)
-        
-        // Flatten the map into a single list
         let allEpisodes = container.episodes.flatMap { $0.value }
         
-        // Sort by Season then Episode
         return allEpisodes.sorted {
             if $0.season != $1.season {
                 return $0.season < $1.season

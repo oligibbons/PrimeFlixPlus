@@ -5,11 +5,10 @@ import Combine
 @MainActor
 class PrimeFlixRepository: ObservableObject {
     
-    // MARK: - Global Sync State
     @Published var isSyncing: Bool = false
     @Published var syncStatusMessage: String? = nil
     @Published var lastSyncDate: Date? = nil
-    @Published var isErrorState: Bool = false // New flag for red text
+    @Published var isErrorState: Bool = false
     
     private let container: NSPersistentContainer
     private let tmdbClient = TmdbClient()
@@ -30,28 +29,23 @@ class PrimeFlixRepository: ObservableObject {
     
     func addPlaylist(title: String, url: String, source: DataSourceType) {
         let context = container.viewContext
-        // Check duplicates first
         let req: NSFetchRequest<Playlist> = NSFetchRequest(entityName: "Playlist")
         req.predicate = NSPredicate(format: "url == %@", url)
         
         if (try? context.fetch(req).count) ?? 0 == 0 {
             _ = Playlist(context: context, title: title, url: url, source: source)
             try? context.save()
-            
-            // Trigger Sync immediately
             Task { await syncPlaylist(playlistTitle: title, playlistUrl: url, source: source) }
         }
     }
     
     func deletePlaylist(_ playlist: Playlist) {
         let context = container.viewContext
-        // 1. Delete associated channels first
         let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
         fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlist.url)
         let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
         _ = try? context.execute(deleteReq)
         
-        // 2. Delete Playlist
         context.delete(playlist)
         try? context.save()
         self.objectWillChange.send()
@@ -75,8 +69,6 @@ class PrimeFlixRepository: ObservableObject {
         }
         
         self.isSyncing = false
-        
-        // Only show "Complete" if we didn't end in an error state
         if !self.isErrorState {
             self.syncStatusMessage = "Sync Complete"
             self.lastSyncDate = Date()
@@ -94,7 +86,6 @@ class PrimeFlixRepository: ObservableObject {
         print("Syncing: \(playlistTitle)")
         self.syncStatusMessage = "Connecting to \(playlistTitle)..."
         
-        // 1. Delete Old Data
         await container.performBackgroundTask { context in
             let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
             fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlistUrl)
@@ -102,7 +93,6 @@ class PrimeFlixRepository: ObservableObject {
             _ = try? context.execute(deleteReq)
         }
         
-        // 2. Fetch & Parse
         var channels: [ChannelStruct] = []
         
         do {
@@ -124,7 +114,9 @@ class PrimeFlixRepository: ObservableObject {
             } else if source == .m3u {
                 self.syncStatusMessage = "Downloading Playlist..."
                 guard let url = URL(string: playlistUrl) else { throw URLError(.badURL) }
-                let (data, response) = try await URLSession.shared.data(from: url)
+                
+                // CHANGED: Use UnsafeSession.shared
+                let (data, response) = try await UnsafeSession.shared.data(from: url)
                 
                 guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
                     throw URLError(.badServerResponse)
@@ -136,7 +128,6 @@ class PrimeFlixRepository: ObservableObject {
                 }
             }
             
-            // 3. Batch Insert
             self.syncStatusMessage = "Saving \(channels.count) items..."
             if !channels.isEmpty {
                 await container.performBackgroundTask { context in
@@ -162,9 +153,8 @@ class PrimeFlixRepository: ObservableObject {
             print("Sync Failed: \(error.localizedDescription)")
             self.isErrorState = true
             self.isSyncing = false
-            self.syncStatusMessage = "Sync Failed: \(error.localizedDescription)"
+            self.syncStatusMessage = "Error: \(error.localizedDescription)"
             
-            // Keep the error message visible longer (5 seconds)
             try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
             self.syncStatusMessage = nil
             self.isErrorState = false
