@@ -1,5 +1,6 @@
 import Foundation
 import AVKit
+import AVFoundation // CRITICAL: Required for AVURLAsset
 import Combine
 import SwiftUI
 
@@ -25,9 +26,24 @@ class PlayerViewModel: ObservableObject {
         self.repository = repository
         self.videoTitle = channel.title
         
-        // 1. Sanitize URL (Fix spaces)
-        let cleanUrl = channel.url.replacingOccurrences(of: " ", with: "%20")
+        // 1. NUCLEAR URL SANITIZATION
+        // We handle the specific "Space Bug" (http: //) and standard encoding
+        var rawUrl = channel.url
+        
+        // Fix the specific scheme spacing issue if present
+        if rawUrl.contains(": //") {
+            rawUrl = rawUrl.replacingOccurrences(of: ": //", with: "://")
+        }
+        // Fix spaces encoded incorrectly by previous attempts
+        if rawUrl.contains(":%20//") {
+            rawUrl = rawUrl.replacingOccurrences(of: ":%20//", with: "://")
+        }
+        
+        // Finally, fix any other spaces in the path (standard encoding)
+        let cleanUrl = rawUrl.replacingOccurrences(of: " ", with: "%20")
+        
         self.currentUrl = cleanUrl
+        print("▶️ Attempting playback: \(cleanUrl)")
         
         setupPlayer(url: cleanUrl)
     }
@@ -43,41 +59,55 @@ class PlayerViewModel: ObservableObject {
     private func setupPlayer(url: String) {
         guard let streamUrl = URL(string: url) else {
             self.isError = true
-            self.errorMessage = "Invalid URL"
+            self.errorMessage = "Invalid URL Format"
+            print("❌ Invalid URL String: \(url)")
             return
         }
         
-        // 2. CRITICAL FIX: Create Asset with Custom Headers
+        // 2. HEADERS (User-Agent)
+        // Many IPTV providers block standard AVPlayer User-Agents.
         let headers: [String: Any] = [
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15"
         ]
         
-        // FIXED: Use String literal to avoid scope resolution errors with older Xcode/SDKs
+        // 3. ASSET CREATION
+        // We use the String literal "AVURLAssetHTTPHeaderFieldsKey" to avoid SDK version scope issues.
         let asset = AVURLAsset(url: streamUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
         let item = AVPlayerItem(asset: asset)
         
-        // 3. Monitor Playback Status
+        // 4. MONITORING
         let statusObserver = item.publisher(for: \.status)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 switch status {
                 case .failed:
                     self?.isError = true
-                    self?.errorMessage = item.error?.localizedDescription ?? "Stream Error"
-                    print("❌ Player Error: \(String(describing: item.error)) for URL: \(url)")
+                    
+                    // FIXED: Cast to NSError to access detailed properties
+                    let nsError = item.error as NSError?
+                    let err = nsError?.localizedDescription ?? "Unknown Stream Error"
+                    let reason = nsError?.localizedFailureReason ?? ""
+                    
+                    self?.errorMessage = "\(err) \(reason)"
+                    print("❌ Player Failed: \(err) | Reason: \(reason) | URL: \(url)")
+                    
                 case .readyToPlay:
                     self?.isError = false
                     self?.duration = item.duration.seconds
-                    print("✅ Ready to play")
-                    self?.player?.play() // Auto-play when ready
+                    print("✅ Ready to play. Duration: \(item.duration.seconds)")
+                    self?.player?.play()
                     self?.isPlaying = true
-                default: break
+                    
+                default:
+                    break
                 }
             }
         
         itemObservers.insert(AnyCancellable(statusObserver))
         
+        // 5. INITIALIZE PLAYER
         self.player = AVPlayer(playerItem: item)
+        self.player?.actionAtItemEnd = .pause // Stop at end
         
         // Periodic Time Observer
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)

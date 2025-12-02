@@ -83,11 +83,13 @@ class PrimeFlixRepository: ObservableObject {
         print("Syncing: \(playlistTitle)")
         self.syncStatusMessage = "Connecting to \(playlistTitle)..."
         
+        // Clean old data for this playlist
         await container.performBackgroundTask { context in
             let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
             fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlistUrl)
             let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
             _ = try? context.execute(deleteReq)
+            try? context.save()
         }
         
         var channels: [ChannelStruct] = []
@@ -97,22 +99,27 @@ class PrimeFlixRepository: ObservableObject {
                 let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
                 
                 self.syncStatusMessage = "Fetching Live Channels..."
-                let live = try await xtreamClient.getLiveStreams(input: input)
-                channels += live.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
+                // 1. Live
+                if let live = try? await xtreamClient.getLiveStreams(input: input) {
+                     channels += live.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
+                }
                 
                 self.syncStatusMessage = "Fetching Movies..."
-                let vod = try await xtreamClient.getVodStreams(input: input)
-                channels += vod.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
+                // 2. VOD
+                if let vod = try? await xtreamClient.getVodStreams(input: input) {
+                    channels += vod.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
+                }
                 
                 self.syncStatusMessage = "Fetching Series..."
-                let series = try await xtreamClient.getSeries(input: input)
-                channels += series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) }
+                // 3. Series
+                if let series = try? await xtreamClient.getSeries(input: input) {
+                     channels += series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) }
+                }
                 
             } else if source == .m3u {
                 self.syncStatusMessage = "Downloading Playlist..."
                 guard let url = URL(string: playlistUrl) else { throw URLError(.badURL) }
                 
-                // FIX: Use UnsafeSession to allow insecure M3U links
                 let (data, response) = try await UnsafeSession.shared.data(from: url)
                 
                 guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
@@ -131,10 +138,12 @@ class PrimeFlixRepository: ObservableObject {
                     context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
                     for (index, item) in channels.enumerated() {
                         _ = item.toManagedObject(context: context)
-                        if index % 1000 == 0 { try? context.save() }
+                        // Save in batches to prevent memory spikes
+                        if index % 2000 == 0 { try? context.save() }
                     }
                     try? context.save()
                 }
+                // Force UI Refresh
                 await MainActor.run { self.objectWillChange.send() }
             }
             

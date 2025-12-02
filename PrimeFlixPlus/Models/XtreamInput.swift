@@ -36,6 +36,7 @@ struct XtreamInput {
         let portStr = (urlComponents.port != nil) ? ":\(urlComponents.port!)" : ""
         
         // CRITICAL FIX: Removed space between scheme and slash (was ": //")
+        // This single character was breaking the entire player.
         let basicUrl = "\(scheme)://\(host)\(portStr)"
         
         // Extract query parameters
