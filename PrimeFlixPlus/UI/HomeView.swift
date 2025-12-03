@@ -10,7 +10,6 @@ struct HomeView: View {
     
     // Focus State for Navigation Logic
     @FocusState private var focusedSection: HomeSection?
-    @Namespace private var scrollSpace
     
     enum HomeSection: Hashable {
         case tabs
@@ -18,9 +17,9 @@ struct HomeView: View {
         case content(String) // Channel ID
     }
     
-    // Grid Layout
+    // Grid Layout: Adaptive width for posters
     let columns = [
-        GridItem(.adaptive(minimum: 200, maximum: 220), spacing: 40)
+        GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 40)
     ]
     
     var body: some View {
@@ -31,11 +30,12 @@ struct HomeView: View {
                 // --- PROFILE/PLAYLIST SELECTOR ---
                 VStack(spacing: 40) {
                     Text("Who is watching?")
-                        .font(.largeTitle)
+                        .font(.custom("Exo2-Bold", size: 50))
                         .fontWeight(.bold)
                         .foregroundColor(.white)
                     
                     HStack(spacing: 40) {
+                        // Add Profile Button
                         Button(action: onAddPlaylist) {
                             VStack {
                                 Image(systemName: "plus")
@@ -47,6 +47,7 @@ struct HomeView: View {
                         }
                         .buttonStyle(.card)
                         
+                        // Existing Profiles
                         ForEach(viewModel.playlists) { playlist in
                             Button(action: { viewModel.selectPlaylist(playlist) }) {
                                 VStack {
@@ -54,6 +55,7 @@ struct HomeView: View {
                                         .font(.system(size: 50))
                                         .padding()
                                     Text(playlist.title)
+                                        .fontWeight(.semibold)
                                 }
                                 .frame(width: 300, height: 200)
                             }
@@ -66,12 +68,16 @@ struct HomeView: View {
                 ScrollViewReader { scrollProxy in
                     VStack(alignment: .leading, spacing: 0) {
                         
-                        // 1. Header Tabs
+                        // 1. Header / Tabs
                         HStack(spacing: 30) {
+                            // Tab Buttons
                             tabButton(title: "SERIES", type: .series)
                             tabButton(title: "MOVIES", type: .movie)
                             tabButton(title: "LIVE TV", type: .live)
+                            
                             Spacer()
+                            
+                            // Settings Button
                             Button(action: onSettings) {
                                 Image(systemName: "gearshape")
                                     .font(.title2)
@@ -81,14 +87,16 @@ struct HomeView: View {
                         .padding(.top, 20)
                         .padding(.horizontal, 60)
                         .padding(.bottom, 20)
-                        .background(LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom))
-                        .id("TopAnchor")
+                        .background(
+                            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                        )
+                        .id("TopAnchor") // Anchor for scrolling to top
                         
-                        // 2. Scrollable Content
+                        // 2. Scrollable Content Area
                         ScrollView(.vertical, showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 30) {
                                 
-                                // Categories (Chips)
+                                // Category Chips (Horizontal Scroll)
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: 20) {
                                         ForEach(viewModel.categories, id: \.self) { category in
@@ -100,17 +108,19 @@ struct HomeView: View {
                                             }
                                             .buttonStyle(.card)
                                             .focused($focusedSection, equals: .categories)
+                                            .foregroundColor(viewModel.selectedCategory == category ? .white : .gray)
                                         }
                                     }
                                     .padding(.horizontal, 60)
                                     .padding(.vertical, 20)
                                 }
                                 
-                                // Content Grid
+                                // Main Content Grid
                                 if viewModel.isLoading {
                                     HStack {
                                         Spacer()
                                         ProgressView(viewModel.loadingMessage)
+                                            .scaleEffect(1.5)
                                         Spacer()
                                     }
                                     .frame(height: 300)
@@ -131,14 +141,14 @@ struct HomeView: View {
                     }
                     // --- SMART NAVIGATION LOGIC ---
                     .onExitCommand {
-                        // If user is deep in the grid (content focused), scroll to top first
+                        // 1. If focus is deep in content, scroll to top first
                         if case .content = focusedSection {
                             withAnimation {
                                 scrollProxy.scrollTo("TopAnchor", anchor: .top)
-                                focusedSection = .categories // Move focus to chips
+                                focusedSection = .categories // Move focus up to chips
                             }
                         }
-                        // If user is at categories or tabs, go back to Profile Select
+                        // 2. If already at categories or tabs, go back to Profile Select
                         else {
                             withAnimation {
                                 viewModel.selectedPlaylist = nil
@@ -151,6 +161,7 @@ struct HomeView: View {
         .onAppear { viewModel.configure(repository: repository) }
     }
     
+    // Helper for Tab Buttons
     private func tabButton(title: String, type: StreamType) -> some View {
         Button(action: { viewModel.selectTab(type) }) {
             Text(title)
@@ -158,6 +169,7 @@ struct HomeView: View {
                 .fontWeight(.bold)
                 .foregroundColor(viewModel.selectedTab == type ? .cyan : .gray)
                 .scaleEffect(viewModel.selectedTab == type ? 1.1 : 1.0)
+                .animation(.spring(), value: viewModel.selectedTab)
         }
         .buttonStyle(.plain)
         .focused($focusedSection, equals: .tabs)

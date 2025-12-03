@@ -24,7 +24,7 @@ class ChannelRepository {
     
     // MARK: - Versioning & Variants
     
-    /// Finds ALL variants of a channel (different langs, resolutions)
+    /// Finds ALL variants of a channel (different langs, resolutions) based on the Canonical Title.
     func getVersions(for channel: Channel) -> [Channel] {
         // 1. If we have a canonical title (from import time), use it.
         // Otherwise, re-parse on the fly to be safe.
@@ -39,8 +39,9 @@ class ChannelRepository {
         guard let candidates = try? context.fetch(request) else { return [channel] }
         
         // 3. Smart Filter in Memory (Core Data Regex is slow/limited)
-        // We filter for items that normalize to the exact same title string
+        // We filter for items that normalize to the exact same title string.
         let variants = candidates.filter { candidate in
+            // Compare normalized titles
             let candidateInfo = TitleNormalizer.parse(rawTitle: candidate.title)
             return candidateInfo.normalizedTitle.lowercased() == targetTitle.lowercased()
         }
@@ -68,7 +69,7 @@ class ChannelRepository {
         guard let allChannels = try? context.fetch(request) else { return [] }
         
         // --- DEDUPLICATION LOGIC ---
-        // Group by Normalized Title -> Pick ONE representative
+        // Group by Normalized Title -> Pick ONE representative.
         // We want the UI to show only one poster per movie, not 5 duplicates.
         
         var uniqueMap = [String: Channel]()
@@ -78,8 +79,6 @@ class ChannelRepository {
             let key = info.normalizedTitle.lowercased()
             
             // If we haven't seen this movie yet, add it.
-            // (Optimization: We could pick the 'best' resolution here to display,
-            // but just picking the first one found is sufficient for the grid view)
             if uniqueMap[key] == nil {
                 uniqueMap[key] = channel
             }
@@ -92,6 +91,7 @@ class ChannelRepository {
     // MARK: - Standard Lists
     
     func getGroups(playlistUrl: String, type: String) -> [String] {
+        // Use DictionaryResultType to fetch distinct groups efficiently
         let request = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
         request.predicate = NSPredicate(format: "playlistUrl == %@ AND type == %@", playlistUrl, type)
         request.propertiesToFetch = ["group"]
@@ -108,7 +108,8 @@ class ChannelRepository {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "playlistUrl == %@ AND type == %@", playlistUrl, type)
         request.sortDescriptors = [NSSortDescriptor(key: "addedAt", ascending: false)]
-        request.fetchLimit = 100 // Increased limit to account for deduplication filtering
+        // Fetch more than 20 initially because we might filter out duplicates
+        request.fetchLimit = 100
         
         guard let recent = try? context.fetch(request) else { return [] }
         

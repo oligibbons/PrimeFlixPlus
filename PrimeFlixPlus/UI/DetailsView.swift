@@ -13,9 +13,9 @@ struct DetailsView: View {
         self.onBack = onBack
     }
     
-    // Navigation State
+    // Focus State
     @FocusState private var focusedField: FocusField?
-    @Namespace private var scrollSpace // For scroll-to-top logic
+    @Namespace private var scrollSpace
     
     enum FocusField: Hashable {
         case back, play, resume, favorite, version, season(Int), episode(String)
@@ -23,33 +23,38 @@ struct DetailsView: View {
     
     var body: some View {
         ZStack {
-            // 1. Background
+            // 1. Dynamic Background
             if let bgUrl = viewModel.backgroundUrl {
                 AsyncImage(url: bgUrl) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: { Color.black }
+                } placeholder: {
+                    Color.black
+                }
                 .ignoresSafeArea()
                 .opacity(viewModel.backdropOpacity)
                 .overlay(
-                    LinearGradient(stops: [
-                        .init(color: .black.opacity(0.6), location: 0),
-                        .init(color: .black, location: 0.8)
-                    ], startPoint: .top, endPoint: .bottom)
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black.opacity(0.6), location: 0),
+                            .init(color: .black, location: 0.8)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 )
                 .overlay(LinearGradient(colors: [.black.opacity(0.9), .clear], startPoint: .leading, endPoint: .trailing).frame(width: 900, alignment: .leading))
             } else {
                 Color.black.ignoresSafeArea()
             }
             
-            // 2. Main Scrollable Content
+            // 2. Main Content
             ScrollViewReader { scrollProxy in
                 ScrollView {
-                    // Anchor for scrolling to top
-                    Color.clear.frame(height: 1).id("top")
+                    Color.clear.frame(height: 1).id("top") // Scroll anchor
                     
                     VStack(alignment: .leading, spacing: 30) {
                         
-                        // --- BACK BUTTON ---
+                        // --- Back Button ---
                         Button(action: onBack) {
                             HStack(spacing: 8) {
                                 Image(systemName: "arrow.left")
@@ -63,9 +68,8 @@ struct DetailsView: View {
                         .padding(.leading, 80)
                         .padding(.top, 40)
                         
-                        // --- HEADER INFO ---
+                        // --- Header Info ---
                         VStack(alignment: .leading, spacing: 16) {
-                            // Title
                             Text(viewModel.tmdbDetails?.displayTitle ?? viewModel.channel.title)
                                 .font(.custom("Exo2-Bold", size: 68))
                                 .fontWeight(.black)
@@ -73,9 +77,8 @@ struct DetailsView: View {
                                 .shadow(radius: 10)
                                 .lineLimit(2)
                             
-                            // Metadata Badges
+                            // Metadata Row
                             HStack(spacing: 12) {
-                                // Dynamic Resolution Badge (from current selection)
                                 if let v = viewModel.selectedVersion {
                                     let info = TitleNormalizer.parse(rawTitle: v.title)
                                     Text(info.quality).font(.headline).fontWeight(.bold).foregroundColor(.cyan)
@@ -98,8 +101,7 @@ struct DetailsView: View {
                                 }
                             }
                             
-                            // Overview
-                            Text(viewModel.tmdbDetails?.overview ?? "")
+                            Text(viewModel.tmdbDetails?.overview ?? "No synopsis available.")
                                 .font(.body)
                                 .lineSpacing(5)
                                 .foregroundColor(.white.opacity(0.8))
@@ -108,9 +110,9 @@ struct DetailsView: View {
                         }
                         .padding(.horizontal, 80)
                         
-                        // --- ACTIONS ---
+                        // --- Action Buttons ---
                         HStack(spacing: 20) {
-                            // 1. Play/Resume
+                            // Play/Resume
                             Button(action: {
                                 if let target = viewModel.selectedVersion {
                                     onPlay(target)
@@ -126,7 +128,7 @@ struct DetailsView: View {
                             .buttonStyle(.card)
                             .focused($focusedField, equals: .play)
                             
-                            // 2. Versions (If duplicates exist)
+                            // Version Selector
                             if viewModel.availableVersions.count > 1 && viewModel.channel.type == "movie" {
                                 Button(action: { viewModel.showVersionSelector = true }) {
                                     HStack {
@@ -139,7 +141,7 @@ struct DetailsView: View {
                                 .focused($focusedField, equals: .version)
                             }
                             
-                            // 3. Favorite
+                            // Favorite
                             Button(action: { viewModel.toggleFavorite() }) {
                                 Image(systemName: viewModel.isFavorite ? "heart.fill" : "heart")
                                     .padding(12)
@@ -150,9 +152,10 @@ struct DetailsView: View {
                         }
                         .padding(.horizontal, 80)
                         
-                        // --- SERIES SEASONS ---
+                        // --- Series Section ---
                         if viewModel.channel.type == "series" {
                             VStack(alignment: .leading) {
+                                // Season Tabs
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: 20) {
                                         ForEach(viewModel.seasons, id: \.self) { season in
@@ -177,7 +180,7 @@ struct DetailsView: View {
                                     .padding(.horizontal, 80)
                                 }
                                 
-                                // Episodes
+                                // Episodes Lane
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     LazyHStack(spacing: 40) {
                                         ForEach(viewModel.displayedEpisodes) { ep in
@@ -193,13 +196,12 @@ struct DetailsView: View {
                                 }
                             }
                         }
+                        
                         Spacer(minLength: 100)
                     }
                 }
-                // --- MENU BUTTON INTERCEPTION ---
+                // Menu button handler
                 .onExitCommand {
-                    // Logic: If focused on Play button or Back button, go Back.
-                    // Otherwise, scroll to top first.
                     if focusedField == .play || focusedField == .back || focusedField == .resume {
                         onBack()
                     } else {
@@ -236,24 +238,68 @@ struct DetailsView: View {
                         .padding()
                     }
                     .frame(maxHeight: 400)
-                    
                     Button("Cancel") { viewModel.showVersionSelector = false }
-                        .buttonStyle(.plain)
-                        .padding()
+                        .buttonStyle(.plain).padding()
                 }
                 .padding(40)
                 .background(Color(white: 0.15))
                 .cornerRadius(24)
-                .transition(.opacity)
             }
         }
         .onAppear {
             viewModel.configure(repository: repository)
             Task { await viewModel.loadData() }
-            // Initial Focus
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 focusedField = .play
             }
         }
+    }
+}
+
+// MARK: - Subviews
+
+struct EpisodeCard: View {
+    let episode: DetailsViewModel.MergedEpisode
+    @FocusState private var isFocused: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ZStack(alignment: .bottomLeading) {
+                AsyncImage(url: episode.imageUrl) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ZStack {
+                        Color(white: 0.15)
+                        Image(systemName: "tv").font(.largeTitle).foregroundColor(.gray)
+                    }
+                }
+                .frame(width: 320, height: 180)
+                .clipped()
+                .overlay(LinearGradient(colors: [.black.opacity(0.8), .clear], startPoint: .bottom, endPoint: .center))
+                
+                Text("\(episode.number). \(episode.title)")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                    .padding(10)
+                    .lineLimit(1)
+            }
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isFocused ? Color.cyan : Color.clear, lineWidth: 3)
+            )
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(), value: isFocused)
+            
+            if isFocused {
+                Text(episode.overview)
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                    .lineLimit(3)
+                    .frame(width: 320, alignment: .leading)
+            }
+        }
+        .focused($isFocused)
     }
 }

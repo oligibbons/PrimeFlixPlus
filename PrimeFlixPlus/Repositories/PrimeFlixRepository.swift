@@ -11,7 +11,7 @@ class PrimeFlixRepository: ObservableObject {
     @Published var lastSyncDate: Date? = nil
     @Published var isErrorState: Bool = false
     
-    // FIXED: Changed from 'private' to internal so ViewModels can access context for history checks
+    // FIXED: Changed from 'private' to 'internal' so ViewModels can access context for history checks
     let container: NSPersistentContainer
     
     private let tmdbClient = TmdbClient()
@@ -24,6 +24,7 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     // MARK: - Playlist Management
+    
     func getAllPlaylists() -> [Playlist] {
         let request = NSFetchRequest<Playlist>(entityName: "Playlist")
         return (try? container.viewContext.fetch(request)) ?? []
@@ -37,22 +38,28 @@ class PrimeFlixRepository: ObservableObject {
         if (try? context.fetch(req).count) ?? 0 == 0 {
             _ = Playlist(context: context, title: title, url: url, source: source)
             try? context.save()
+            // Trigger immediate sync
             Task { await syncPlaylist(playlistTitle: title, playlistUrl: url, source: source) }
         }
     }
     
     func deletePlaylist(_ playlist: Playlist) {
         let context = container.viewContext
+        
+        // Delete associated channels first
         let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
         fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlist.url)
         let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
         _ = try? context.execute(deleteReq)
+        
+        // Delete playlist object
         context.delete(playlist)
         try? context.save()
         self.objectWillChange.send()
     }
     
     // MARK: - Sync Logic
+    
     func syncAll() async {
         guard !isSyncing else { return }
         let playlists = getAllPlaylists()
@@ -84,6 +91,7 @@ class PrimeFlixRepository: ObservableObject {
         
         self.syncStatusMessage = "Connecting..."
         
+        // Clean old data for this playlist before sync
         await container.performBackgroundTask { context in
             let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
             fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlistUrl)
@@ -229,7 +237,7 @@ class PrimeFlixRepository: ObservableObject {
     
     // MARK: - Accessors
     
-    // FIXED: Added wrapper to expose version finding logic to ViewModels
+    // FIXED: Added this missing wrapper method
     func getVersions(for channel: Channel) -> [Channel] {
         return channelRepo.getVersions(for: channel)
     }

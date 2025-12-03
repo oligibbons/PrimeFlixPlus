@@ -1,5 +1,6 @@
 import SwiftUI
 
+// A simple state machine for navigation without NavigationView overhead
 enum NavigationDestination: Equatable {
     case home
     case details(Channel)
@@ -25,15 +26,16 @@ struct ContentView: View {
     
     var body: some View {
         ZStack {
+            // Switcher Logic
             switch currentDestination {
             case .home:
                 HomeView(
                     onPlayChannel: { channel in
                         if channel.type == "live" {
-                            // Live TV skips details
+                            // Live TV goes straight to player
                             currentDestination = .player(channel)
                         } else {
-                            // Movies/Series go to Details
+                            // Movies/Series go to Details Page
                             currentDestination = .details(channel)
                         }
                     },
@@ -46,6 +48,7 @@ struct ContentView: View {
                 DetailsView(
                     channel: channel,
                     onPlay: { playableChannel in
+                        // Navigate to player with the specific file/episode
                         currentDestination = .player(playableChannel)
                     },
                     onBack: {
@@ -58,13 +61,11 @@ struct ContentView: View {
                 PlayerView(
                     channel: channel,
                     onBack: {
-                        // Return to details if it was a movie/series, or home if live
-                        if channel.type == "live" {
-                            currentDestination = .home
-                        } else {
-                            // Go back to Home to avoid state complexity in V1
-                            currentDestination = .home
-                        }
+                        // When player exits:
+                        // If it was a live channel, go Home.
+                        // If it was a VOD/Series, we *could* go back to Details,
+                        // but for now going Home is a safe default to avoid state complexity.
+                        currentDestination = .home
                     }
                 )
                 .transition(.move(edge: .bottom))
@@ -81,6 +82,6 @@ struct ContentView: View {
                 .transition(.move(edge: .trailing))
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: currentDestination)
+        .animation(.easeInOut(duration: 0.35), value: currentDestination)
     }
 }
