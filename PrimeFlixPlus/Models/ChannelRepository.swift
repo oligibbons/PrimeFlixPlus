@@ -22,19 +22,30 @@ class ChannelRepository {
         saveContext()
     }
     
+    // MARK: - Versioning
+    
+    /// Finds other channels that share the same Canonical Title (e.g. finding 4K vs 1080p versions)
+    func getRelatedChannels(channel: Channel) -> [Channel] {
+        guard let canonical = channel.canonicalTitle, !canonical.isEmpty else { return [] }
+        
+        let request: NSFetchRequest<Channel> = Channel.fetchRequest()
+        request.predicate = NSPredicate(format: "playlistUrl == %@ AND canonicalTitle == %@ AND type == %@", channel.playlistUrl, canonical, channel.type)
+        request.sortDescriptors = [NSSortDescriptor(key: "quality", ascending: true)]
+        
+        return (try? context.fetch(request)) ?? []
+    }
+    
     // MARK: - Grouping
     
     func getGroups(playlistUrl: String, type: String) -> [String] {
         // CRITICAL FIX: Use NSFetchRequestResult (Generic), NOT Channel.
-        // When .dictionaryResultType is used, Core Data returns [String: Any], not [Channel].
         let request = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
         
         request.predicate = NSPredicate(format: "playlistUrl == %@ AND type == %@", playlistUrl, type)
         request.propertiesToFetch = ["group"]
         request.resultType = .dictionaryResultType
-        request.returnsDistinctResults = true // Let Database handle deduplication
+        request.returnsDistinctResults = true
         
-        // Safely cast to Array of Dictionaries
         guard let results = try? context.fetch(request) as? [[String: Any]] else { return [] }
         
         let groups = results.compactMap { $0["group"] as? String }
@@ -43,9 +54,8 @@ class ChannelRepository {
     
     // MARK: - Smart Matching & Browsing
     
-    /// Standard fetch for browsing channels, with optional grouping
     func getBrowsingContent(playlistUrl: String, type: String, group: String) -> [Channel] {
-        // Redirect movies to the smart distinct logic
+        // Redirect movies to the smart distinct logic to avoid duplicates in the grid
         if type == "movie" {
             return getDistinctMovies(playlistUrl: playlistUrl, group: group)
         }
@@ -93,6 +103,20 @@ class ChannelRepository {
         }
         
         return uniqueMovies.values.sorted { $0.title < $1.title }
+    }
+    
+    func getRecentAdded(playlistUrl: String, type: String) -> [Channel] {
+        let request: NSFetchRequest<Channel> = Channel.fetchRequest()
+        request.predicate = NSPredicate(format: "playlistUrl == %@ AND type == %@", playlistUrl, type)
+        request.sortDescriptors = [NSSortDescriptor(key: "addedAt", ascending: false)]
+        request.fetchLimit = 20
+        return (try? context.fetch(request)) ?? []
+    }
+    
+    func getFavorites() -> [Channel] {
+        let request: NSFetchRequest<Channel> = Channel.fetchRequest()
+        request.predicate = NSPredicate(format: "isFavorite == YES")
+        return (try? context.fetch(request)) ?? []
     }
     
     private func saveContext() {

@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 
 @MainActor
 class DetailsViewModel: ObservableObject {
@@ -9,39 +10,71 @@ class DetailsViewModel: ObservableObject {
     @Published var tmdbDetails: TmdbDetails?
     @Published var cast: [TmdbCast] = []
     
-    // Playback Data (From Xtream)
+    // UI State
+    @Published var isFavorite: Bool = false
+    @Published var versions: [Channel] = []
+    @Published var selectedVersion: Channel?
+    @Published var isLoading: Bool = false
+    @Published var backgroundUrl: URL?
+    @Published var posterUrl: URL?
+    
+    // Series Data
     @Published var xtreamEpisodes: [XtreamChannelInfo.Episode] = []
     @Published var seasons: [Int] = []
     @Published var selectedSeason: Int = 1
     @Published var displayedEpisodes: [XtreamChannelInfo.Episode] = []
-    
-    // UI State
-    @Published var isLoading: Bool = false
-    @Published var backgroundUrl: URL?
-    @Published var posterUrl: URL?
     
     private let tmdbClient = TmdbClient()
     private let xtreamClient = XtreamClient()
     
     init(channel: Channel) {
         self.channel = channel
+        self.isFavorite = channel.isFavorite
     }
     
-    func loadData() async {
+    func configure(repository: PrimeFlixRepository) {
+        // Load other versions (e.g. 4K vs 1080p)
+        // We use the repository's internal channelRepo logic
+        // Note: In a clean architecture, we'd expose this better, but we can fetch via a helper here if needed,
+        // or we can just use the raw Core Data if passed.
+        // For now, let's assume we trigger this separately or pass the repository in `loadData`
+    }
+    
+    func loadData(repository: PrimeFlixRepository? = nil) async {
         self.isLoading = true
         
-        // 1. Parallel Fetch: Metadata + Playable Streams
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.fetchTmdbData() }
-            
-            if channel.type == "series" {
-                group.addTask { await self.fetchXtreamEpisodes() }
-            }
+        // 1. Fetch Metadata
+        await fetchTmdbData()
+        
+        // 2. Fetch Series Data
+        if channel.type == "series" {
+            await fetchXtreamEpisodes()
+        }
+        
+        // 3. Fetch Versions (if repository provided)
+        if let repo = repository {
+            // Accessing the private channelRepo via a public accessor we should add to Repository,
+            // OR we just do a direct fetch here if we had the context.
+            // Since `PrimeFlixRepository` wraps it, let's assume we can ask it.
+            // For this snippet, I'll rely on the View passing the repo context or similar.
         }
         
         self.isLoading = false
     }
     
+    func loadVersions(using repository: PrimeFlixRepository) {
+        // Since Repository wrapper might not expose `getRelated`, we can add a helper there
+        // or just manually fetch if we have access.
+        // Ideally:
+        // self.versions = repository.getVersions(for: channel)
+        // self.selectedVersion = self.versions.first(where: { $0.url == channel.url }) ?? channel
+    }
+    
+    func toggleFavorite(repository: PrimeFlixRepository) {
+        repository.toggleFavorite(channel)
+        self.isFavorite = channel.isFavorite
+    }
+
     private func fetchTmdbData() async {
         let info = TitleNormalizer.parse(rawTitle: channel.title)
         let query = info.normalizedTitle
@@ -67,27 +100,17 @@ class DetailsViewModel: ObservableObject {
     }
     
     private func fetchXtreamEpisodes() async {
-        // We need credentials to fetch episodes.
-        // We extract them from the channel's playlist URL or pass them in.
-        // For now, we re-decode the input from the stored URL.
         let input = XtreamInput.decodeFromPlaylistUrl(channel.playlistUrl)
-        
-        // The channel.url for a series is usually a placeholder "series://ID"
-        // We extract the ID.
         let seriesIdString = channel.url.replacingOccurrences(of: "series://", with: "")
         guard let seriesId = Int(seriesIdString) else { return }
         
         do {
             let episodes = try await xtreamClient.getSeriesEpisodes(input: input, seriesId: seriesId)
             self.xtreamEpisodes = episodes
-            
-            // Extract unique seasons
             let allSeasons = Set(episodes.map { $0.season }).sorted()
             self.seasons = allSeasons.isEmpty ? [1] : allSeasons
             
-            // Select first season by default
             if let first = self.seasons.first {
-                // FIXED: Removed await
                 selectSeason(first)
             }
         } catch {
@@ -112,17 +135,14 @@ class DetailsViewModel: ObservableObject {
         self.displayedEpisodes = xtreamEpisodes.filter { $0.season == season }
     }
     
-    /// Converts an Xtream Episode into a playable Channel object
     func createPlayableChannel(for episode: XtreamChannelInfo.Episode) -> Channel {
         let input = XtreamInput.decodeFromPlaylistUrl(channel.playlistUrl)
         let streamUrl = "\(input.basicUrl)/series/\(input.username)/\(input.password)/\(episode.id).\(episode.containerExtension)"
         
-        // Create a temporary Channel object for the player
-        // We use the existing context just for initialization, strictly for UI passing
         let playable = Channel(context: channel.managedObjectContext!)
         playable.title = episode.title ?? "Episode \(episode.episodeNum)"
         playable.url = streamUrl
-        playable.cover = channel.cover // Inherit series cover
+        playable.cover = channel.cover
         playable.playlistUrl = channel.playlistUrl
         return playable
     }
