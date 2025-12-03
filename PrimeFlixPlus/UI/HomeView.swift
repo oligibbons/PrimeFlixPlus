@@ -8,9 +8,17 @@ struct HomeView: View {
     var onAddPlaylist: () -> Void
     var onSettings: () -> Void
     
-    @FocusState private var focusedCategory: String?
+    // Focus State for Navigation Logic
+    @FocusState private var focusedSection: HomeSection?
+    @Namespace private var scrollSpace
     
-    // Define the Grid Layout for Posters (200 width + spacing)
+    enum HomeSection: Hashable {
+        case tabs
+        case categories
+        case content(String) // Channel ID
+    }
+    
+    // Grid Layout
     let columns = [
         GridItem(.adaptive(minimum: 200, maximum: 220), spacing: 40)
     ]
@@ -20,7 +28,7 @@ struct HomeView: View {
             Color.black.ignoresSafeArea()
             
             if viewModel.selectedPlaylist == nil {
-                // Playlist Selection View
+                // --- PROFILE/PLAYLIST SELECTOR ---
                 VStack(spacing: 40) {
                     Text("Who is watching?")
                         .font(.largeTitle)
@@ -54,68 +62,86 @@ struct HomeView: View {
                     }
                 }
             } else {
-                // Dashboard View
-                VStack(alignment: .leading, spacing: 0) {
-                    
-                    // Header / Tabs
-                    HStack(spacing: 30) {
-                        tabButton(title: "SERIES", type: .series)
-                        tabButton(title: "MOVIES", type: .movie)
-                        tabButton(title: "LIVE TV", type: .live)
-                        Spacer()
-                        Button(action: onSettings) {
-                            Image(systemName: "gearshape")
-                                .font(.title2)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.top, 20)
-                    .padding(.horizontal, 60)
-                    .padding(.bottom, 20)
-                    .background(
-                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
-                    )
-                    
-                    // Main Content
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 30) {
-                            
-                            // Category Filter Chips
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 20) {
-                                    ForEach(viewModel.categories, id: \.self) { category in
-                                        Button(action: { viewModel.selectCategory(category) }) {
-                                            Text(category)
-                                                .fontWeight(.semibold)
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 6)
-                                        }
-                                        .buttonStyle(.card)
-                                        .focused($focusedCategory, equals: category)
-                                    }
-                                }
-                                .padding(.horizontal, 60)
-                                .padding(.vertical, 20)
+                // --- MAIN DASHBOARD ---
+                ScrollViewReader { scrollProxy in
+                    VStack(alignment: .leading, spacing: 0) {
+                        
+                        // 1. Header Tabs
+                        HStack(spacing: 30) {
+                            tabButton(title: "SERIES", type: .series)
+                            tabButton(title: "MOVIES", type: .movie)
+                            tabButton(title: "LIVE TV", type: .live)
+                            Spacer()
+                            Button(action: onSettings) {
+                                Image(systemName: "gearshape")
+                                    .font(.title2)
                             }
-                            
-                            // Content Grid
-                            if viewModel.isLoading {
-                                HStack {
-                                    Spacer()
-                                    ProgressView()
-                                    Spacer()
-                                }
-                                .frame(height: 300)
-                            } else {
-                                LazyVGrid(columns: columns, spacing: 60) {
-                                    ForEach(viewModel.displayedChannels) { channel in
-                                        MovieCard(channel: channel) {
-                                            onPlayChannel(channel)
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.top, 20)
+                        .padding(.horizontal, 60)
+                        .padding(.bottom, 20)
+                        .background(LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom))
+                        .id("TopAnchor")
+                        
+                        // 2. Scrollable Content
+                        ScrollView(.vertical, showsIndicators: false) {
+                            VStack(alignment: .leading, spacing: 30) {
+                                
+                                // Categories (Chips)
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 20) {
+                                        ForEach(viewModel.categories, id: \.self) { category in
+                                            Button(action: { viewModel.selectCategory(category) }) {
+                                                Text(category)
+                                                    .fontWeight(.semibold)
+                                                    .padding(.horizontal, 12)
+                                                    .padding(.vertical, 6)
+                                            }
+                                            .buttonStyle(.card)
+                                            .focused($focusedSection, equals: .categories)
                                         }
                                     }
+                                    .padding(.horizontal, 60)
+                                    .padding(.vertical, 20)
                                 }
-                                .padding(.horizontal, 60)
-                                .padding(.bottom, 100)
+                                
+                                // Content Grid
+                                if viewModel.isLoading {
+                                    HStack {
+                                        Spacer()
+                                        ProgressView(viewModel.loadingMessage)
+                                        Spacer()
+                                    }
+                                    .frame(height: 300)
+                                } else {
+                                    LazyVGrid(columns: columns, spacing: 60) {
+                                        ForEach(viewModel.displayedChannels) { channel in
+                                            MovieCard(channel: channel) {
+                                                onPlayChannel(channel)
+                                            }
+                                            .focused($focusedSection, equals: .content(channel.url))
+                                        }
+                                    }
+                                    .padding(.horizontal, 60)
+                                    .padding(.bottom, 100)
+                                }
+                            }
+                        }
+                    }
+                    // --- SMART NAVIGATION LOGIC ---
+                    .onExitCommand {
+                        // If user is deep in the grid (content focused), scroll to top first
+                        if case .content = focusedSection {
+                            withAnimation {
+                                scrollProxy.scrollTo("TopAnchor", anchor: .top)
+                                focusedSection = .categories // Move focus to chips
+                            }
+                        }
+                        // If user is at categories or tabs, go back to Profile Select
+                        else {
+                            withAnimation {
+                                viewModel.selectedPlaylist = nil
                             }
                         }
                     }
@@ -134,5 +160,6 @@ struct HomeView: View {
                 .scaleEffect(viewModel.selectedTab == type ? 1.1 : 1.0)
         }
         .buttonStyle(.plain)
+        .focused($focusedSection, equals: .tabs)
     }
 }

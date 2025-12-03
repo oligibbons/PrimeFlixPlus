@@ -11,7 +11,7 @@ class PrimeFlixRepository: ObservableObject {
     @Published var lastSyncDate: Date? = nil
     @Published var isErrorState: Bool = false
     
-    // FIXED: Changed from 'private' to internal so ViewModels can access context
+    // FIXED: Changed from 'private' to internal so ViewModels can access context for history checks
     let container: NSPersistentContainer
     
     private let tmdbClient = TmdbClient()
@@ -25,13 +25,13 @@ class PrimeFlixRepository: ObservableObject {
     
     // MARK: - Playlist Management
     func getAllPlaylists() -> [Playlist] {
-        let request: NSFetchRequest<Playlist> = NSFetchRequest(entityName: "Playlist")
+        let request = NSFetchRequest<Playlist>(entityName: "Playlist")
         return (try? container.viewContext.fetch(request)) ?? []
     }
     
     func addPlaylist(title: String, url: String, source: DataSourceType) {
         let context = container.viewContext
-        let req: NSFetchRequest<Playlist> = NSFetchRequest(entityName: "Playlist")
+        let req = NSFetchRequest<Playlist>(entityName: "Playlist")
         req.predicate = NSPredicate(format: "url == %@", url)
         
         if (try? context.fetch(req).count) ?? 0 == 0 {
@@ -134,7 +134,8 @@ class PrimeFlixRepository: ObservableObject {
         }
     }
     
-    // MARK: - Xtream Bulk Strategy (Fast)
+    // MARK: - Xtream Strategies
+    
     private func syncXtreamBulk(input: XtreamInput, playlistUrl: String) async throws {
         self.syncStatusMessage = "Fetching Live..."
         let live = try await xtreamClient.getLiveStreams(input: input)
@@ -149,7 +150,6 @@ class PrimeFlixRepository: ObservableObject {
         await saveBatch(items: series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) })
     }
     
-    // MARK: - Xtream Category Strategy (Safe/Deep)
     private func syncXtreamByCategories(input: XtreamInput, playlistUrl: String) async throws {
         
         // 1. Deep Sync Live
@@ -228,6 +228,12 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     // MARK: - Accessors
+    
+    // FIXED: Added wrapper to expose version finding logic to ViewModels
+    func getVersions(for channel: Channel) -> [Channel] {
+        return channelRepo.getVersions(for: channel)
+    }
+    
     func getGroups(playlistUrl: String, type: StreamType) -> [String] {
         return channelRepo.getGroups(playlistUrl: playlistUrl, type: type.rawValue)
     }
@@ -237,19 +243,11 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     func getRecentAdded(playlistUrl: String, type: StreamType) -> [Channel] {
-        return repositoryFetch(predicate: NSPredicate(format: "playlistUrl == %@ AND type == %@", playlistUrl, type.rawValue), sort: [NSSortDescriptor(key: "addedAt", ascending: false)], limit: 20)
+        return channelRepo.getRecentAdded(playlistUrl: playlistUrl, type: type.rawValue)
     }
     
     func getFavorites() -> [Channel] {
-        return repositoryFetch(predicate: NSPredicate(format: "isFavorite == YES"))
-    }
-    
-    private func repositoryFetch(predicate: NSPredicate? = nil, sort: [NSSortDescriptor]? = nil, limit: Int? = nil) -> [Channel] {
-        let request: NSFetchRequest<Channel> = Channel.fetchRequest()
-        request.predicate = predicate
-        request.sortDescriptors = sort
-        if let limit = limit { request.fetchLimit = limit }
-        return (try? container.viewContext.fetch(request)) ?? []
+        return channelRepo.getFavorites()
     }
     
     func toggleFavorite(_ channel: Channel) {
@@ -259,7 +257,7 @@ class PrimeFlixRepository: ObservableObject {
     
     func saveProgress(url: String, pos: Int64, dur: Int64) {
         let context = container.viewContext
-        let request: NSFetchRequest<WatchProgress> = NSFetchRequest(entityName: "WatchProgress")
+        let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
         request.predicate = NSPredicate(format: "channelUrl == %@", url)
         
         let progress: WatchProgress = (try? context.fetch(request))?.first ?? WatchProgress(context: context, channelUrl: url, position: pos, duration: dur)

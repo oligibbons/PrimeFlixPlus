@@ -5,7 +5,6 @@ struct PlayerView: View {
     let channel: Channel
     let onBack: () -> Void
     
-    // Downgrade: Use @StateObject for ObservableObject logic
     @StateObject private var viewModel = PlayerViewModel()
     @EnvironmentObject var repository: PrimeFlixRepository
     
@@ -14,11 +13,9 @@ struct PlayerView: View {
             Color.black.ignoresSafeArea()
             
             if let player = viewModel.player {
-                // Native Video Player Surface
                 VideoPlayer(player: player)
                     .ignoresSafeArea()
                     .onAppear {
-                        // Prevent sleep during playback
                         UIApplication.shared.isIdleTimerDisabled = true
                     }
                     .onDisappear {
@@ -27,12 +24,18 @@ struct PlayerView: View {
                     .overlay(controlsOverlay)
             } else {
                 ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .scaleEffect(2.0)
             }
         }
-        // Custom Remote Handling
+        // MARK: - Interaction Handling
         .onMoveCommand { _ in viewModel.triggerControls() }
         .onPlayPauseCommand { viewModel.togglePlayPause() }
-        .onExitCommand { onBack() }
+        .onExitCommand {
+            // Intercept Menu button to close player gracefully
+            viewModel.cleanup()
+            onBack()
+        }
         .onAppear {
             viewModel.configure(repository: repository, channel: channel)
         }
@@ -42,20 +45,23 @@ struct PlayerView: View {
     }
     
     // MARK: - Overlay UI
-    
     private var controlsOverlay: some View {
         ZStack {
             if viewModel.showControls || !viewModel.isPlaying {
-                // Dimmed Background
                 Color.black.opacity(0.4).ignoresSafeArea()
                 
                 VStack {
-                    // Top Bar
+                    // Header
                     HStack {
-                        Button(action: onBack) {
-                            Image(systemName: "arrow.left")
-                                .font(.title2)
-                                .foregroundColor(.white)
+                        Button(action: {
+                            viewModel.cleanup()
+                            onBack()
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.left")
+                                Text("Back")
+                            }
+                            .foregroundColor(.white)
                         }
                         .buttonStyle(.plain)
                         Spacer()
@@ -64,7 +70,7 @@ struct PlayerView: View {
                     
                     Spacer()
                     
-                    // Play/Pause Icon
+                    // Big Play Icon
                     if !viewModel.isPlaying {
                         Image(systemName: "play.circle.fill")
                             .font(.system(size: 100))
@@ -73,8 +79,8 @@ struct PlayerView: View {
                     
                     Spacer()
                     
-                    // Bottom Bar
-                    VStack(alignment: .leading, spacing: 10) {
+                    // Footer
+                    VStack(alignment: .leading, spacing: 12) {
                         Text(viewModel.videoTitle)
                             .font(.title)
                             .fontWeight(.bold)
@@ -90,18 +96,18 @@ struct PlayerView: View {
                                 ZStack(alignment: .leading) {
                                     Rectangle()
                                         .fill(Color.white.opacity(0.3))
-                                        .frame(height: 6)
-                                        .cornerRadius(3)
+                                        .frame(height: 8)
+                                        .cornerRadius(4)
                                     
                                     Rectangle()
                                         .fill(Color.cyan)
                                         .frame(width: viewModel.duration > 0 ?
                                                geo.size.width * (viewModel.currentTime / viewModel.duration) : 0,
-                                               height: 6)
-                                        .cornerRadius(3)
+                                               height: 8)
+                                        .cornerRadius(4)
                                 }
                             }
-                            .frame(height: 6)
+                            .frame(height: 8)
                             
                             Text(formatTime(viewModel.duration))
                                 .font(.caption)
@@ -115,8 +121,9 @@ struct PlayerView: View {
     }
     
     private func formatTime(_ seconds: Double) -> String {
+        if seconds.isNaN || seconds.isInfinite { return "00:00" }
         let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.hour, .minute, .second]
+        formatter.allowedUnits = seconds >= 3600 ? [.hour, .minute, .second] : [.minute, .second]
         formatter.zeroFormattingBehavior = .pad
         return formatter.string(from: seconds) ?? "00:00"
     }

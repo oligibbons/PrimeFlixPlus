@@ -47,7 +47,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 40) {
                     
-                    // --- SECTION 1: PLAYBACK PREFERENCES (NEW) ---
+                    // --- SECTION 1: PLAYBACK PREFERENCES ---
                     VStack(alignment: .leading, spacing: 20) {
                         Text("Playback Preferences")
                             .font(.title3)
@@ -61,12 +61,12 @@ struct SettingsView: View {
                                 .foregroundColor(.gray)
                                 .frame(width: 200, alignment: .leading)
                             
+                            // FIXED: Removed .pickerStyle(.menu) for tvOS compatibility
                             Picker("", selection: $viewModel.preferredLanguage) {
                                 ForEach(viewModel.availableLanguages, id: \.self) { lang in
                                     Text(lang).tag(lang)
                                 }
                             }
-                            .pickerStyle(.menu)
                             .frame(maxWidth: 300)
                         }
                         
@@ -82,7 +82,6 @@ struct SettingsView: View {
                                     Text(res).tag(res)
                                 }
                             }
-                            .pickerStyle(.menu)
                             .frame(maxWidth: 300)
                         }
                         
@@ -163,7 +162,6 @@ struct SettingsView: View {
                 focusedField = "back"
             }
         }
-        // Menu Button Handler
         .onExitCommand {
             onBack()
         }

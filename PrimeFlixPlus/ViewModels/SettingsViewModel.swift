@@ -6,12 +6,16 @@ import Combine
 class SettingsViewModel: ObservableObject {
     
     // --- Preferences ---
-    // Persist to UserDefaults automatically
+    // Persist to UserDefaults automatically so they survive app restarts
     @AppStorage("preferredLanguage") var preferredLanguage: String = "English"
     @AppStorage("preferredResolution") var preferredResolution: String = "4K UHD"
     
-    // Available Options
-    let availableLanguages = ["English", "Arabic", "French", "Spanish", "German", "Multi-Audio"]
+    // Available Options for the Picker
+    let availableLanguages = [
+        "English", "Arabic", "French", "Spanish", "German",
+        "Italian", "Russian", "Turkish", "Portuguese", "Multi-Audio"
+    ]
+    
     let availableResolutions = ["4K UHD", "1080p", "720p", "SD"]
     
     // --- Playlist Management ---
@@ -40,7 +44,7 @@ class SettingsViewModel: ObservableObject {
     }
     
     func clearCache() {
-        // Clear Kingfisher or URLCache if implemented
+        // Clear URLCache (covers AsyncImage)
         URLCache.shared.removeAllCachedResponses()
     }
 }

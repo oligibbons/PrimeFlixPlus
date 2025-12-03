@@ -3,8 +3,8 @@ import Foundation
 struct ContentInfo {
     let rawTitle: String
     let normalizedTitle: String
-    let quality: String      // "4K", "1080p", "SD"
-    let language: String?    // "AR", "EN", "FR" etc.
+    let quality: String      // "4K UHD", "1080p", "SD"
+    let language: String?    // "Arabic", "English", "French" etc.
     let year: String?
     
     // Helper to score quality for sorting (Higher is better)
@@ -23,16 +23,19 @@ enum TitleNormalizer {
     private static let resolutionPattern = "(4k|uhd|2160p|1080p|720p|480p|sd)"
     private static let codecPattern = "(h264|h265|hevc|x264|x265|aac|ac3|dts)"
     
-    // Language Codes (Add more as needed)
+    // Language Codes (Expanded list)
     private static let languageMap: [String: String] = [
-        "AR": "Arabic", "ARA": "Arabic",
+        "AR": "Arabic", "ARA": "Arabic", "KSA": "Arabic",
         "EN": "English", "ENG": "English", "UK": "English", "US": "English",
-        "FR": "French", "FRE": "French", "VF": "French",
+        "FR": "French", "FRE": "French", "VF": "French", "VOSTFR": "French",
         "ES": "Spanish", "SPA": "Spanish",
         "DE": "German", "GER": "German",
         "IT": "Italian", "ITA": "Italian",
         "RU": "Russian", "RUS": "Russian",
         "TR": "Turkish", "TUR": "Turkish",
+        "PT": "Portuguese", "POR": "Portuguese",
+        "NL": "Dutch",
+        "PL": "Polish",
         "MULTI": "Multi-Audio"
     ]
     
@@ -44,9 +47,13 @@ enum TitleNormalizer {
         var year: String? = nil
         if let yearMatch = rawTitle.range(of: yearPattern, options: .regularExpression) {
             let yearRaw = String(rawTitle[yearMatch])
-            year = yearRaw.replacingOccurrences(of: "[^0-9]", with: "", options: .regularExpression)
-            // Remove year from title for cleaner display
-            cleanTitle = cleanTitle.replacingOccurrences(of: yearRaw, with: "")
+            // Extract just digits
+            let digits = yearRaw.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+            if digits.count == 4 {
+                year = digits
+                // Remove year from title for cleaner display
+                cleanTitle = cleanTitle.replacingOccurrences(of: yearRaw, with: "")
+            }
         }
         
         // 2. Identify Resolution
@@ -57,13 +64,14 @@ enum TitleNormalizer {
         else { quality = "SD" }
         
         // 3. Identify Language
-        // We look for specific patterns like " Movie Name AR " or "[AR]" or "EN" at end
+        // We look for tokens that match our language map
         var detectedLang: String? = nil
         
-        // Tokenize by spaces and non-alphanumeric splitters
+        // Tokenize by spaces and common separators
         let tokens = rawTitle.components(separatedBy: CharacterSet(charactersIn: " .-_[]()"))
         
-        for token in tokens.reversed() { // search from back usually safer
+        // Search from the end backwards (language tags are usually suffixes)
+        for token in tokens.reversed() {
             let up = token.uppercased()
             if let langName = languageMap[up] {
                 detectedLang = langName
@@ -72,18 +80,25 @@ enum TitleNormalizer {
         }
         
         // 4. Cleanup Title
-        // Remove Resolution/Codecs/Lang tags from the display title
+        // Remove Resolution/Codecs tags from the display title
         let patternsToRemove = [
             resolutionPattern,
-            codecPattern,
-            "\\b(" + languageMap.keys.joined(separator: "|") + ")\\b" // Remove lang codes
+            codecPattern
         ]
         
         for pattern in patternsToRemove {
             cleanTitle = cleanTitle.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
         }
         
-        // Remove Year pattern again to be safe
+        // Remove Language Codes from title if found
+        if let lang = detectedLang {
+            // Try to remove the specific code we found?
+            // A simpler approach for now is removing known codes that appear as standalone tokens
+            let codePattern = "\\b(" + languageMap.keys.joined(separator: "|") + ")\\b"
+            cleanTitle = cleanTitle.replacingOccurrences(of: codePattern, with: "", options: [.regularExpression, .caseInsensitive])
+        }
+        
+        // Remove Year pattern again to be safe if it wasn't caught earlier
         cleanTitle = cleanTitle.replacingOccurrences(of: yearPattern, with: "", options: .regularExpression)
         
         // Remove common garbage characters
@@ -107,5 +122,13 @@ enum TitleNormalizer {
             language: detectedLang,
             year: year
         )
+    }
+    
+    /// Generates a consistent key for grouping duplicates
+    static func generateGroupKey(_ normalizedTitle: String) -> String {
+        return normalizedTitle
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .joined()
     }
 }

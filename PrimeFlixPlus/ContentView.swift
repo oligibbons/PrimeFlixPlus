@@ -30,7 +30,7 @@ struct ContentView: View {
                 HomeView(
                     onPlayChannel: { channel in
                         if channel.type == "live" {
-                            // Live TV goes straight to player
+                            // Live TV skips details
                             currentDestination = .player(channel)
                         } else {
                             // Movies/Series go to Details
@@ -62,9 +62,7 @@ struct ContentView: View {
                         if channel.type == "live" {
                             currentDestination = .home
                         } else {
-                            // We actually just go back to home for simplicity in V1,
-                            // or you could pass a state to go back to details.
-                            // For now, going to Home is safer navigation flow.
+                            // Go back to Home to avoid state complexity in V1
                             currentDestination = .home
                         }
                     }

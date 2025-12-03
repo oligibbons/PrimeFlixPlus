@@ -11,7 +11,7 @@ class ChannelRepository {
     // MARK: - Basic Fetching
     
     func getChannel(byUrl url: String) -> Channel? {
-        let request: NSFetchRequest<Channel> = Channel.fetchRequest()
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "url == %@", url)
         request.fetchLimit = 1
         return try? context.fetch(request).first
@@ -33,14 +33,14 @@ class ChannelRepository {
         let targetTitle = info.normalizedTitle
         
         // 2. Fetch all candidates from the same playlist & type
-        let request: NSFetchRequest<Channel> = Channel.fetchRequest()
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "playlistUrl == %@ AND type == %@", channel.playlistUrl, channel.type)
         
         guard let candidates = try? context.fetch(request) else { return [channel] }
         
         // 3. Smart Filter in Memory (Core Data Regex is slow/limited)
+        // We filter for items that normalize to the exact same title string
         let variants = candidates.filter { candidate in
-            // Compare normalized titles
             let candidateInfo = TitleNormalizer.parse(rawTitle: candidate.title)
             return candidateInfo.normalizedTitle.lowercased() == targetTitle.lowercased()
         }
@@ -51,7 +51,7 @@ class ChannelRepository {
     // MARK: - Smart Browsing
     
     func getBrowsingContent(playlistUrl: String, type: String, group: String) -> [Channel] {
-        let request: NSFetchRequest<Channel> = Channel.fetchRequest()
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
         
         var predicates = [
             NSPredicate(format: "playlistUrl == %@", playlistUrl),
@@ -69,7 +69,7 @@ class ChannelRepository {
         
         // --- DEDUPLICATION LOGIC ---
         // Group by Normalized Title -> Pick ONE representative
-        // (The representative doesn't strictly matter here, but picking the "cleanest" looking one is nice)
+        // We want the UI to show only one poster per movie, not 5 duplicates.
         
         var uniqueMap = [String: Channel]()
         
@@ -77,6 +77,9 @@ class ChannelRepository {
             let info = TitleNormalizer.parse(rawTitle: channel.title)
             let key = info.normalizedTitle.lowercased()
             
+            // If we haven't seen this movie yet, add it.
+            // (Optimization: We could pick the 'best' resolution here to display,
+            // but just picking the first one found is sufficient for the grid view)
             if uniqueMap[key] == nil {
                 uniqueMap[key] = channel
             }
@@ -96,35 +99,51 @@ class ChannelRepository {
         request.returnsDistinctResults = true
         
         guard let results = try? context.fetch(request) as? [[String: Any]] else { return [] }
+        
         let groups = results.compactMap { $0["group"] as? String }
         return Array(Set(groups)).sorted()
     }
     
     func getRecentAdded(playlistUrl: String, type: String) -> [Channel] {
-        let request: NSFetchRequest<Channel> = Channel.fetchRequest()
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "playlistUrl == %@ AND type == %@", playlistUrl, type)
         request.sortDescriptors = [NSSortDescriptor(key: "addedAt", ascending: false)]
-        request.fetchLimit = 100
+        request.fetchLimit = 100 // Increased limit to account for deduplication filtering
         
         guard let recent = try? context.fetch(request) else { return [] }
         
-        // Deduplicate Recent List too
+        // Deduplicate Recent List
         var uniqueMap = [String: Channel]()
         for channel in recent {
             let key = TitleNormalizer.parse(rawTitle: channel.title).normalizedTitle
-            if uniqueMap[key] == nil { uniqueMap[key] = channel }
+            if uniqueMap[key] == nil {
+                uniqueMap[key] = channel
+            }
         }
         
-        return Array(uniqueMap.values.sorted { ($0.addedAt ?? Date.distantPast) > ($1.addedAt ?? Date.distantPast) }.prefix(20))
+        // Re-sort by date after filtering and take top 20
+        let sorted = uniqueMap.values.sorted {
+            ($0.addedAt ?? Date.distantPast) > ($1.addedAt ?? Date.distantPast)
+        }
+        
+        return Array(sorted.prefix(20))
     }
     
     func getFavorites() -> [Channel] {
-        let request: NSFetchRequest<Channel> = Channel.fetchRequest()
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "isFavorite == YES")
         return (try? context.fetch(request)) ?? []
     }
     
     private func saveContext() {
-        if context.hasChanges { try? context.save() }
+        if context.hasChanges {
+            try? context.save()
+        }
+    }
+}
+
+extension Channel {
+    @nonobjc public class func fetchRequest() -> NSFetchRequest<Channel> {
+        return NSFetchRequest<Channel>(entityName: "Channel")
     }
 }
