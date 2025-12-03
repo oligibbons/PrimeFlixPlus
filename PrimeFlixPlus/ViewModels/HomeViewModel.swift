@@ -80,13 +80,13 @@ class HomeViewModel: ObservableObject {
                     newSections.append(HomeSection(title: "Favorite Channels", type: .favorites, items: favs))
                 }
                 
-                // 2. Recently Watched (Simulated via Continue Watching logic, raw list)
+                // 2. Recently Watched
                 let recent = repo.getSmartContinueWatching(type: typeStr)
                 if !recent.isEmpty {
                     newSections.append(HomeSection(title: "Recently Watched", type: .continueWatching, items: recent))
                 }
                 
-                // 3. All Categories (No trending/genres for Live TV in the same way)
+                // 3. All Categories (Simple alphabetical list for Live TV)
                 if let pl = selectedPlaylist {
                     let allGroups = repo.getGroups(playlistUrl: pl.url, type: selectedTab)
                     for group in allGroups {
@@ -100,13 +100,15 @@ class HomeViewModel: ObservableObject {
             } else {
                 // --- MOVIES & SERIES LAYOUT ---
                 
-                // 1. Continue Watching (Smart Logic: 30 days, 5-95%, Next Ep)
+                // 1. Continue Watching
                 let resumeItems = repo.getSmartContinueWatching(type: typeStr)
                 if !resumeItems.isEmpty {
                     newSections.append(HomeSection(title: "Continue Watching", type: .continueWatching, items: resumeItems))
+                } else {
+                    print("Debug: No continue watching items found for \(typeStr)")
                 }
                 
-                // 2. Trending (TMDB Integration)
+                // 2. Trending
                 let trendingItems = await fetchTrendingItems(type: selectedTab)
                 if !trendingItems.isEmpty {
                     newSections.append(HomeSection(title: "Trending Now", type: .trending, items: trendingItems))
@@ -118,44 +120,59 @@ class HomeViewModel: ObservableObject {
                     newSections.append(HomeSection(title: "My List", type: .favorites, items: favs))
                 }
                 
-                // 4. Recently Added (Last Week)
+                // 4. Recently Added
                 let recent = repo.getRecentlyAdded(type: typeStr, limit: 20)
                 if !recent.isEmpty {
                     newSections.append(HomeSection(title: "Recently Added", type: .recent, items: recent))
                 } else {
-                    // Fallback: If nothing added in exactly last week, show general recent
                     let fallback = repo.getRecentFallback(type: typeStr, limit: 20)
                     if !fallback.isEmpty {
                         newSections.append(HomeSection(title: "New Arrivals", type: .recent, items: fallback))
                     }
                 }
                 
-                // 5. Smart Genres (Provider & Groups)
+                // 5. Smart Genres & Fallback
                 if let pl = selectedPlaylist {
                     let allGroups = repo.getGroups(playlistUrl: pl.url, type: selectedTab)
                     
                     let premiumKeywords = ["Netflix", "Disney", "Apple", "Amazon", "Hulu", "HBO", "4K", "UHD"]
-                    let standardKeywords = ["Action", "Comedy", "Drama", "Sci-Fi", "Horror", "Documentary", "Kids", "Family", "Thriller", "Adventure", "Animation"]
+                    let standardKeywords = ["Action", "Comedy", "Drama", "Sci-Fi", "Horror", "Documentary", "Kids", "Family", "Thriller", "Adventure", "Animation", "Crime", "Mystery"]
                     
-                    // A. Premium Provider Rails
+                    var addedGroups = Set<String>()
+                    
+                    // A. Premium Providers (Top Priority)
                     for group in allGroups {
-                        if premiumKeywords.contains(where: { group.caseInsensitiveCompare($0) == .orderedSame || group.contains($0) }) {
+                        if premiumKeywords.contains(where: { group.localizedCaseInsensitiveContains($0) }) {
                             let items = repo.getByGenre(type: typeStr, groupName: group, limit: 20)
-                            if !items.isEmpty {
+                            if !items.isEmpty && !addedGroups.contains(group) {
                                 newSections.append(HomeSection(title: group, type: .provider(group), items: items))
+                                addedGroups.insert(group)
                             }
                         }
                     }
                     
                     // B. Standard Genres
                     for group in allGroups {
-                        if standardKeywords.contains(where: { group.contains($0) }) {
-                            // Avoid duplication if captured above
-                            if !newSections.contains(where: { $0.title == group }) {
+                        if standardKeywords.contains(where: { group.localizedCaseInsensitiveContains($0) }) {
+                            let items = repo.getByGenre(type: typeStr, groupName: group, limit: 20)
+                            if !items.isEmpty && !addedGroups.contains(group) {
+                                newSections.append(HomeSection(title: group, type: .genre(group), items: items))
+                                addedGroups.insert(group)
+                            }
+                        }
+                    }
+                    
+                    // C. Fallback: If we don't have enough rows, just add whatever groups we have!
+                    // This ensures the screen isn't empty if the provider uses weird names.
+                    if newSections.count < 6 {
+                        for group in allGroups {
+                            if !addedGroups.contains(group) {
                                 let items = repo.getByGenre(type: typeStr, groupName: group, limit: 20)
                                 if !items.isEmpty {
                                     newSections.append(HomeSection(title: group, type: .genre(group), items: items))
+                                    addedGroups.insert(group)
                                 }
+                                if newSections.count >= 15 { break } // Hard limit
                             }
                         }
                     }

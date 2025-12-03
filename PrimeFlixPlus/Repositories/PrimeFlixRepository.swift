@@ -11,7 +11,7 @@ class PrimeFlixRepository: ObservableObject {
     @Published var lastSyncDate: Date? = nil
     @Published var isErrorState: Bool = false
     
-    // Internal access for ViewModels
+    // Internal so ViewModels can access context for history checks
     internal let container: NSPersistentContainer
     
     private let tmdbClient = TmdbClient()
@@ -38,23 +38,27 @@ class PrimeFlixRepository: ObservableObject {
         if (try? context.fetch(req).count) ?? 0 == 0 {
             _ = Playlist(context: context, title: title, url: url, source: source)
             try? context.save()
+            // Trigger immediate sync
             Task { await syncPlaylist(playlistTitle: title, playlistUrl: url, source: source) }
         }
     }
     
     func deletePlaylist(_ playlist: Playlist) {
         let context = container.viewContext
+        
+        // Delete associated channels first
         let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
         fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlist.url)
         let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
         _ = try? context.execute(deleteReq)
         
+        // Delete playlist object
         context.delete(playlist)
         try? context.save()
         self.objectWillChange.send()
     }
     
-    // MARK: - Smart Accessors (Restored)
+    // MARK: - Smart Accessors (Exposed to ViewModel)
     
     func getSmartContinueWatching(type: String) -> [Channel] {
         return channelRepo.getSmartContinueWatching(type: type)
@@ -78,6 +82,45 @@ class PrimeFlixRepository: ObservableObject {
     
     func getTrendingMatches(type: String, tmdbResults: [String]) -> [Channel] {
         return channelRepo.getTrendingMatches(type: type, tmdbResults: tmdbResults)
+    }
+    
+    // MARK: - Standard Accessors
+    
+    func getVersions(for channel: Channel) -> [Channel] {
+        return channelRepo.getVersions(for: channel)
+    }
+    
+    func getGroups(playlistUrl: String, type: StreamType) -> [String] {
+        return channelRepo.getGroups(playlistUrl: playlistUrl, type: type.rawValue)
+    }
+    
+    func getBrowsingContent(playlistUrl: String, type: String, group: String) -> [Channel] {
+        return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type, group: group)
+    }
+    
+    func getRecentAdded(playlistUrl: String, type: StreamType) -> [Channel] {
+        return channelRepo.getRecentAdded(playlistUrl: playlistUrl, type: type.rawValue)
+    }
+    
+    func getFavorites() -> [Channel] {
+        return channelRepo.getFavorites()
+    }
+    
+    func toggleFavorite(_ channel: Channel) {
+        channelRepo.toggleFavorite(channel: channel)
+        self.objectWillChange.send()
+    }
+    
+    func saveProgress(url: String, pos: Int64, dur: Int64) {
+        let context = container.viewContext
+        let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
+        request.predicate = NSPredicate(format: "channelUrl == %@", url)
+        
+        let progress: WatchProgress = (try? context.fetch(request))?.first ?? WatchProgress(context: context, channelUrl: url, position: pos, duration: dur)
+        progress.position = pos
+        progress.duration = dur
+        progress.lastPlayed = Date()
+        try? context.save()
     }
     
     // MARK: - Sync Logic
@@ -113,6 +156,7 @@ class PrimeFlixRepository: ObservableObject {
         
         self.syncStatusMessage = "Connecting..."
         
+        // Clean old data for this playlist before sync
         await container.performBackgroundTask { context in
             let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
             fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlistUrl)
@@ -125,12 +169,15 @@ class PrimeFlixRepository: ObservableObject {
             if source == .xtream {
                 let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
                 
+                // 1. Try Fast Sync (Bulk)
                 do {
                     try await syncXtreamBulk(input: input, playlistUrl: playlistUrl)
                 } catch {
+                    // Check for Firewall/Rate Limit Errors
                     if let xErr = error as? XtreamError, case .invalidResponse(let code, _) = xErr, [512, 513, 504].contains(code) {
-                        print("⚠️ Bulk Sync Failed (\(code)). Switching to Deep Sync...")
+                        print("⚠️ Bulk Sync Failed (\(code)). Switching to Deep Sync (Safe Mode)...")
                         self.syncStatusMessage = "Switching to Deep Sync..."
+                        // 2. Fallback to Slow Sync (Categories)
                         try await syncXtreamByCategories(input: input, playlistUrl: playlistUrl)
                     } else {
                         throw error
@@ -177,29 +224,56 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     private func syncXtreamByCategories(input: XtreamInput, playlistUrl: String) async throws {
+        
+        // 1. Deep Sync Live
+        self.syncStatusMessage = "Fetching Categories..."
         let liveCats = try await xtreamClient.getLiveCategories(input: input)
+        
         for (index, cat) in liveCats.enumerated() {
-            self.syncStatusMessage = "Live: \(cat.categoryName) (\(index + 1)/\(liveCats.count))"
-            let streams = try await xtreamClient.getLiveStreams(input: input, categoryId: cat.categoryId)
-            if !streams.isEmpty {
-                await saveBatch(items: streams.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) })
+            let status = "Live: \(cat.categoryName) (\(index + 1)/\(liveCats.count))"
+            self.syncStatusMessage = status
+            
+            // CRITICAL: Individual category protection
+            do {
+                let streams = try await xtreamClient.getLiveStreams(input: input, categoryId: cat.categoryId)
+                if !streams.isEmpty {
+                    await saveBatch(items: streams.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) })
+                }
+                // 0.5s delay to be safe against 513 errors
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            } catch {
+                print("⚠️ Failed category \(cat.categoryName): \(error.localizedDescription)")
             }
-            try? await Task.sleep(nanoseconds: 500_000_000)
         }
         
+        // 2. Deep Sync VOD
+        self.syncStatusMessage = "Fetching Movie Categories..."
         let vodCats = try await xtreamClient.getVodCategories(input: input)
+        
         for (index, cat) in vodCats.enumerated() {
-            self.syncStatusMessage = "Mov: \(cat.categoryName) (\(index + 1)/\(vodCats.count))"
-            let streams = try await xtreamClient.getVodStreams(input: input, categoryId: cat.categoryId)
-            if !streams.isEmpty {
-                await saveBatch(items: streams.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) })
+            let status = "Mov: \(cat.categoryName) (\(index + 1)/\(vodCats.count))"
+            self.syncStatusMessage = status
+            
+            // CRITICAL: Individual category protection
+            do {
+                let streams = try await xtreamClient.getVodStreams(input: input, categoryId: cat.categoryId)
+                if !streams.isEmpty {
+                    await saveBatch(items: streams.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) })
+                }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            } catch {
+                print("⚠️ Failed category \(cat.categoryName): \(error.localizedDescription)")
             }
-            try? await Task.sleep(nanoseconds: 500_000_000)
         }
         
+        // 3. Series
         self.syncStatusMessage = "Fetching Series..."
-        let series = try await xtreamClient.getSeries(input: input)
-        await saveBatch(items: series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) })
+        do {
+            let series = try await xtreamClient.getSeries(input: input)
+            await saveBatch(items: series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) })
+        } catch {
+            print("⚠️ Series Bulk failed in Deep Sync. Skipping Series.")
+        }
     }
     
     private func syncM3U(playlistUrl: String) async throws {
@@ -226,44 +300,5 @@ class PrimeFlixRepository: ObservableObject {
             try? context.save()
         }
         await MainActor.run { self.objectWillChange.send() }
-    }
-    
-    // MARK: - Accessors
-    
-    func getVersions(for channel: Channel) -> [Channel] {
-        return channelRepo.getVersions(for: channel)
-    }
-    
-    func getGroups(playlistUrl: String, type: StreamType) -> [String] {
-        return channelRepo.getGroups(playlistUrl: playlistUrl, type: type.rawValue)
-    }
-    
-    func getBrowsingContent(playlistUrl: String, type: String, group: String) -> [Channel] {
-        return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type, group: group)
-    }
-    
-    func getRecentAdded(playlistUrl: String, type: StreamType) -> [Channel] {
-        return channelRepo.getRecentAdded(playlistUrl: playlistUrl, type: type.rawValue)
-    }
-    
-    func getFavorites() -> [Channel] {
-        return channelRepo.getFavorites()
-    }
-    
-    func toggleFavorite(_ channel: Channel) {
-        channelRepo.toggleFavorite(channel: channel)
-        objectWillChange.send()
-    }
-    
-    func saveProgress(url: String, pos: Int64, dur: Int64) {
-        let context = container.viewContext
-        let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
-        request.predicate = NSPredicate(format: "channelUrl == %@", url)
-        
-        let progress: WatchProgress = (try? context.fetch(request))?.first ?? WatchProgress(context: context, channelUrl: url, position: pos, duration: dur)
-        progress.position = pos
-        progress.duration = dur
-        progress.lastPlayed = Date()
-        try? context.save()
     }
 }

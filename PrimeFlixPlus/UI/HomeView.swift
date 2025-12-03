@@ -20,7 +20,7 @@ struct HomeView: View {
             Color.black.ignoresSafeArea()
             
             if viewModel.selectedPlaylist == nil {
-                // PROFILE SELECTOR (Unchanged Logic, simplified visual)
+                // PROFILE SELECTOR
                 profileSelector
             } else if let categoryTitle = viewModel.drillDownCategory {
                 // DRILL DOWN GRID VIEW
@@ -101,26 +101,32 @@ struct HomeView: View {
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     LazyHStack(spacing: 40) {
                                         ForEach(section.items) { channel in
-                                            // Differentiate Card Style based on Section Type
-                                            if section.type == .continueWatching {
-                                                ContinueWatchingCard(channel: channel) {
-                                                    onPlayChannel(channel)
-                                                }
-                                            } else {
-                                                MovieCard(channel: channel) {
-                                                    onPlayChannel(channel)
-                                                }
-                                            }
+                                            // FIX: Extracted view logic to prevent compiler hang
+                                            cardView(for: channel, sectionType: section.type)
                                         }
                                     }
                                     .padding(.horizontal, 60)
-                                    .padding(.vertical, 30) // Space for focus expansion
+                                    .padding(.vertical, 30)
                                 }
                             }
                         }
                     }
                     .padding(.bottom, 100)
                 }
+            }
+        }
+    }
+    
+    // MARK: - Helper to Prevent Compiler Hangs
+    @ViewBuilder
+    private func cardView(for channel: Channel, sectionType: HomeSection.SectionType) -> some View {
+        if case .continueWatching = sectionType {
+            ContinueWatchingCard(channel: channel) {
+                onPlayChannel(channel)
+            }
+        } else {
+            MovieCard(channel: channel) {
+                onPlayChannel(channel)
             }
         }
     }
