@@ -15,7 +15,6 @@ struct DetailsView: View {
     
     // Focus State
     @FocusState private var focusedField: FocusField?
-    @Namespace private var scrollSpace
     
     enum FocusField: Hashable {
         case back, play, resume, favorite, version, season(Int), episode(String)
@@ -23,79 +22,94 @@ struct DetailsView: View {
     
     var body: some View {
         ZStack {
-            // 1. Dynamic Background
-            if let bgUrl = viewModel.backgroundUrl {
-                AsyncImage(url: bgUrl) { image in
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: {
+            // 1. Fixed Background (Standardized 16:9 Fill)
+            GeometryReader { geo in
+                if let bgUrl = viewModel.backgroundUrl {
+                    AsyncImage(url: bgUrl) { image in
+                        image.resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped() // Prevents image from bleeding outside bounds
+                    } placeholder: {
+                        Color.black
+                    }
+                } else {
                     Color.black
                 }
-                .ignoresSafeArea()
-                .opacity(viewModel.backdropOpacity)
-                .overlay(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .black.opacity(0.6), location: 0),
-                            .init(color: .black, location: 0.8)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .overlay(LinearGradient(colors: [.black.opacity(0.9), .clear], startPoint: .leading, endPoint: .trailing).frame(width: 900, alignment: .leading))
-            } else {
-                Color.black.ignoresSafeArea()
             }
+            .ignoresSafeArea()
+            .opacity(viewModel.backdropOpacity)
             
-            // 2. Main Content
+            // 2. Gradient Overlay (Readability)
+            // Heavy gradient at bottom to make text pop, light at top
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0.1), location: 0),
+                    .init(color: .black.opacity(0.6), location: 0.5),
+                    .init(color: .black, location: 0.9)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+            
+            // Side gradient for the text area
+            LinearGradient(colors: [.black.opacity(0.9), .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: 1000)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .ignoresSafeArea()
+            
+            // 3. Main Content
             ScrollViewReader { scrollProxy in
                 ScrollView {
-                    Color.clear.frame(height: 1).id("top") // Scroll anchor
+                    // PUSH CONTENT DOWN: This Spacer acts as the "Safe Area" for the background
+                    // It ensures content starts lower down the screen (Hero Style)
+                    Spacer()
+                        .frame(height: 450)
+                        .id("top")
                     
                     VStack(alignment: .leading, spacing: 30) {
-                        
-                        // --- Back Button ---
-                        Button(action: onBack) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "arrow.left")
-                                Text("Back")
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                        }
-                        .buttonStyle(.card)
-                        .focused($focusedField, equals: .back)
-                        .padding(.leading, 80)
-                        .padding(.top, 40)
                         
                         // --- Header Info ---
                         VStack(alignment: .leading, spacing: 16) {
                             Text(viewModel.tmdbDetails?.displayTitle ?? viewModel.channel.title)
-                                .font(.custom("Exo2-Bold", size: 68))
+                                .font(.custom("Exo2-Bold", size: 70)) // Large Hero Title
                                 .fontWeight(.black)
                                 .foregroundColor(.white)
                                 .shadow(radius: 10)
                                 .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true) // Wrap text properly
                             
                             // Metadata Row
-                            HStack(spacing: 12) {
+                            HStack(spacing: 20) {
+                                // Quality Badge
                                 if let v = viewModel.selectedVersion {
                                     let info = TitleNormalizer.parse(rawTitle: v.title)
-                                    Text(info.quality).font(.headline).fontWeight(.bold).foregroundColor(.cyan)
+                                    Text(info.quality)
+                                        .font(.headline)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.black)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.cyan)
+                                        .cornerRadius(4)
+                                    
                                     if let lang = info.language {
                                         Text(lang).font(.headline).foregroundColor(.gray)
                                     }
                                 }
                                 
+                                // Rating Badge
                                 if let score = viewModel.tmdbDetails?.voteAverage {
-                                    Label(String(format: "%.1f", score), systemImage: "star.fill")
-                                        .font(.headline)
-                                        .foregroundColor(.black)
-                                        .padding(6)
-                                        .background(Color.yellow)
-                                        .cornerRadius(4)
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "star.fill").font(.caption)
+                                        Text(String(format: "%.1f", score))
+                                    }
+                                    .font(.headline)
+                                    .foregroundColor(.yellow)
                                 }
                                 
+                                // Year
                                 if let year = viewModel.tmdbDetails?.displayDate?.prefix(4) {
                                     Text(String(year)).font(.headline).foregroundColor(.gray)
                                 }
@@ -103,9 +117,9 @@ struct DetailsView: View {
                             
                             Text(viewModel.tmdbDetails?.overview ?? "No synopsis available.")
                                 .font(.body)
-                                .lineSpacing(5)
-                                .foregroundColor(.white.opacity(0.8))
-                                .frame(maxWidth: 700, alignment: .leading)
+                                .lineSpacing(6)
+                                .foregroundColor(.white.opacity(0.9))
+                                .frame(maxWidth: 800, alignment: .leading)
                                 .lineLimit(4)
                         }
                         .padding(.horizontal, 80)
@@ -121,9 +135,10 @@ struct DetailsView: View {
                                 HStack {
                                     Image(systemName: viewModel.hasWatchHistory ? "clock.arrow.circlepath" : "play.fill")
                                     Text(viewModel.hasWatchHistory ? "Resume" : "Play")
+                                        .fontWeight(.bold)
                                 }
                                 .padding(.vertical, 12)
-                                .padding(.horizontal, 24)
+                                .padding(.horizontal, 30)
                             }
                             .buttonStyle(.card)
                             .focused($focusedField, equals: .play)
@@ -133,7 +148,7 @@ struct DetailsView: View {
                                 Button(action: { viewModel.showVersionSelector = true }) {
                                     HStack {
                                         Image(systemName: "list.bullet")
-                                        Text("Versions (\(viewModel.availableVersions.count))")
+                                        Text("Versions")
                                     }
                                     .padding(12)
                                 }
@@ -149,12 +164,27 @@ struct DetailsView: View {
                             .buttonStyle(.card)
                             .focused($focusedField, equals: .favorite)
                             .foregroundColor(viewModel.isFavorite ? .red : .white)
+                            
+                            Spacer()
+                            
+                            // Explicit Back Button (Placed here for easier thumb access)
+                            Button(action: onBack) {
+                                Text("Back")
+                                    .foregroundColor(.gray)
+                            }
+                            .buttonStyle(.plain)
+                            .focused($focusedField, equals: .back)
                         }
                         .padding(.horizontal, 80)
                         
                         // --- Series Section ---
                         if viewModel.channel.type == "series" {
                             VStack(alignment: .leading) {
+                                Text("Seasons")
+                                    .font(.headline)
+                                    .foregroundColor(.gray)
+                                    .padding(.leading, 80)
+                                
                                 // Season Tabs
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: 20) {
@@ -178,6 +208,7 @@ struct DetailsView: View {
                                         }
                                     }
                                     .padding(.horizontal, 80)
+                                    .padding(.bottom, 20)
                                 }
                                 
                                 // Episodes Lane
@@ -197,7 +228,7 @@ struct DetailsView: View {
                             }
                         }
                         
-                        Spacer(minLength: 100)
+                        Spacer(minLength: 150)
                     }
                 }
                 // Menu button handler
@@ -213,7 +244,7 @@ struct DetailsView: View {
                 }
             }
             
-            // 3. Version Selector Modal
+            // 4. Version Selector Modal
             if viewModel.showVersionSelector {
                 Color.black.opacity(0.8).ignoresSafeArea()
                 VStack(spacing: 20) {
@@ -249,6 +280,7 @@ struct DetailsView: View {
         .onAppear {
             viewModel.configure(repository: repository)
             Task { await viewModel.loadData() }
+            // Ensure focus lands on Play
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 focusedField = .play
             }
@@ -256,8 +288,7 @@ struct DetailsView: View {
     }
 }
 
-// MARK: - Subviews
-
+// Reuse EpisodeCard from previous upload
 struct EpisodeCard: View {
     let episode: DetailsViewModel.MergedEpisode
     @FocusState private var isFocused: Bool

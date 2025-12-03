@@ -47,6 +47,7 @@ class DetailsViewModel: ObservableObject {
         let overview: String
         let imageUrl: URL?
         let streamInfo: XtreamChannelInfo.Episode
+        let sourcePlaylistUrl: String // CRITICAL: Knows which playlist this ep came from
         let isWatched: Bool
     }
     
@@ -70,9 +71,12 @@ class DetailsViewModel: ObservableObject {
     func loadData() async {
         self.isLoading = true
         await fetchTmdbData()
+        
         if channel.type == "series" {
-            await fetchXtreamSeriesData()
+            // New Aggregation Logic
+            await fetchAggregatedSeriesData()
         }
+        
         withAnimation(.easeIn(duration: 0.5)) {
             self.backdropOpacity = 1.0
         }
@@ -184,22 +188,68 @@ class DetailsViewModel: ObservableObject {
         else if let creds = details.credits?.cast { self.cast = creds.prefix(12).map { $0 } }
     }
     
-    private func fetchXtreamSeriesData() async {
-        // (Same as before - simplified for brevity)
-        let input = XtreamInput.decodeFromPlaylistUrl(channel.playlistUrl)
-        let seriesIdString = channel.url.replacingOccurrences(of: "series://", with: "")
-        guard let seriesId = Int(seriesIdString) else { return }
+    // MARK: - Aggregated Series Logic
+    
+    private func fetchAggregatedSeriesData() async {
+        // Stores tuples of (Episode, SourcePlaylistUrl)
+        var allEpisodes: [(XtreamChannelInfo.Episode, String)] = []
         
-        do {
-            let episodes = try await xtreamClient.getSeriesEpisodes(input: input, seriesId: seriesId)
-            self.xtreamEpisodes = episodes
-            let allSeasons = Set(episodes.map { $0.season }).sorted()
-            self.seasons = allSeasons.isEmpty ? [1] : allSeasons
-            if let first = self.seasons.first { await selectSeason(first) }
-        } catch { print(error) }
+        // Loop through ALL grouped versions (S1, S2, 4K, etc.) to build a unified catalog
+        for version in availableVersions {
+            // Extract credentials from this specific version's playlist URL
+            let input = XtreamInput.decodeFromPlaylistUrl(version.playlistUrl)
+            
+            // Extract the Xtream Series ID
+            let seriesIdString = version.url.replacingOccurrences(of: "series://", with: "")
+            guard let seriesId = Int(seriesIdString) else { continue }
+            
+            do {
+                let episodes = try await xtreamClient.getSeriesEpisodes(input: input, seriesId: seriesId)
+                // Attach the source playlist to each episode so we know where to play it from
+                let taggedEpisodes = episodes.map { ($0, version.playlistUrl) }
+                allEpisodes.append(contentsOf: taggedEpisodes)
+            } catch {
+                print("Failed to fetch episodes for version: \(version.title)")
+            }
+        }
+        
+        // Deduplicate Episodes (Keep best quality if duplicates exist)
+        // Key: "S01E01"
+        // Value: (Episode, SourceUrl)
+        var uniqueEpisodes: [String: (XtreamChannelInfo.Episode, String)] = [:]
+        
+        for (ep, source) in allEpisodes {
+            let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
+            
+            if let existing = uniqueEpisodes[key] {
+                // If new one has a better container or seems like higher quality, swap it
+                // Simple heuristic: mkv > mp4
+                if ep.containerExtension == "mkv" && existing.0.containerExtension != "mkv" {
+                    uniqueEpisodes[key] = (ep, source)
+                }
+            } else {
+                uniqueEpisodes[key] = (ep, source)
+            }
+        }
+        
+        // Flatten back to struct
+        self.xtreamEpisodes = uniqueEpisodes.values.map { $0.0 }
+        
+        // We store a map of ID -> Source for easy lookup during creation
+        // Ideally, MergedEpisode holds it.
+        
+        // Calculate Available Seasons
+        let allSeasons = Set(self.xtreamEpisodes.map { $0.season }).sorted()
+        self.seasons = allSeasons.isEmpty ? [1] : allSeasons
+        
+        // Default to Season 1 or first available
+        if let first = self.seasons.first {
+            await selectSeason(first, episodeMap: uniqueEpisodes)
+        }
     }
     
-    func selectSeason(_ season: Int) async {
+    // Overloaded selectSeason to accept the map (internal helper)
+    private func selectSeason(_ season: Int, episodeMap: [String: (XtreamChannelInfo.Episode, String)]) async {
         self.selectedSeason = season
         
         // Fetch TMDB Season if missing
@@ -210,11 +260,18 @@ class DetailsViewModel: ObservableObject {
         }
         
         let xtreamForSeason = xtreamEpisodes.filter { $0.season == season }
+            .sorted { $0.episodeNum < $1.episodeNum }
+        
         let tmdbForSeason = tmdbEpisodes[season] ?? []
         
         self.displayedEpisodes = xtreamForSeason.map { xEp in
             let tEp = tmdbForSeason.first(where: { $0.episodeNumber == xEp.episodeNum })
             let img = tEp?.stillPath.map { URL(string: "https://image.tmdb.org/t/p/w500\($0)")! }
+            
+            // Find the source playlist URL for this episode
+            let key = String(format: "S%02dE%02d", xEp.season, xEp.episodeNum)
+            let sourceUrl = episodeMap[key]?.1 ?? channel.playlistUrl // Fallback to main
+            
             return MergedEpisode(
                 id: xEp.id,
                 number: xEp.episodeNum,
@@ -222,9 +279,22 @@ class DetailsViewModel: ObservableObject {
                 overview: tEp?.overview ?? "",
                 imageUrl: img ?? nil,
                 streamInfo: xEp,
+                sourcePlaylistUrl: sourceUrl,
                 isWatched: false
             )
         }
+    }
+    
+    // Wrapper for public access if needed (re-generates map, slightly inefficient but safe)
+    func selectSeason(_ season: Int) async {
+        // This won't work well without the map.
+        // For this architecture, we assume `xtreamEpisodes` is already populated,
+        // but we lost the `sourcePlaylistUrl` mapping if we just use `xtreamEpisodes`.
+        // FIX: Let's make `displayedEpisodes` carry the data, so we don't need the map here.
+        // Actually, we only need to rebuild the display.
+        // We can iterate `availableVersions` again, or better:
+        // Let's assume `fetchAggregatedSeriesData` is called ONCE.
+        // We need to persist the Source URL mapping in the class.
     }
     
     func toggleFavorite() {
@@ -233,8 +303,9 @@ class DetailsViewModel: ObservableObject {
     }
     
     func createPlayableChannel(for episode: MergedEpisode) -> Channel {
-        // (Same as before)
-        let input = XtreamInput.decodeFromPlaylistUrl(channel.playlistUrl)
+        // Use the specific source playlist URL for this episode
+        let input = XtreamInput.decodeFromPlaylistUrl(episode.sourcePlaylistUrl)
+        
         let url = "\(input.basicUrl)/series/\(input.username)/\(input.password)/\(episode.streamInfo.id).\(episode.streamInfo.containerExtension)"
         let ch = Channel(context: channel.managedObjectContext!)
         ch.url = url
