@@ -15,6 +15,20 @@ actor TmdbClient {
         return d
     }()
     
+    // MARK: - Trending (NEW)
+    
+    func getTrending(type: String) async throws -> [TmdbTrendingItem] {
+        // Map our internal type to TMDB type
+        let mediaType: String
+        if type == "series" { mediaType = "tv" }
+        else if type == "movie" { mediaType = "movie" }
+        else { mediaType = "all" }
+        
+        // Use a generic response wrapper with our flexible item struct
+        let response: TmdbSearchResponse<TmdbTrendingItem> = try await fetch("/trending/\(mediaType)/week", params: [:])
+        return response.results
+    }
+    
     // MARK: - Search
     
     func searchMovie(query: String, year: String? = nil) async throws -> [TmdbMovieResult] {
@@ -34,13 +48,11 @@ actor TmdbClient {
     // MARK: - Details
     
     func getMovieDetails(id: Int) async throws -> TmdbDetails {
-        // Fetch credits, similar movies, age ratings, and trailers
         let params = ["append_to_response": "credits,similar,release_dates,videos", "language": "en-US"]
         return try await fetch("/movie/\(id)", params: params)
     }
     
     func getTvDetails(id: Int) async throws -> TmdbDetails {
-        // Fetch credits, similar shows, content ratings, and trailers
         let params = ["append_to_response": "aggregate_credits,similar,content_ratings,videos", "language": "en-US"]
         return try await fetch("/tv/\(id)", params: params)
     }
@@ -54,8 +66,6 @@ actor TmdbClient {
     
     private func fetch<T: Decodable>(_ endpoint: String, params: [String: String]) async throws -> T {
         var urlComp = URLComponents(string: baseUrl + endpoint)!
-        
-        // Add API Key as query param fallback, though we use Bearer mostly
         var queryItems = params.map { URLQueryItem(name: $0.key, value: $0.value) }
         queryItems.append(URLQueryItem(name: "api_key", value: apiKey))
         urlComp.queryItems = queryItems
@@ -70,10 +80,6 @@ actor TmdbClient {
         let (data, response) = try await session.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-            // Debugging helper
-            if let str = String(data: data, encoding: .utf8) {
-                print("❌ TMDB Error Body: \(str)")
-            }
             throw URLError(.badServerResponse)
         }
         
@@ -85,6 +91,20 @@ actor TmdbClient {
 
 struct TmdbSearchResponse<T: Decodable>: Decodable {
     let results: [T]
+}
+
+// Flexible struct for Trending that handles both "title" (Movie) and "name" (TV)
+struct TmdbTrendingItem: Decodable, Identifiable {
+    let id: Int
+    let title: String?
+    let name: String?
+    let overview: String?
+    let posterPath: String?
+    let backdropPath: String?
+    
+    var displayTitle: String {
+        return title ?? name ?? "Unknown"
+    }
 }
 
 struct TmdbMovieResult: Decodable, Identifiable {
@@ -105,6 +125,7 @@ struct TmdbTvResult: Decodable, Identifiable {
     let overview: String?
 }
 
+// Detailed Models used by DetailsViewModel
 struct TmdbDetails: Decodable {
     let id: Int
     let title: String?
@@ -119,10 +140,9 @@ struct TmdbDetails: Decodable {
     let runtime: Int?
     let episodeRunTime: [Int]?
     
-    // Nested appends
     let credits: TmdbCredits?
     let aggregateCredits: TmdbCredits?
-    let similar: TmdbSearchResponse<TmdbMovieResult>? // Using generic fallback
+    let similar: TmdbSearchResponse<TmdbMovieResult>?
     let videos: TmdbVideoResponse?
     let releaseDates: TmdbReleaseDates?
     let contentRatings: TmdbContentRatings?
@@ -134,13 +154,10 @@ struct TmdbDetails: Decodable {
     var displayTitle: String { title ?? name ?? "Unknown" }
     var displayDate: String? { releaseDate ?? firstAirDate }
     
-    // Extract Certification (e.g. PG-13, TV-MA)
     var certification: String? {
-        // Movies
         if let releases = releaseDates?.results.first(where: { $0.iso31661 == "US" }) {
             return releases.releaseDates.first?.certification
         }
-        // TV
         if let ratings = contentRatings?.results.first(where: { $0.iso31661 == "US" }) {
             return ratings.rating
         }
@@ -167,7 +184,6 @@ struct TmdbCast: Decodable, Identifiable {
     let name: String
     let character: String?
     let profilePath: String?
-    // For Aggregate (TV)
     let roles: [TmdbRole]?
     
     var displayRole: String {
@@ -199,7 +215,6 @@ struct TmdbVideo: Decodable, Identifiable {
     var isTrailer: Bool { type == "Trailer" && site == "YouTube" }
 }
 
-// Certification Models
 struct TmdbReleaseDates: Decodable {
     let results: [TmdbIsoResult]
 }
@@ -219,7 +234,6 @@ struct TmdbTvRating: Decodable {
     let rating: String
 }
 
-// Season / Episode
 struct TmdbSeason: Decodable, Identifiable {
     let id: Int
     let name: String
@@ -229,7 +243,7 @@ struct TmdbSeason: Decodable, Identifiable {
 }
 
 struct TmdbSeasonDetails: Decodable {
-    let _id: String? // Ignored, mapped manually if needed
+    let _id: String?
     let episodes: [TmdbEpisode]
 }
 

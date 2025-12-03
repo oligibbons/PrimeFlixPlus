@@ -11,8 +11,8 @@ class PrimeFlixRepository: ObservableObject {
     @Published var lastSyncDate: Date? = nil
     @Published var isErrorState: Bool = false
     
-    // FIXED: Changed from 'private' to 'internal' so ViewModels can access context for history checks
-    let container: NSPersistentContainer
+    // Internal access for ViewModels
+    internal let container: NSPersistentContainer
     
     private let tmdbClient = TmdbClient()
     private let xtreamClient = XtreamClient()
@@ -38,24 +38,46 @@ class PrimeFlixRepository: ObservableObject {
         if (try? context.fetch(req).count) ?? 0 == 0 {
             _ = Playlist(context: context, title: title, url: url, source: source)
             try? context.save()
-            // Trigger immediate sync
             Task { await syncPlaylist(playlistTitle: title, playlistUrl: url, source: source) }
         }
     }
     
     func deletePlaylist(_ playlist: Playlist) {
         let context = container.viewContext
-        
-        // Delete associated channels first
         let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
         fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlist.url)
         let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
         _ = try? context.execute(deleteReq)
         
-        // Delete playlist object
         context.delete(playlist)
         try? context.save()
         self.objectWillChange.send()
+    }
+    
+    // MARK: - Smart Accessors (Restored)
+    
+    func getSmartContinueWatching(type: String) -> [Channel] {
+        return channelRepo.getSmartContinueWatching(type: type)
+    }
+    
+    func getFavorites(type: String) -> [Channel] {
+        return channelRepo.getFavorites(type: type)
+    }
+    
+    func getRecentlyAdded(type: String, limit: Int) -> [Channel] {
+        return channelRepo.getRecentlyAdded(type: type, limit: limit)
+    }
+    
+    func getRecentFallback(type: String, limit: Int) -> [Channel] {
+        return channelRepo.getRecentFallback(type: type, limit: limit)
+    }
+    
+    func getByGenre(type: String, groupName: String, limit: Int) -> [Channel] {
+        return channelRepo.getByGenre(type: type, groupName: groupName, limit: limit)
+    }
+    
+    func getTrendingMatches(type: String, tmdbResults: [String]) -> [Channel] {
+        return channelRepo.getTrendingMatches(type: type, tmdbResults: tmdbResults)
     }
     
     // MARK: - Sync Logic
@@ -91,7 +113,6 @@ class PrimeFlixRepository: ObservableObject {
         
         self.syncStatusMessage = "Connecting..."
         
-        // Clean old data for this playlist before sync
         await container.performBackgroundTask { context in
             let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
             fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlistUrl)
@@ -104,15 +125,12 @@ class PrimeFlixRepository: ObservableObject {
             if source == .xtream {
                 let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
                 
-                // 1. Try Fast Sync (Bulk)
                 do {
                     try await syncXtreamBulk(input: input, playlistUrl: playlistUrl)
                 } catch {
-                    // Check for Firewall/Rate Limit Errors
                     if let xErr = error as? XtreamError, case .invalidResponse(let code, _) = xErr, [512, 513, 504].contains(code) {
-                        print("⚠️ Bulk Sync Failed (\(code)). Switching to Deep Sync (Safe Mode)...")
+                        print("⚠️ Bulk Sync Failed (\(code)). Switching to Deep Sync...")
                         self.syncStatusMessage = "Switching to Deep Sync..."
-                        // 2. Fallback to Slow Sync (Categories)
                         try await syncXtreamByCategories(input: input, playlistUrl: playlistUrl)
                     } else {
                         throw error
@@ -159,54 +177,29 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     private func syncXtreamByCategories(input: XtreamInput, playlistUrl: String) async throws {
-        
-        // 1. Deep Sync Live
-        self.syncStatusMessage = "Fetching Categories..."
         let liveCats = try await xtreamClient.getLiveCategories(input: input)
-        
         for (index, cat) in liveCats.enumerated() {
-            let status = "Live: \(cat.categoryName) (\(index + 1)/\(liveCats.count))"
-            self.syncStatusMessage = status
-            
-            do {
-                let streams = try await xtreamClient.getLiveStreams(input: input, categoryId: cat.categoryId)
-                if !streams.isEmpty {
-                    await saveBatch(items: streams.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) })
-                }
-                // 0.5s delay to be safe against 513 errors
-                try? await Task.sleep(nanoseconds: 500_000_000)
-            } catch {
-                print("⚠️ Failed category \(cat.categoryName): \(error.localizedDescription)")
+            self.syncStatusMessage = "Live: \(cat.categoryName) (\(index + 1)/\(liveCats.count))"
+            let streams = try await xtreamClient.getLiveStreams(input: input, categoryId: cat.categoryId)
+            if !streams.isEmpty {
+                await saveBatch(items: streams.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) })
             }
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
         
-        // 2. Deep Sync VOD
-        self.syncStatusMessage = "Fetching Movie Categories..."
         let vodCats = try await xtreamClient.getVodCategories(input: input)
-        
         for (index, cat) in vodCats.enumerated() {
-            let status = "Mov: \(cat.categoryName) (\(index + 1)/\(vodCats.count))"
-            self.syncStatusMessage = status
-            
-            do {
-                let streams = try await xtreamClient.getVodStreams(input: input, categoryId: cat.categoryId)
-                if !streams.isEmpty {
-                    await saveBatch(items: streams.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) })
-                }
-                try? await Task.sleep(nanoseconds: 500_000_000)
-            } catch {
-                print("⚠️ Failed category \(cat.categoryName): \(error.localizedDescription)")
+            self.syncStatusMessage = "Mov: \(cat.categoryName) (\(index + 1)/\(vodCats.count))"
+            let streams = try await xtreamClient.getVodStreams(input: input, categoryId: cat.categoryId)
+            if !streams.isEmpty {
+                await saveBatch(items: streams.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) })
             }
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
         
-        // 3. Series
         self.syncStatusMessage = "Fetching Series..."
-        do {
-            let series = try await xtreamClient.getSeries(input: input)
-            await saveBatch(items: series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) })
-        } catch {
-            print("⚠️ Series Bulk failed in Deep Sync. Skipping Series.")
-        }
+        let series = try await xtreamClient.getSeries(input: input)
+        await saveBatch(items: series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) })
     }
     
     private func syncM3U(playlistUrl: String) async throws {
@@ -237,7 +230,6 @@ class PrimeFlixRepository: ObservableObject {
     
     // MARK: - Accessors
     
-    // FIXED: Added this missing wrapper method
     func getVersions(for channel: Channel) -> [Channel] {
         return channelRepo.getVersions(for: channel)
     }
@@ -246,8 +238,8 @@ class PrimeFlixRepository: ObservableObject {
         return channelRepo.getGroups(playlistUrl: playlistUrl, type: type.rawValue)
     }
     
-    func getBrowsingContent(playlistUrl: String, type: StreamType, group: String) -> [Channel] {
-        return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type.rawValue, group: group)
+    func getBrowsingContent(playlistUrl: String, type: String, group: String) -> [Channel] {
+        return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type, group: group)
     }
     
     func getRecentAdded(playlistUrl: String, type: StreamType) -> [Channel] {
