@@ -6,7 +6,6 @@ struct SettingsView: View {
     
     var onBack: () -> Void
     
-    // Explicit focus control
     @FocusState private var focusedField: String?
     
     var body: some View {
@@ -36,12 +35,6 @@ struct SettingsView: View {
                         .font(.largeTitle)
                         .fontWeight(.bold)
                         .foregroundColor(.white)
-                    
-                    if let date = repository.lastSyncDate {
-                        Text("Last Sync: \(date.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
                 }
                 
                 Spacer()
@@ -52,54 +45,77 @@ struct SettingsView: View {
             
             // RIGHT PANE: Content
             ScrollView {
-                VStack(alignment: .leading, spacing: 30) {
+                VStack(alignment: .leading, spacing: 40) {
                     
-                    // --- FOCUS BRIDGE ---
-                    // This button ensures you can always move RIGHT from the back button
-                    Button(action: {
-                        Task { await repository.syncAll() }
-                    }) {
-                        HStack {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                            Text("Sync All Playlists")
-                            Spacer()
-                        }
-                        .padding()
-                    }
-                    .buttonStyle(.card)
-                    .focused($focusedField, equals: "syncAll")
-                    
-                    Divider().background(Color.gray)
-                    
-                    // Playlists Section
-                    VStack(alignment: .leading, spacing: 15) {
-                        Text("Manage Playlists")
+                    // --- SECTION 1: PLAYBACK PREFERENCES (NEW) ---
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text("Playback Preferences")
                             .font(.title3)
                             .fontWeight(.bold)
                             .foregroundColor(.cyan)
                         
-                        if viewModel.playlists.isEmpty {
-                            Text("No playlists added yet.")
+                        // Language Picker
+                        HStack {
+                            Text("Default Language")
+                                .font(.headline)
                                 .foregroundColor(.gray)
-                                .padding(.vertical, 10)
-                        } else {
-                            ForEach(viewModel.playlists, id: \.self) { playlist in
-                                PlaylistRow(playlist: playlist, viewModel: viewModel)
+                                .frame(width: 200, alignment: .leading)
+                            
+                            Picker("", selection: $viewModel.preferredLanguage) {
+                                ForEach(viewModel.availableLanguages, id: \.self) { lang in
+                                    Text(lang).tag(lang)
+                                }
                             }
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: 300)
                         }
+                        
+                        // Resolution Picker
+                        HStack {
+                            Text("Preferred Quality")
+                                .font(.headline)
+                                .foregroundColor(.gray)
+                                .frame(width: 200, alignment: .leading)
+                            
+                            Picker("", selection: $viewModel.preferredResolution) {
+                                ForEach(viewModel.availableResolutions, id: \.self) { res in
+                                    Text(res).tag(res)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: 300)
+                        }
+                        
+                        Text("PrimeFlix+ will automatically try to select the best version matching these preferences.")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                            .padding(.top, 5)
                     }
+                    .padding(30)
+                    .background(Color(white: 0.15))
+                    .cornerRadius(20)
                     
-                    Divider().background(Color.gray)
-                    
-                    // General Section
-                    VStack(alignment: .leading, spacing: 15) {
-                        Text("General")
+                    // --- SECTION 2: DATA MANAGEMENT ---
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text("Data & Sync")
                             .font(.title3)
                             .fontWeight(.bold)
                             .foregroundColor(.cyan)
                         
                         Button(action: {
-                            // Clear cache logic
+                            Task { await repository.syncAll() }
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                Text("Force Sync All Playlists")
+                                Spacer()
+                            }
+                            .padding()
+                        }
+                        .buttonStyle(.card)
+                        
+                        Button(action: {
+                            viewModel.clearCache()
                         }) {
                             HStack {
                                 Image(systemName: "trash")
@@ -110,6 +126,32 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.card)
                     }
+                    
+                    // --- SECTION 3: PLAYLISTS ---
+                    VStack(alignment: .leading, spacing: 15) {
+                        Text("Active Playlists")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(.cyan)
+                        
+                        ForEach(viewModel.playlists, id: \.self) { playlist in
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(playlist.title)
+                                        .fontWeight(.bold)
+                                    Text(playlist.url).font(.caption).foregroundColor(.gray).lineLimit(1)
+                                }
+                                Spacer()
+                                Button(role: .destructive, action: { viewModel.deletePlaylist(playlist) }) {
+                                    Image(systemName: "trash").foregroundColor(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding()
+                            .background(Color(white: 0.12))
+                            .cornerRadius(12)
+                        }
+                    }
                 }
                 .padding(50)
             }
@@ -117,45 +159,13 @@ struct SettingsView: View {
         .background(Color.black.ignoresSafeArea())
         .onAppear {
             viewModel.configure(repository: repository)
-            // Force focus to start on Back button
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 focusedField = "back"
             }
         }
-    }
-}
-
-// Subview for Rows
-struct PlaylistRow: View {
-    @ObservedObject var playlist: Playlist
-    @ObservedObject var viewModel: SettingsViewModel
-    
-    var body: some View {
-        HStack(spacing: 20) {
-            VStack(alignment: .leading) {
-                Text(playlist.title)
-                    .font(.headline)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                Text(playlist.url)
-                    .font(.caption)
-                    .foregroundColor(.gray)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            
-            Button(role: .destructive, action: {
-                viewModel.deletePlaylist(playlist)
-            }) {
-                Image(systemName: "trash")
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .foregroundColor(.red)
-            }
-            .buttonStyle(.card)
+        // Menu Button Handler
+        .onExitCommand {
+            onBack()
         }
-        .padding(16)
-        .background(Color(white: 0.15))
-        .cornerRadius(12)
     }
 }

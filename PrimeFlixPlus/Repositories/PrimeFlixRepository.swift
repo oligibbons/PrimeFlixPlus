@@ -11,7 +11,9 @@ class PrimeFlixRepository: ObservableObject {
     @Published var lastSyncDate: Date? = nil
     @Published var isErrorState: Bool = false
     
-    private let container: NSPersistentContainer
+    // FIXED: Changed from 'private' to internal so ViewModels can access context
+    let container: NSPersistentContainer
+    
     private let tmdbClient = TmdbClient()
     private let xtreamClient = XtreamClient()
     private let channelRepo: ChannelRepository
@@ -225,7 +227,7 @@ class PrimeFlixRepository: ObservableObject {
         await MainActor.run { self.objectWillChange.send() }
     }
     
-    // MARK: - Accessors (Unchanged)
+    // MARK: - Accessors
     func getGroups(playlistUrl: String, type: StreamType) -> [String] {
         return channelRepo.getGroups(playlistUrl: playlistUrl, type: type.rawValue)
     }

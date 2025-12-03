@@ -1,10 +1,20 @@
 import Foundation
-import CoreData
+import SwiftUI
 import Combine
 
 @MainActor
 class SettingsViewModel: ObservableObject {
     
+    // --- Preferences ---
+    // Persist to UserDefaults automatically
+    @AppStorage("preferredLanguage") var preferredLanguage: String = "English"
+    @AppStorage("preferredResolution") var preferredResolution: String = "4K UHD"
+    
+    // Available Options
+    let availableLanguages = ["English", "Arabic", "French", "Spanish", "German", "Multi-Audio"]
+    let availableResolutions = ["4K UHD", "1080p", "720p", "SD"]
+    
+    // --- Playlist Management ---
     @Published var playlists: [Playlist] = []
     private var repository: PrimeFlixRepository?
     
@@ -15,22 +25,22 @@ class SettingsViewModel: ObservableObject {
         loadPlaylists()
     }
     
-    private func loadPlaylists() {
+    func loadPlaylists() {
         guard let repo = repository else { return }
         self.playlists = repo.getAllPlaylists()
     }
     
-    func syncPlaylist(_ playlist: Playlist) async {
-        guard let repo = repository else { return }
-        guard let source = DataSourceType(rawValue: playlist.source) else { return }
-        
-        // Triggers the repo's global sync logic which updates the overlay
-        await repo.syncPlaylist(playlistTitle: playlist.title, playlistUrl: playlist.url, source: source)
-    }
-    
     func deletePlaylist(_ playlist: Playlist) {
         repository?.deletePlaylist(playlist)
-        // Refresh local list
         loadPlaylists()
+    }
+    
+    func syncAll() async {
+        await repository?.syncAll()
+    }
+    
+    func clearCache() {
+        // Clear Kingfisher or URLCache if implemented
+        URLCache.shared.removeAllCachedResponses()
     }
 }
