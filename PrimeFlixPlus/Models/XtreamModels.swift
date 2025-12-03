@@ -1,13 +1,36 @@
 import Foundation
 
+// MARK: - Helper Extension
+private extension KeyedDecodingContainer {
+    /// Tries to decode an Int, then a String (converting to Int). Returns 0 if both fail.
+    func decodeFlexibleInt(forKey key: K) -> Int {
+        if let intVal = try? decode(Int.self, forKey: key) {
+            return intVal
+        }
+        if let strVal = try? decode(String.self, forKey: key), let intVal = Int(strVal) {
+            return intVal
+        }
+        return 0
+    }
+    
+    /// Tries to decode a String, then an Int (converting to String). Returns nil if both fail.
+    func decodeFlexibleString(forKey key: K) -> String? {
+        if let strVal = try? decode(String.self, forKey: key) {
+            return strVal
+        }
+        if let intVal = try? decode(Int.self, forKey: key) {
+            return String(intVal)
+        }
+        return nil
+    }
+}
+
 // MARK: - Categories
-/// Represents a category category from the Xtream API.
 struct XtreamCategory: Codable, Identifiable {
     let categoryId: String
     let categoryName: String
     let parentId: Int
     
-    // Conformance to Identifiable uses the API's unique ID
     var id: String { categoryId }
     
     enum CodingKeys: String, CodingKey {
@@ -16,17 +39,15 @@ struct XtreamCategory: Codable, Identifiable {
         case parentId = "parent_id"
     }
     
-    // Handle cases where parent_id might be missing in JSON
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        categoryId = try container.decode(String.self, forKey: .categoryId)
-        categoryName = try container.decode(String.self, forKey: .categoryName)
-        parentId = try container.decodeIfPresent(Int.self, forKey: .parentId) ?? 0
+        categoryId = container.decodeFlexibleString(forKey: .categoryId) ?? "0"
+        categoryName = try container.decodeIfPresent(String.self, forKey: .categoryName) ?? "Unknown"
+        parentId = container.decodeFlexibleInt(forKey: .parentId)
     }
 }
 
 // MARK: - Channel Info Namespace
-/// Container for all Xtream Stream Information types
 struct XtreamChannelInfo {
     
     /// Live TV Stream Metadata
@@ -45,6 +66,15 @@ struct XtreamChannelInfo {
             case streamIcon = "stream_icon"
             case categoryId = "category_id"
             case epgChannelId = "epg_channel_id"
+        }
+        
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            streamId = container.decodeFlexibleInt(forKey: .streamId)
+            name = try container.decodeIfPresent(String.self, forKey: .name)
+            streamIcon = try container.decodeIfPresent(String.self, forKey: .streamIcon)
+            categoryId = container.decodeFlexibleString(forKey: .categoryId)
+            epgChannelId = container.decodeFlexibleString(forKey: .epgChannelId)
         }
     }
     
@@ -68,13 +98,12 @@ struct XtreamChannelInfo {
             case rating
         }
         
-        // Default values logic
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            streamId = try container.decode(Int.self, forKey: .streamId)
+            streamId = container.decodeFlexibleInt(forKey: .streamId)
             name = try container.decodeIfPresent(String.self, forKey: .name)
             streamIcon = try container.decodeIfPresent(String.self, forKey: .streamIcon)
-            categoryId = try container.decodeIfPresent(String.self, forKey: .categoryId)
+            categoryId = container.decodeFlexibleString(forKey: .categoryId)
             containerExtension = try container.decodeIfPresent(String.self, forKey: .containerExtension) ?? "mp4"
             rating = try container.decodeIfPresent(String.self, forKey: .rating)
         }
@@ -96,6 +125,15 @@ struct XtreamChannelInfo {
             case cover
             case categoryId = "category_id"
             case rating
+        }
+        
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            seriesId = container.decodeFlexibleInt(forKey: .seriesId)
+            name = try container.decodeIfPresent(String.self, forKey: .name)
+            cover = try container.decodeIfPresent(String.self, forKey: .cover)
+            categoryId = container.decodeFlexibleString(forKey: .categoryId)
+            rating = try container.decodeIfPresent(String.self, forKey: .rating)
         }
     }
     
@@ -127,16 +165,17 @@ struct XtreamChannelInfo {
         
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            // JSON IDs can sometimes be Ints or Strings, force to String
-            if let idInt = try? container.decode(Int.self, forKey: .id) {
-                id = String(idInt)
+            // Robust ID for Episode
+            if let intId = try? container.decode(Int.self, forKey: .id) {
+                id = String(intId)
             } else {
-                id = try container.decode(String.self, forKey: .id)
+                id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
             }
+            
             title = try container.decodeIfPresent(String.self, forKey: .title)
             containerExtension = try container.decodeIfPresent(String.self, forKey: .containerExtension) ?? "mp4"
-            season = try container.decodeIfPresent(Int.self, forKey: .season) ?? 0
-            episodeNum = try container.decodeIfPresent(Int.self, forKey: .episodeNum) ?? 0
+            season = container.decodeFlexibleInt(forKey: .season)
+            episodeNum = container.decodeFlexibleInt(forKey: .episodeNum)
         }
     }
 }

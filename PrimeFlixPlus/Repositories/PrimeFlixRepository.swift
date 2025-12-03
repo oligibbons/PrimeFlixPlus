@@ -80,8 +80,7 @@ class PrimeFlixRepository: ObservableObject {
             self.isErrorState = false
         }
         
-        print("Syncing: \(playlistTitle)")
-        self.syncStatusMessage = "Connecting to \(playlistTitle)..."
+        self.syncStatusMessage = "Connecting..."
         
         // Clean old data for this playlist
         await container.performBackgroundTask { context in
@@ -93,46 +92,56 @@ class PrimeFlixRepository: ObservableObject {
         }
         
         var channels: [ChannelStruct] = []
+        var hasAnySuccess = false
         
         do {
             if source == .xtream {
                 let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
                 
-                self.syncStatusMessage = "Fetching Live Channels..."
-                // FIX: Removed 'try?' so errors propagate to the catch block
-                let live = try await xtreamClient.getLiveStreams(input: input)
-                channels += live.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
+                // Live
+                self.syncStatusMessage = "Fetching Live..."
+                do {
+                    let live = try await xtreamClient.getLiveStreams(input: input)
+                    channels += live.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
+                    hasAnySuccess = true
+                } catch {
+                    print("⚠️ Live Skipped: \(error.localizedDescription)")
+                }
                 
+                // VOD
                 self.syncStatusMessage = "Fetching Movies..."
-                // Attempt to fetch, but don't fail entire sync if VOD fails but Live worked
                 do {
                     let vod = try await xtreamClient.getVodStreams(input: input)
                     channels += vod.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
+                    hasAnySuccess = true
                 } catch {
-                     print("VOD Sync Warning: \(error.localizedDescription)")
+                    print("⚠️ VOD Skipped: \(error.localizedDescription)")
                 }
                 
+                // Series
                 self.syncStatusMessage = "Fetching Series..."
                 do {
                     let series = try await xtreamClient.getSeries(input: input)
                     channels += series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) }
+                    hasAnySuccess = true
                 } catch {
-                    print("Series Sync Warning: \(error.localizedDescription)")
+                     print("⚠️ Series Skipped: \(error.localizedDescription)")
+                }
+                
+                // If EVERYTHING failed, we force a hard error by trying one call again
+                if !hasAnySuccess {
+                    _ = try await xtreamClient.getLiveStreams(input: input)
                 }
                 
             } else if source == .m3u {
-                self.syncStatusMessage = "Downloading Playlist..."
+                self.syncStatusMessage = "Downloading M3U..."
                 guard let url = URL(string: playlistUrl) else { throw URLError(.badURL) }
-                
-                // FIX: Use UnsafeSession to allow insecure M3U links
                 let (data, response) = try await UnsafeSession.shared.data(from: url)
-                
-                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                     throw URLError(.badServerResponse)
                 }
-                
                 if let content = String(data: data, encoding: .utf8) {
-                    self.syncStatusMessage = "Parsing M3U..."
+                    self.syncStatusMessage = "Parsing..."
                     channels = await M3UParser.parse(content: content, playlistUrl: playlistUrl)
                 }
             }
@@ -151,20 +160,28 @@ class PrimeFlixRepository: ObservableObject {
             }
             
             if !isAutoSync {
-                self.syncStatusMessage = "Sync Finished!"
+                self.syncStatusMessage = "Done"
                 self.isSyncing = false
                 self.lastSyncDate = Date()
-                try? await Task.sleep(nanoseconds: 3 * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
                 self.syncStatusMessage = nil
             }
             
         } catch {
-            print("Sync Failed: \(error.localizedDescription)")
+            print("❌ Sync Failed: \(error)")
             self.isErrorState = true
             self.isSyncing = false
-            self.syncStatusMessage = "Error: \(error.localizedDescription)"
             
-            try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+            // Show the user WHY it failed
+            if let xError = error as? XtreamError {
+                self.syncStatusMessage = xError.errorDescription
+            } else if let urlError = error as? URLError {
+                self.syncStatusMessage = "Net Error: \(urlError.localizedDescription)"
+            } else {
+                self.syncStatusMessage = "Error: \(error.localizedDescription)"
+            }
+            
+            try? await Task.sleep(nanoseconds: 6 * 1_000_000_000)
             self.syncStatusMessage = nil
             self.isErrorState = false
         }
