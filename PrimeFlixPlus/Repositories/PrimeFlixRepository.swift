@@ -99,27 +99,32 @@ class PrimeFlixRepository: ObservableObject {
                 let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
                 
                 self.syncStatusMessage = "Fetching Live Channels..."
-                // 1. Live
-                if let live = try? await xtreamClient.getLiveStreams(input: input) {
-                     channels += live.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
-                }
+                // FIX: Removed 'try?' so errors propagate to the catch block
+                let live = try await xtreamClient.getLiveStreams(input: input)
+                channels += live.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
                 
                 self.syncStatusMessage = "Fetching Movies..."
-                // 2. VOD
-                if let vod = try? await xtreamClient.getVodStreams(input: input) {
+                // Attempt to fetch, but don't fail entire sync if VOD fails but Live worked
+                do {
+                    let vod = try await xtreamClient.getVodStreams(input: input)
                     channels += vod.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
+                } catch {
+                     print("VOD Sync Warning: \(error.localizedDescription)")
                 }
                 
                 self.syncStatusMessage = "Fetching Series..."
-                // 3. Series
-                if let series = try? await xtreamClient.getSeries(input: input) {
-                     channels += series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) }
+                do {
+                    let series = try await xtreamClient.getSeries(input: input)
+                    channels += series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) }
+                } catch {
+                    print("Series Sync Warning: \(error.localizedDescription)")
                 }
                 
             } else if source == .m3u {
                 self.syncStatusMessage = "Downloading Playlist..."
                 guard let url = URL(string: playlistUrl) else { throw URLError(.badURL) }
                 
+                // FIX: Use UnsafeSession to allow insecure M3U links
                 let (data, response) = try await UnsafeSession.shared.data(from: url)
                 
                 guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
@@ -138,12 +143,10 @@ class PrimeFlixRepository: ObservableObject {
                     context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
                     for (index, item) in channels.enumerated() {
                         _ = item.toManagedObject(context: context)
-                        // Save in batches to prevent memory spikes
                         if index % 2000 == 0 { try? context.save() }
                     }
                     try? context.save()
                 }
-                // Force UI Refresh
                 await MainActor.run { self.objectWillChange.send() }
             }
             

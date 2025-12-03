@@ -27,7 +27,6 @@ class PlayerViewModel: ObservableObject {
         self.videoTitle = channel.title
         
         // 1. NUCLEAR URL SANITIZATION
-        // We handle the specific "Space Bug" (http: //) and standard encoding
         var rawUrl = channel.url
         
         // Fix the specific scheme spacing issue if present
@@ -65,13 +64,13 @@ class PlayerViewModel: ObservableObject {
         }
         
         // 2. HEADERS (User-Agent)
-        // Many IPTV providers block standard AVPlayer User-Agents.
+        // Switching to VLC/3.0.16 which is the 'Gold Standard' for IPTV compatibility
         let headers: [String: Any] = [
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15"
+            "User-Agent": "VLC/3.0.16 LibVLC/3.0.16"
         ]
         
         // 3. ASSET CREATION
-        // We use the String literal "AVURLAssetHTTPHeaderFieldsKey" to avoid SDK version scope issues.
+        // Use string literal to ensure compatibility
         let asset = AVURLAsset(url: streamUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
         let item = AVPlayerItem(asset: asset)
         
@@ -83,13 +82,13 @@ class PlayerViewModel: ObservableObject {
                 case .failed:
                     self?.isError = true
                     
-                    // FIXED: Cast to NSError to access detailed properties
-                    let nsError = item.error as NSError?
-                    let err = nsError?.localizedDescription ?? "Unknown Stream Error"
-                    let reason = nsError?.localizedFailureReason ?? ""
+                    // FIXED: Correctly cast Error to NSError to access localizedFailureReason
+                    let error = item.error as NSError?
+                    let errDescription = error?.localizedDescription ?? "Unknown Stream Error"
+                    let reason = error?.localizedFailureReason ?? ""
                     
-                    self?.errorMessage = "\(err) \(reason)"
-                    print("❌ Player Failed: \(err) | Reason: \(reason) | URL: \(url)")
+                    self?.errorMessage = "\(errDescription) \(reason)"
+                    print("❌ Player Failed: \(errDescription) | Reason: \(reason) | URL: \(url)")
                     
                 case .readyToPlay:
                     self?.isError = false
@@ -107,7 +106,7 @@ class PlayerViewModel: ObservableObject {
         
         // 5. INITIALIZE PLAYER
         self.player = AVPlayer(playerItem: item)
-        self.player?.actionAtItemEnd = .pause // Stop at end
+        self.player?.actionAtItemEnd = .pause
         
         // Periodic Time Observer
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)

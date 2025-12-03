@@ -12,9 +12,14 @@ struct XtreamInput {
         // 1. Check for internal "packed" format (url|username|password)
         if urlString.contains("|") {
             let parts = urlString.split(separator: "|").map { String($0) }
-            let url = parts.indices.contains(0) ? parts[0] : ""
+            var url = parts.indices.contains(0) ? parts[0] : ""
             let user = parts.indices.contains(1) ? parts[1] : ""
             let pass = parts.indices.contains(2) ? parts[2] : ""
+            
+            // CRITICAL FIX: Sanitize the URL read from the database.
+            // This fixes the specific bug where "http: //" was stored.
+            url = url.replacingOccurrences(of: ": //", with: "://")
+                     .replacingOccurrences(of: " ", with: "")
             
             return XtreamInput(
                 basicUrl: url,
@@ -35,8 +40,7 @@ struct XtreamInput {
         let host = urlComponents.host ?? ""
         let portStr = (urlComponents.port != nil) ? ":\(urlComponents.port!)" : ""
         
-        // CRITICAL FIX: Removed space between scheme and slash (was ": //")
-        // This single character was breaking the entire player.
+        // CRITICAL FIX: Ensure no spaces are injected here
         let basicUrl = "\(scheme)://\(host)\(portStr)"
         
         // Extract query parameters
