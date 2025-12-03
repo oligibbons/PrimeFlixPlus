@@ -1,6 +1,7 @@
 import Foundation
 import CoreData
 import Combine
+import SwiftUI
 
 @MainActor
 class PrimeFlixRepository: ObservableObject {
@@ -44,7 +45,6 @@ class PrimeFlixRepository: ObservableObject {
         fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlist.url)
         let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
         _ = try? context.execute(deleteReq)
-        
         context.delete(playlist)
         try? context.save()
         self.objectWillChange.send()
@@ -82,7 +82,6 @@ class PrimeFlixRepository: ObservableObject {
         
         self.syncStatusMessage = "Connecting..."
         
-        // Clean old data for this playlist
         await container.performBackgroundTask { context in
             let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
             fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlistUrl)
@@ -91,72 +90,27 @@ class PrimeFlixRepository: ObservableObject {
             try? context.save()
         }
         
-        var channels: [ChannelStruct] = []
-        var hasAnySuccess = false
-        
         do {
             if source == .xtream {
                 let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
                 
-                // Live
-                self.syncStatusMessage = "Fetching Live..."
+                // 1. Try Fast Sync (Bulk)
                 do {
-                    let live = try await xtreamClient.getLiveStreams(input: input)
-                    channels += live.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
-                    hasAnySuccess = true
+                    try await syncXtreamBulk(input: input, playlistUrl: playlistUrl)
                 } catch {
-                    print("⚠️ Live Skipped: \(error.localizedDescription)")
-                }
-                
-                // VOD
-                self.syncStatusMessage = "Fetching Movies..."
-                do {
-                    let vod = try await xtreamClient.getVodStreams(input: input)
-                    channels += vod.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
-                    hasAnySuccess = true
-                } catch {
-                    print("⚠️ VOD Skipped: \(error.localizedDescription)")
-                }
-                
-                // Series
-                self.syncStatusMessage = "Fetching Series..."
-                do {
-                    let series = try await xtreamClient.getSeries(input: input)
-                    channels += series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) }
-                    hasAnySuccess = true
-                } catch {
-                     print("⚠️ Series Skipped: \(error.localizedDescription)")
-                }
-                
-                // If EVERYTHING failed, we force a hard error by trying one call again
-                if !hasAnySuccess {
-                    _ = try await xtreamClient.getLiveStreams(input: input)
+                    // Check for Firewall/Rate Limit Errors
+                    if let xErr = error as? XtreamError, case .invalidResponse(let code, _) = xErr, [512, 513, 504].contains(code) {
+                        print("⚠️ Bulk Sync Failed (\(code)). Switching to Deep Sync (Safe Mode)...")
+                        self.syncStatusMessage = "Switching to Deep Sync..."
+                        // 2. Fallback to Slow Sync (Categories)
+                        try await syncXtreamByCategories(input: input, playlistUrl: playlistUrl)
+                    } else {
+                        throw error
+                    }
                 }
                 
             } else if source == .m3u {
-                self.syncStatusMessage = "Downloading M3U..."
-                guard let url = URL(string: playlistUrl) else { throw URLError(.badURL) }
-                let (data, response) = try await UnsafeSession.shared.data(from: url)
-                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                    throw URLError(.badServerResponse)
-                }
-                if let content = String(data: data, encoding: .utf8) {
-                    self.syncStatusMessage = "Parsing..."
-                    channels = await M3UParser.parse(content: content, playlistUrl: playlistUrl)
-                }
-            }
-            
-            self.syncStatusMessage = "Saving \(channels.count) items..."
-            if !channels.isEmpty {
-                await container.performBackgroundTask { context in
-                    context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
-                    for (index, item) in channels.enumerated() {
-                        _ = item.toManagedObject(context: context)
-                        if index % 2000 == 0 { try? context.save() }
-                    }
-                    try? context.save()
-                }
-                await MainActor.run { self.objectWillChange.send() }
+                try await syncM3U(playlistUrl: playlistUrl)
             }
             
             if !isAutoSync {
@@ -171,23 +125,107 @@ class PrimeFlixRepository: ObservableObject {
             print("❌ Sync Failed: \(error)")
             self.isErrorState = true
             self.isSyncing = false
-            
-            // Show the user WHY it failed
-            if let xError = error as? XtreamError {
-                self.syncStatusMessage = xError.errorDescription
-            } else if let urlError = error as? URLError {
-                self.syncStatusMessage = "Net Error: \(urlError.localizedDescription)"
-            } else {
-                self.syncStatusMessage = "Error: \(error.localizedDescription)"
-            }
-            
+            self.syncStatusMessage = (error as? XtreamError)?.errorDescription ?? error.localizedDescription
             try? await Task.sleep(nanoseconds: 6 * 1_000_000_000)
             self.syncStatusMessage = nil
             self.isErrorState = false
         }
     }
     
-    // MARK: - Accessors
+    // MARK: - Xtream Bulk Strategy (Fast)
+    private func syncXtreamBulk(input: XtreamInput, playlistUrl: String) async throws {
+        self.syncStatusMessage = "Fetching Live..."
+        let live = try await xtreamClient.getLiveStreams(input: input)
+        await saveBatch(items: live.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) })
+        
+        self.syncStatusMessage = "Fetching Movies..."
+        let vod = try await xtreamClient.getVodStreams(input: input)
+        await saveBatch(items: vod.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) })
+        
+        self.syncStatusMessage = "Fetching Series..."
+        let series = try await xtreamClient.getSeries(input: input)
+        await saveBatch(items: series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) })
+    }
+    
+    // MARK: - Xtream Category Strategy (Safe/Deep)
+    private func syncXtreamByCategories(input: XtreamInput, playlistUrl: String) async throws {
+        
+        // 1. Deep Sync Live
+        self.syncStatusMessage = "Fetching Categories..."
+        let liveCats = try await xtreamClient.getLiveCategories(input: input)
+        
+        for (index, cat) in liveCats.enumerated() {
+            let status = "Live: \(cat.categoryName) (\(index + 1)/\(liveCats.count))"
+            self.syncStatusMessage = status
+            
+            do {
+                let streams = try await xtreamClient.getLiveStreams(input: input, categoryId: cat.categoryId)
+                if !streams.isEmpty {
+                    await saveBatch(items: streams.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) })
+                }
+                // 0.5s delay to be safe against 513 errors
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            } catch {
+                print("⚠️ Failed category \(cat.categoryName): \(error.localizedDescription)")
+            }
+        }
+        
+        // 2. Deep Sync VOD
+        self.syncStatusMessage = "Fetching Movie Categories..."
+        let vodCats = try await xtreamClient.getVodCategories(input: input)
+        
+        for (index, cat) in vodCats.enumerated() {
+            let status = "Mov: \(cat.categoryName) (\(index + 1)/\(vodCats.count))"
+            self.syncStatusMessage = status
+            
+            do {
+                let streams = try await xtreamClient.getVodStreams(input: input, categoryId: cat.categoryId)
+                if !streams.isEmpty {
+                    await saveBatch(items: streams.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) })
+                }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            } catch {
+                print("⚠️ Failed category \(cat.categoryName): \(error.localizedDescription)")
+            }
+        }
+        
+        // 3. Series
+        self.syncStatusMessage = "Fetching Series..."
+        do {
+            let series = try await xtreamClient.getSeries(input: input)
+            await saveBatch(items: series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) })
+        } catch {
+            print("⚠️ Series Bulk failed in Deep Sync. Skipping Series.")
+        }
+    }
+    
+    private func syncM3U(playlistUrl: String) async throws {
+        self.syncStatusMessage = "Downloading M3U..."
+        guard let url = URL(string: playlistUrl) else { throw URLError(.badURL) }
+        let (data, response) = try await UnsafeSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        if let content = String(data: data, encoding: .utf8) {
+            self.syncStatusMessage = "Parsing..."
+            let channels = await M3UParser.parse(content: content, playlistUrl: playlistUrl)
+            await saveBatch(items: channels)
+        }
+    }
+    
+    private func saveBatch(items: [ChannelStruct]) async {
+        guard !items.isEmpty else { return }
+        await container.performBackgroundTask { context in
+            context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+            for item in items {
+                _ = item.toManagedObject(context: context)
+            }
+            try? context.save()
+        }
+        await MainActor.run { self.objectWillChange.send() }
+    }
+    
+    // MARK: - Accessors (Unchanged)
     func getGroups(playlistUrl: String, type: StreamType) -> [String] {
         return channelRepo.getGroups(playlistUrl: playlistUrl, type: type.rawValue)
     }

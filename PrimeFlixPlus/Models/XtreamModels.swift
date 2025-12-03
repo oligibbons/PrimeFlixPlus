@@ -2,25 +2,15 @@ import Foundation
 
 // MARK: - Helper Extension
 private extension KeyedDecodingContainer {
-    /// Tries to decode an Int, then a String (converting to Int). Returns 0 if both fail.
     func decodeFlexibleInt(forKey key: K) -> Int {
-        if let intVal = try? decode(Int.self, forKey: key) {
-            return intVal
-        }
-        if let strVal = try? decode(String.self, forKey: key), let intVal = Int(strVal) {
-            return intVal
-        }
+        if let intVal = try? decode(Int.self, forKey: key) { return intVal }
+        if let strVal = try? decode(String.self, forKey: key), let intVal = Int(strVal) { return intVal }
         return 0
     }
     
-    /// Tries to decode a String, then an Int (converting to String). Returns nil if both fail.
     func decodeFlexibleString(forKey key: K) -> String? {
-        if let strVal = try? decode(String.self, forKey: key) {
-            return strVal
-        }
-        if let intVal = try? decode(Int.self, forKey: key) {
-            return String(intVal)
-        }
+        if let strVal = try? decode(String.self, forKey: key) { return strVal }
+        if let intVal = try? decode(Int.self, forKey: key) { return String(intVal) }
         return nil
     }
 }
@@ -50,7 +40,6 @@ struct XtreamCategory: Codable, Identifiable {
 // MARK: - Channel Info Namespace
 struct XtreamChannelInfo {
     
-    /// Live TV Stream Metadata
     struct LiveStream: Codable, Identifiable {
         let streamId: Int
         let name: String?
@@ -78,7 +67,6 @@ struct XtreamChannelInfo {
         }
     }
     
-    /// Video On Demand (Movie) Metadata
     struct VodStream: Codable, Identifiable {
         let streamId: Int
         let name: String?
@@ -109,7 +97,6 @@ struct XtreamChannelInfo {
         }
     }
     
-    /// Series Metadata
     struct Series: Codable, Identifiable {
         let seriesId: Int
         let name: String?
@@ -137,7 +124,6 @@ struct XtreamChannelInfo {
         }
     }
     
-    /// Container to handle the nested "episodes" map in JSON
     struct SeriesInfoContainer: Codable {
         let episodes: [String: [Episode]]
         
@@ -147,7 +133,6 @@ struct XtreamChannelInfo {
         }
     }
     
-    /// Individual Episode Metadata
     struct Episode: Codable, Identifiable {
         let id: String
         let title: String?
@@ -165,13 +150,11 @@ struct XtreamChannelInfo {
         
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            // Robust ID for Episode
             if let intId = try? container.decode(Int.self, forKey: .id) {
                 id = String(intId)
             } else {
                 id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
             }
-            
             title = try container.decodeIfPresent(String.self, forKey: .title)
             containerExtension = try container.decodeIfPresent(String.self, forKey: .containerExtension) ?? "mp4"
             season = container.decodeFlexibleInt(forKey: .season)

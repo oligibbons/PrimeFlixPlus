@@ -8,10 +8,10 @@ class UnsafeSession: NSObject, URLSessionDelegate {
         configuration.timeoutIntervalForRequest = 300 // 5 minutes
         configuration.timeoutIntervalForResource = 600 // 10 minutes
         
-        // CRITICAL FIX: Use VLC User-Agent to match PlayerViewModel
-        configuration.httpAdditionalHeaders = [
-            "User-Agent": "VLC/3.0.16 LibVLC/3.0.16"
-        ]
+        // FIX: Removed global User-Agent header.
+        // We now let the individual Clients (XtreamClient / AVPlayer) handle this
+        // dynamically to support rotation and specific requirements.
+        configuration.httpAdditionalHeaders = nil
         
         // Keep the delegate to bypass SSL errors
         return URLSession(configuration: configuration, delegate: UnsafeSession(), delegateQueue: nil)
