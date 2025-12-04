@@ -128,8 +128,9 @@ struct DetailsView: View {
                         HStack(spacing: 20) {
                             // Play/Resume
                             Button(action: {
-                                if let target = viewModel.selectedVersion {
-                                    onPlay(target)
+                                // THE FIX: Call the Smart Target logic!
+                                if let playable = viewModel.getSmartPlayTarget() {
+                                    onPlay(playable)
                                 }
                             }) {
                                 HStack {

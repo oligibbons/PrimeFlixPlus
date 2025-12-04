@@ -20,7 +20,7 @@ class DetailsViewModel: ObservableObject {
     
     // --- Intelligent Versioning ---
     @Published var availableVersions: [Channel] = []
-    @Published var selectedVersion: Channel? // The actual file to play
+    @Published var selectedVersion: Channel? // The actual file (or Series parent)
     @Published var showVersionSelector: Bool = false
     
     // --- Resume Logic ---
@@ -35,10 +35,13 @@ class DetailsViewModel: ObservableObject {
     @Published var selectedSeason: Int = 1
     @Published var displayedEpisodes: [MergedEpisode] = []
     
+    // CRITICAL: Maps "S01E01" -> "PlaylistURL" to recover credentials for playback
+    private var episodeSourceMap: [String: String] = [:]
+    
     private let tmdbClient = TmdbClient()
     private let xtreamClient = XtreamClient()
     private var repository: PrimeFlixRepository?
-    private let settings = SettingsViewModel() // To access preferences
+    private let settings = SettingsViewModel()
     
     struct MergedEpisode: Identifiable {
         let id: String
@@ -47,7 +50,7 @@ class DetailsViewModel: ObservableObject {
         let overview: String
         let imageUrl: URL?
         let streamInfo: XtreamChannelInfo.Episode
-        let sourcePlaylistUrl: String // CRITICAL: Knows which playlist this ep came from
+        let sourcePlaylistUrl: String
         let isWatched: Bool
     }
     
@@ -73,7 +76,6 @@ class DetailsViewModel: ObservableObject {
         await fetchTmdbData()
         
         if channel.type == "series" {
-            // New Aggregation Logic
             await fetchAggregatedSeriesData()
         }
         
@@ -83,61 +85,109 @@ class DetailsViewModel: ObservableObject {
         self.isLoading = false
     }
     
+    // MARK: - Smart Playback Logic
+    
+    /// Determines exactly what file to play when the user hits "Play".
+    /// For Movies: Returns the movie file.
+    /// For Series: Returns the First Episode (S1E1) or the Resume Point.
+    func getSmartPlayTarget() -> Channel? {
+        // 1. Movies are simple: just play the file
+        if channel.type == "movie" {
+            return selectedVersion
+        }
+        
+        // 2. Series: We NEVER play the 'series://' URL. We must find an episode.
+        if channel.type == "series" {
+            // A. Sort all episodes to find the first one
+            let sorted = xtreamEpisodes.sorted {
+                if $0.season != $1.season { return $0.season < $1.season }
+                return $0.episodeNum < $1.episodeNum
+            }
+            
+            // B. TODO: Add Resume Logic here (find first unwatched)
+            // For now, default to S1 E1
+            if let firstEp = sorted.first {
+                return constructChannelForEpisode(firstEp)
+            }
+        }
+        
+        return nil
+    }
+    
+    /// Helper to build a temporary Channel object for a specific episode
+    private func constructChannelForEpisode(_ ep: XtreamChannelInfo.Episode) -> Channel? {
+        let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
+        guard let sourceUrl = episodeSourceMap[key] else { return nil }
+        
+        // Decode credentials from the specific playlist that provided this episode
+        let input = XtreamInput.decodeFromPlaylistUrl(sourceUrl)
+        
+        // 1. Strict Encoding for Credentials
+        // Special characters in passwords (e.g., "pass@word") break the URL path if not encoded.
+        let safeUser = input.username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? input.username
+        let safePass = input.password.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? input.password
+        
+        // 2. THE FIX: Force .m3u8 extension
+        // This tells the Xtream server to stream via HLS, which is native to Apple TV.
+        // It bypasses the MKV incompatibility and usually fixes 404 errors on the /series/ endpoint.
+        let streamUrl = "\(input.basicUrl)/series/\(safeUser)/\(safePass)/\(ep.id).m3u8"
+        
+        // Create Temp Core Data Object
+        let ch = Channel(context: channel.managedObjectContext!)
+        ch.url = streamUrl
+        ch.title = "\(channel.title) - S\(ep.season)E\(ep.episodeNum)"
+        ch.type = "series_episode" // Marker type
+        return ch
+    }
+    
+    // Only used when clicking a specific episode card
+    func createPlayableChannel(for episode: MergedEpisode) -> Channel {
+        return constructChannelForEpisode(episode.streamInfo) ?? channel
+    }
+    
     // MARK: - Smart Versioning
     
     private func fetchVersions() {
         guard let repo = repository else { return }
-        
-        // 1. Get all raw duplicates
         let rawVersions = repo.getVersions(for: channel)
         self.availableVersions = rawVersions
-        
-        // 2. Auto-Select Best Version based on Settings
         resolveBestVersion()
     }
     
     private func resolveBestVersion() {
         guard !availableVersions.isEmpty else { return }
-        
         let prefLang = settings.preferredLanguage.lowercased()
         let prefRes = settings.preferredResolution
         
-        // Score each candidate
         let sorted = availableVersions.sorted { c1, c2 in
             let i1 = TitleNormalizer.parse(rawTitle: c1.title)
             let i2 = TitleNormalizer.parse(rawTitle: c2.title)
+            var s1 = 0; var s2 = 0
             
-            var s1 = 0
-            var s2 = 0
-            
-            // Language Match (+1000)
             if let l1 = i1.language?.lowercased(), l1.contains(prefLang) { s1 += 1000 }
             if let l2 = i2.language?.lowercased(), l2.contains(prefLang) { s2 += 1000 }
-            
-            // Resolution Match (+500)
             if i1.quality == prefRes { s1 += 500 }
             if i2.quality == prefRes { s2 += 500 }
-            
-            // Fallback: Higher Resolution (+10 per pixel class)
             s1 += i1.qualityScore / 100
             s2 += i2.qualityScore / 100
-            
             return s1 > s2
         }
-        
         self.selectedVersion = sorted.first
     }
     
     func userSelectedVersion(_ channel: Channel) {
         self.selectedVersion = channel
         self.showVersionSelector = false
+        // Re-fetch series data if we switched versions (providers might differ)
+        if channel.type == "series" {
+            Task { await fetchAggregatedSeriesData() }
+        }
     }
     
     // MARK: - Watch History
     
     private func checkWatchHistory() {
         guard let repo = repository, let target = selectedVersion else { return }
-        
         let context = repo.container.viewContext
         let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
         request.predicate = NSPredicate(format: "channelUrl == %@", target.url)
@@ -150,9 +200,7 @@ class DetailsViewModel: ObservableObject {
                 self.resumeDuration = Double(progress.duration) / 1000.0
                 let pct = self.resumePosition / self.resumeDuration
                 self.hasWatchHistory = pct > 0.02 && pct < 0.95
-            } else {
-                self.hasWatchHistory = false
-            }
+            } else { self.hasWatchHistory = false }
         } catch { self.hasWatchHistory = false }
     }
     
@@ -174,7 +222,7 @@ class DetailsViewModel: ObservableObject {
                     handleDetailsLoaded(details)
                 }
             }
-        } catch { print("TMDB: \(error)") }
+        } catch { print("TMDB Error: \(error)") }
     }
     
     @MainActor
@@ -183,7 +231,6 @@ class DetailsViewModel: ObservableObject {
         if let bg = details.backdropPath {
             self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)")
         }
-        // Extract cast...
         if let agg = details.aggregateCredits?.cast { self.cast = agg.prefix(12).map { $0 } }
         else if let creds = details.credits?.cast { self.cast = creds.prefix(12).map { $0 } }
     }
@@ -191,39 +238,32 @@ class DetailsViewModel: ObservableObject {
     // MARK: - Aggregated Series Logic
     
     private func fetchAggregatedSeriesData() async {
-        // Stores tuples of (Episode, SourcePlaylistUrl)
         var allEpisodes: [(XtreamChannelInfo.Episode, String)] = []
         
-        // Loop through ALL grouped versions (S1, S2, 4K, etc.) to build a unified catalog
-        for version in availableVersions {
-            // Extract credentials from this specific version's playlist URL
+        let versionsToFetch = availableVersions.isEmpty ? [channel] : availableVersions
+        
+        for version in versionsToFetch {
             let input = XtreamInput.decodeFromPlaylistUrl(version.playlistUrl)
-            
-            // Extract the Xtream Series ID
             let seriesIdString = version.url.replacingOccurrences(of: "series://", with: "")
             guard let seriesId = Int(seriesIdString) else { continue }
             
             do {
                 let episodes = try await xtreamClient.getSeriesEpisodes(input: input, seriesId: seriesId)
-                // Attach the source playlist to each episode so we know where to play it from
-                let taggedEpisodes = episodes.map { ($0, version.playlistUrl) }
-                allEpisodes.append(contentsOf: taggedEpisodes)
+                let tagged = episodes.map { ($0, version.playlistUrl) }
+                allEpisodes.append(contentsOf: tagged)
             } catch {
-                print("Failed to fetch episodes for version: \(version.title)")
+                print("Failed episodes fetch: \(version.title)")
             }
         }
         
-        // Deduplicate Episodes (Keep best quality if duplicates exist)
-        // Key: "S01E01"
-        // Value: (Episode, SourceUrl)
+        // 2. Deduplicate & Populate Source Map
         var uniqueEpisodes: [String: (XtreamChannelInfo.Episode, String)] = [:]
         
         for (ep, source) in allEpisodes {
             let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
             
+            // Logic: Prefer MKV/Better extensions if duplicate
             if let existing = uniqueEpisodes[key] {
-                // If new one has a better container or seems like higher quality, swap it
-                // Simple heuristic: mkv > mp4
                 if ep.containerExtension == "mkv" && existing.0.containerExtension != "mkv" {
                     uniqueEpisodes[key] = (ep, source)
                 }
@@ -232,27 +272,25 @@ class DetailsViewModel: ObservableObject {
             }
         }
         
-        // Flatten back to struct
+        // 3. Save to State
         self.xtreamEpisodes = uniqueEpisodes.values.map { $0.0 }
         
-        // We store a map of ID -> Source for easy lookup during creation
-        // Ideally, MergedEpisode holds it.
+        // CRITICAL: Save the map so `constructChannelForEpisode` works!
+        self.episodeSourceMap = uniqueEpisodes.mapValues { $0.1 }
         
-        // Calculate Available Seasons
+        // 4. Update UI
         let allSeasons = Set(self.xtreamEpisodes.map { $0.season }).sorted()
         self.seasons = allSeasons.isEmpty ? [1] : allSeasons
         
-        // Default to Season 1 or first available
         if let first = self.seasons.first {
-            await selectSeason(first, episodeMap: uniqueEpisodes)
+            await selectSeason(first)
         }
     }
     
-    // Overloaded selectSeason to accept the map (internal helper)
-    private func selectSeason(_ season: Int, episodeMap: [String: (XtreamChannelInfo.Episode, String)]) async {
+    func selectSeason(_ season: Int) async {
         self.selectedSeason = season
         
-        // Fetch TMDB Season if missing
+        // Fetch TMDB Season Metadata
         if tmdbEpisodes[season] == nil, let tmdbId = tmdbDetails?.id {
             if let seasonDetails = try? await tmdbClient.getTvSeason(tvId: tmdbId, seasonNumber: season) {
                 tmdbEpisodes[season] = seasonDetails.episodes
@@ -268,16 +306,15 @@ class DetailsViewModel: ObservableObject {
             let tEp = tmdbForSeason.first(where: { $0.episodeNumber == xEp.episodeNum })
             let img = tEp?.stillPath.map { URL(string: "https://image.tmdb.org/t/p/w500\($0)")! }
             
-            // Find the source playlist URL for this episode
             let key = String(format: "S%02dE%02d", xEp.season, xEp.episodeNum)
-            let sourceUrl = episodeMap[key]?.1 ?? channel.playlistUrl // Fallback to main
+            let sourceUrl = episodeSourceMap[key] ?? channel.playlistUrl
             
             return MergedEpisode(
                 id: xEp.id,
                 number: xEp.episodeNum,
                 title: tEp?.name ?? xEp.title ?? "Episode \(xEp.episodeNum)",
                 overview: tEp?.overview ?? "",
-                imageUrl: img ?? nil,
+                imageUrl: img,
                 streamInfo: xEp,
                 sourcePlaylistUrl: sourceUrl,
                 isWatched: false
@@ -285,31 +322,8 @@ class DetailsViewModel: ObservableObject {
         }
     }
     
-    // Wrapper for public access if needed (re-generates map, slightly inefficient but safe)
-    func selectSeason(_ season: Int) async {
-        // This won't work well without the map.
-        // For this architecture, we assume `xtreamEpisodes` is already populated,
-        // but we lost the `sourcePlaylistUrl` mapping if we just use `xtreamEpisodes`.
-        // FIX: Let's make `displayedEpisodes` carry the data, so we don't need the map here.
-        // Actually, we only need to rebuild the display.
-        // We can iterate `availableVersions` again, or better:
-        // Let's assume `fetchAggregatedSeriesData` is called ONCE.
-        // We need to persist the Source URL mapping in the class.
-    }
-    
     func toggleFavorite() {
         repository?.toggleFavorite(channel)
         self.isFavorite.toggle()
-    }
-    
-    func createPlayableChannel(for episode: MergedEpisode) -> Channel {
-        // Use the specific source playlist URL for this episode
-        let input = XtreamInput.decodeFromPlaylistUrl(episode.sourcePlaylistUrl)
-        
-        let url = "\(input.basicUrl)/series/\(input.username)/\(input.password)/\(episode.streamInfo.id).\(episode.streamInfo.containerExtension)"
-        let ch = Channel(context: channel.managedObjectContext!)
-        ch.url = url
-        ch.title = "\(channel.title) - S\(selectedSeason)E\(episode.number)"
-        return ch
     }
 }

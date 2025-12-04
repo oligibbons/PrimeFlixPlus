@@ -8,81 +8,131 @@ class ChannelRepository {
         self.context = context
     }
     
+    // MARK: - Search Logic
+    
+    struct SearchResults {
+        let movies: [Channel]
+        let series: [Channel]
+        let liveChannels: [Channel]
+        let livePrograms: [Programme] // Programs matching the query
+    }
+    
+    func search(query: String) -> SearchResults {
+        guard !query.isEmpty else {
+            return SearchResults(movies: [], series: [], liveChannels: [], livePrograms: [])
+        }
+        
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // 1. Search Channels (Movies, Series, Live)
+        let channelReq = NSFetchRequest<Channel>(entityName: "Channel")
+        // Case-insensitive, diacritic-insensitive "CONTAINS"
+        channelReq.predicate = NSPredicate(format: "title CONTAINS[cd] %@", normalizedQuery)
+        // Limit to prevent UI lag on massive libraries
+        channelReq.fetchLimit = 50
+        
+        var movies: [Channel] = []
+        var series: [Channel] = []
+        var live: [Channel] = []
+        
+        if let channels = try? context.fetch(channelReq) {
+            for ch in channels {
+                switch ch.type {
+                case "movie": movies.append(ch)
+                case "series": series.append(ch)
+                case "live": live.append(ch)
+                default: break
+                }
+            }
+        }
+        
+        // 2. Search EPG (Live TV Guide)
+        // Find programs that match the query AND are On Air or Starting Soon
+        let epgReq = NSFetchRequest<Programme>(entityName: "Programme")
+        
+        let now = Date()
+        let oneHourLater = now.addingTimeInterval(3600)
+        
+        // Predicate:
+        // (Title matches query) AND
+        // (Ends AFTER now) AND (Starts BEFORE 1 hour from now)
+        epgReq.predicate = NSPredicate(
+            format: "title CONTAINS[cd] %@ AND end > %@ AND start < %@",
+            normalizedQuery, now as NSDate, oneHourLater as NSDate
+        )
+        epgReq.fetchLimit = 20
+        epgReq.sortDescriptors = [NSSortDescriptor(key: "start", ascending: true)]
+        
+        let programs = (try? context.fetch(epgReq)) ?? []
+        
+        // Deduplicate Series (Optional optimization)
+        let uniqueSeries = deduplicateChannels(series)
+        
+        return SearchResults(
+            movies: movies,
+            series: uniqueSeries,
+            liveChannels: live,
+            livePrograms: programs
+        )
+    }
+    
     // MARK: - Smart "Continue Watching" Logic
     
     /// Returns items partially watched (5-95%) or the NEXT episode if finished.
-    /// Filters out items not watched in the last 30 days.
     func getSmartContinueWatching(type: String) -> [Channel] {
         let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
         
-        // Rule: Watched in the last 30 days
         let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
         request.predicate = NSPredicate(format: "lastPlayed >= %@", thirtyDaysAgo as NSDate)
         
         request.sortDescriptors = [NSSortDescriptor(key: "lastPlayed", ascending: false)]
-        request.fetchLimit = 100 // Fetch a buffer to account for filtering
+        request.fetchLimit = 100
         
         guard let history = try? context.fetch(request) else { return [] }
         
         var results: [Channel] = []
-        var processedSeriesMap = [String: Bool]() // To avoid duplicates for same series
+        var processedSeriesMap = [String: Bool]()
         
         for item in history {
-            // Hard limit to 20 items for the UI
             if results.count >= 20 { break }
-            
-            // Get the actual channel for this history item
             guard let channel = getChannel(byUrl: item.channelUrl), channel.type == type else { continue }
             
             let percentage = Double(item.duration) > 0 ? Double(item.position) / Double(item.duration) : 0
             
             if channel.type == "movie" {
-                // Movies: Show if between 5% and 95% watched (Restored to 0.05)
                 if percentage > 0.05 && percentage < 0.95 {
                     results.append(channel)
                 }
             } else if channel.type == "series" {
-                // Series Logic
                 let info = TitleNormalizer.parse(rawTitle: channel.title)
-                let seriesKey = info.normalizedTitle // Group by show name
+                let seriesKey = info.normalizedTitle
                 
-                // If we already added this show to the "Continue" row, skip
                 if processedSeriesMap[seriesKey] == true { continue }
                 
                 if percentage < 0.95 {
-                    // Not finished? Resume this episode.
                     results.append(channel)
                     processedSeriesMap[seriesKey] = true
                 } else {
-                    // Finished? Find the NEXT episode.
                     if let nextEp = findNextEpisode(currentChannel: channel) {
                         results.append(nextEp)
                         processedSeriesMap[seriesKey] = true
                     }
                 }
             } else if channel.type == "live" {
-                // Live TV: Just show recently watched
                 results.append(channel)
             }
         }
-        
         return results
     }
     
-    /// Helper to find next episode (supports S01E01 and 1x01 formats)
     private func findNextEpisode(currentChannel: Channel) -> Channel? {
         let raw = currentChannel.title
-        
-        // 1. Try S01E05 format
         if let (s, e) = extractSeasonEpisode(from: raw, pattern: "(?i)(S)(\\d+)\\s*(E)(\\d+)") {
             return findNext(currentChannel: currentChannel, season: s, episode: e)
         }
-        
-        // 2. Try 1x05 format
         if let (s, e) = extractSeasonEpisode(from: raw, pattern: "(\\d+)x(\\d+)") {
             return findNext(currentChannel: currentChannel, season: s, episode: e)
         }
-        
         return nil
     }
     
@@ -93,7 +143,6 @@ class ChannelRepository {
         
         guard let match = results.first, match.numberOfRanges >= 3 else { return nil }
         
-        // Handle varying capture groups
         let sIndex = match.numberOfRanges == 5 ? 2 : 1
         let eIndex = match.numberOfRanges == 5 ? 4 : 2
         
@@ -107,11 +156,9 @@ class ChannelRepository {
     }
     
     private func findNext(currentChannel: Channel, season: Int, episode: Int) -> Channel? {
-        // Try Next Episode in Season
         if let next = findEpisodeVariant(original: currentChannel, season: season, episode: episode + 1) {
             return next
         }
-        // Try First Episode of Next Season
         if let nextSeason = findEpisodeVariant(original: currentChannel, season: season + 1, episode: 1) {
             return nextSeason
         }
@@ -122,10 +169,8 @@ class ChannelRepository {
         let req = NSFetchRequest<Channel>(entityName: "Channel")
         let sPadded = String(format: "%02d", season)
         let ePadded = String(format: "%02d", episode)
-        
         let info = TitleNormalizer.parse(rawTitle: original.title)
         
-        // Predicate: Same Playlist, Same Type, Title contains Normalized Name
         req.predicate = NSPredicate(
             format: "playlistUrl == %@ AND type == 'series' AND title CONTAINS[cd] %@",
             original.playlistUrl, info.normalizedTitle
@@ -133,10 +178,8 @@ class ChannelRepository {
         
         guard let candidates = try? context.fetch(req) else { return nil }
         
-        // Manual filter for strict Season/Episode match to avoid false positives
         return candidates.first { ch in
             let title = ch.title.uppercased()
-            // Check variations: S01E02, S1E2, 1x02
             return title.contains("S\(sPadded)E\(ePadded)") ||
                    title.contains("S\(season)E\(episode)") ||
                    title.contains("\(season)X\(ePadded)")
@@ -145,7 +188,6 @@ class ChannelRepository {
     
     // MARK: - Smart Categorization
     
-    /// Get Favorites filtered by Type
     func getFavorites(type: String) -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "isFavorite == YES AND type == %@", type)
@@ -153,7 +195,6 @@ class ChannelRepository {
         return (try? context.fetch(request)) ?? []
     }
     
-    /// Get Recently Added (Strict last 7 days)
     func getRecentlyAdded(type: String, limit: Int) -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         let sevenDaysAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
@@ -166,7 +207,6 @@ class ChannelRepository {
         return deduplicateChannels(raw)
     }
     
-    /// Fallback for Recently Added (Just the latest N items, regardless of date)
     func getRecentFallback(type: String, limit: Int) -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "type == %@", type)
@@ -177,7 +217,6 @@ class ChannelRepository {
         return deduplicateChannels(raw)
     }
     
-    /// Get items by specific Xtream Group Name (Smart Genres)
     func getByGenre(type: String, groupName: String, limit: Int) -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "type == %@ AND group CONTAINS[cd] %@", type, groupName)
@@ -188,16 +227,14 @@ class ChannelRepository {
         return deduplicateChannels(raw)
     }
     
-    /// Find local channels that match a list of TMDB Titles
     func getTrendingMatches(type: String, tmdbResults: [String]) -> [Channel] {
         var matches: [Channel] = []
         var seenTitles = Set<String>()
         
         for title in tmdbResults {
             let req = NSFetchRequest<Channel>(entityName: "Channel")
-            // Fuzzy match: Database title CONTAINS TMDB title
             req.predicate = NSPredicate(format: "type == %@ AND title CONTAINS[cd] %@", type, title)
-            req.fetchLimit = 1 // Just need one match per trending item
+            req.fetchLimit = 1
             
             if let match = try? context.fetch(req).first {
                 let norm = TitleNormalizer.parse(rawTitle: match.title).normalizedTitle
@@ -210,7 +247,7 @@ class ChannelRepository {
         return matches
     }
     
-    // MARK: - Basic Fetching & Helpers
+    // MARK: - Basic Fetching
     
     func getChannel(byUrl url: String) -> Channel? {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
@@ -219,12 +256,20 @@ class ChannelRepository {
         return try? context.fetch(request).first
     }
     
+    func getChannel(byId channelId: String) -> Channel? {
+        // Helper to find a Channel based on its Stream ID (used for EPG mapping)
+        // This is heuristic because Channel Entity doesn't explicitly store ID separate from URL.
+        // We assume the URL contains the ID.
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
+        request.predicate = NSPredicate(format: "url CONTAINS[cd] '/' + %@ + '.'", channelId)
+        request.fetchLimit = 1
+        return try? context.fetch(request).first
+    }
+    
     func toggleFavorite(channel: Channel) {
         channel.isFavorite.toggle()
         saveContext()
     }
-    
-    // MARK: - Versioning & Deduplication
     
     func getVersions(for channel: Channel) -> [Channel] {
         let info = TitleNormalizer.parse(rawTitle: channel.title)
@@ -239,22 +284,18 @@ class ChannelRepository {
             let candidateInfo = TitleNormalizer.parse(rawTitle: candidate.title)
             return candidateInfo.normalizedTitle.lowercased() == targetTitle
         }
-        
         return variants.isEmpty ? [channel] : variants
     }
     
     func getBrowsingContent(playlistUrl: String, type: String, group: String) -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
-        
         var predicates = [
             NSPredicate(format: "playlistUrl == %@", playlistUrl),
             NSPredicate(format: "type == %@", type)
         ]
-        
         if group != "All" {
             predicates.append(NSPredicate(format: "group == %@", group))
         }
-        
         request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
         
@@ -270,19 +311,16 @@ class ChannelRepository {
         request.returnsDistinctResults = true
         
         guard let results = try? context.fetch(request) as? [[String: Any]] else { return [] }
-        
         let groups = results.compactMap { $0["group"] as? String }
         return Array(Set(groups)).sorted()
     }
     
-    // Legacy / General Favorites getter
     func getFavorites() -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "isFavorite == YES")
         return (try? context.fetch(request)) ?? []
     }
     
-    // Added for passthrough compatibility if needed elsewhere
     func getRecentAdded(playlistUrl: String, type: String) -> [Channel] {
         return getRecentFallback(type: type, limit: 20)
     }
@@ -292,7 +330,6 @@ class ChannelRepository {
         for channel in channels {
             let info = TitleNormalizer.parse(rawTitle: channel.title)
             let key = info.normalizedTitle.lowercased()
-            // If we haven't seen this show yet, add it.
             if uniqueMap[key] == nil {
                 uniqueMap[key] = channel
             }
@@ -301,8 +338,6 @@ class ChannelRepository {
     }
     
     private func saveContext() {
-        if context.hasChanges {
-            try? context.save()
-        }
+        if context.hasChanges { try? context.save() }
     }
 }

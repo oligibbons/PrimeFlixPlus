@@ -46,6 +46,8 @@
 		D292D6802EDF56AF00E8845A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D67F2EDF56AF00E8845A /* SettingsView.swift */; };
 		D292D6822EDF573F00E8845A /* PlayerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6812EDF573F00E8845A /* PlayerViewModel.swift */; };
 		D292D6842EDF576500E8845A /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6832EDF576500E8845A /* PlayerView.swift */; };
+		D2AC8AF62EE0ADE900D440C3 /* SearchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8AF52EE0ADE900D440C3 /* SearchViewModel.swift */; };
+		D2AC8AF82EE0AE0E00D440C3 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8AF72EE0AE0E00D440C3 /* SearchView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -110,6 +112,8 @@
 		D292D67F2EDF56AF00E8845A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		D292D6812EDF573F00E8845A /* PlayerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerViewModel.swift; sourceTree = "<group>"; };
 		D292D6832EDF576500E8845A /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
+		D2AC8AF52EE0ADE900D440C3 /* SearchViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewModel.swift; sourceTree = "<group>"; };
+		D2AC8AF72EE0AE0E00D440C3 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -256,6 +260,7 @@
 				D292D6812EDF573F00E8845A /* PlayerViewModel.swift */,
 				D228AD102EDF6682007C6114 /* AddPlaylistViewModel.swift */,
 				D228AD1C2EDFA8E3007C6114 /* DetailsViewModel.swift */,
+				D2AC8AF52EE0ADE900D440C3 /* SearchViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -279,6 +284,7 @@
 				D228AD142EDF67FB007C6114 /* NeonTextField.swift */,
 				D228AD162EDF7311007C6114 /* SyncStatusOverlay.swift */,
 				D228AD1E2EDFA961007C6114 /* DetailsView.swift */,
+				D2AC8AF72EE0AE0E00D440C3 /* SearchView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -414,6 +420,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D292D6722EDF4B7B00E8845A /* HomeViewModel.swift in Sources */,
+				D2AC8AF62EE0ADE900D440C3 /* SearchViewModel.swift in Sources */,
 				D292D6802EDF56AF00E8845A /* SettingsView.swift in Sources */,
 				D228AD132EDF66A3007C6114 /* AddPlaylistView.swift in Sources */,
 				D292D6772EDF4C3300E8845A /* HomeComponents.swift in Sources */,
@@ -440,6 +447,7 @@
 				D292D6692EDF4A4600E8845A /* M3UData.swift in Sources */,
 				D292D67C2EDF4D9E00E8845A /* HomeView.swift in Sources */,
 				D292D6272EDF458100E8845A /* PrimeFlixPlusApp.swift in Sources */,
+				D2AC8AF82EE0AE0E00D440C3 /* SearchView.swift in Sources */,
 				D292D6582EDF46CF00E8845A /* Playlist.swift in Sources */,
 				D292D65E2EDF47D500E8845A /* TitleNormalizer.swift in Sources */,
 				D228AD1D2EDFA8E3007C6114 /* DetailsViewModel.swift in Sources */,

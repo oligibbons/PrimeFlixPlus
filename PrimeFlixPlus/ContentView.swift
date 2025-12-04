@@ -1,8 +1,9 @@
 import SwiftUI
 
-// A simple state machine for navigation without NavigationView overhead
+// Navigation State
 enum NavigationDestination: Equatable {
     case home
+    case search
     case details(Channel)
     case player(Channel)
     case settings
@@ -11,6 +12,7 @@ enum NavigationDestination: Equatable {
     static func == (lhs: NavigationDestination, rhs: NavigationDestination) -> Bool {
         switch (lhs, rhs) {
         case (.home, .home): return true
+        case (.search, .search): return true
         case (.settings, .settings): return true
         case (.addPlaylist, .addPlaylist): return true
         case (.player(let c1), .player(let c2)): return c1.url == c2.url
@@ -22,6 +24,8 @@ enum NavigationDestination: Equatable {
 
 struct ContentView: View {
     @State private var currentDestination: NavigationDestination = .home
+    @State private var navigationStack: [NavigationDestination] = []
+    
     @EnvironmentObject var repository: PrimeFlixRepository
     
     var body: some View {
@@ -31,28 +35,31 @@ struct ContentView: View {
             case .home:
                 HomeView(
                     onPlayChannel: { channel in
-                        if channel.type == "live" {
-                            // Live TV goes straight to player
-                            currentDestination = .player(channel)
-                        } else {
-                            // Movies/Series go to Details Page
-                            currentDestination = .details(channel)
-                        }
+                        navigateToContent(channel)
                     },
-                    onAddPlaylist: { currentDestination = .addPlaylist },
-                    onSettings: { currentDestination = .settings }
+                    onAddPlaylist: { navigate(to: .addPlaylist) },
+                    onSettings: { navigate(to: .settings) },
+                    onSearch: { navigate(to: .search) }
                 )
                 .transition(.opacity)
+                
+            case .search:
+                SearchView(
+                    onPlay: { channel in
+                        navigateToContent(channel)
+                    }
+                )
+                .transition(.move(edge: .top))
                 
             case .details(let channel):
                 DetailsView(
                     channel: channel,
                     onPlay: { playableChannel in
-                        // Navigate to player with the specific file/episode
-                        currentDestination = .player(playableChannel)
+                        // Player is transient; we don't stack it usually, but let's just go direct
+                        navigate(to: .player(playableChannel))
                     },
                     onBack: {
-                        currentDestination = .home
+                        goBack()
                     }
                 )
                 .transition(.move(edge: .trailing))
@@ -61,27 +68,62 @@ struct ContentView: View {
                 PlayerView(
                     channel: channel,
                     onBack: {
-                        // When player exits:
-                        // If it was a live channel, go Home.
-                        // If it was a VOD/Series, we *could* go back to Details,
-                        // but for now going Home is a safe default to avoid state complexity.
-                        currentDestination = .home
+                        // When exiting player, pop back to previous (Details or Home/Search)
+                        goBack()
                     }
                 )
                 .transition(.move(edge: .bottom))
                 
             case .settings:
-                SettingsView(onBack: { currentDestination = .home })
+                SettingsView(onBack: { goBack() })
                     .transition(.move(edge: .trailing))
                 
             case .addPlaylist:
                 AddPlaylistView(
-                    onPlaylistAdded: { currentDestination = .home },
-                    onBack: { currentDestination = .home }
+                    onPlaylistAdded: {
+                        // Reset stack on major state change
+                        navigationStack.removeAll()
+                        currentDestination = .home
+                    },
+                    onBack: { goBack() }
                 )
                 .transition(.move(edge: .trailing))
             }
         }
         .animation(.easeInOut(duration: 0.35), value: currentDestination)
+        // Handle physical Menu button on Apple TV Remote to go back
+        .onExitCommand {
+            if currentDestination != .home {
+                goBack()
+            }
+        }
+    }
+    
+    // MARK: - Navigation Helpers
+    
+    private func navigate(to destination: NavigationDestination) {
+        // Don't stack if we are just swapping tabs or redundant clicks
+        if currentDestination == destination { return }
+        
+        // Push current to stack
+        navigationStack.append(currentDestination)
+        currentDestination = destination
+    }
+    
+    private func goBack() {
+        if let previous = navigationStack.popLast() {
+            currentDestination = previous
+        } else {
+            // Default fallback
+            currentDestination = .home
+        }
+    }
+    
+    private func navigateToContent(_ channel: Channel) {
+        if channel.type == "live" {
+            navigate(to: .player(channel))
+        } else {
+            navigate(to: .details(channel))
+        }
     }
 }

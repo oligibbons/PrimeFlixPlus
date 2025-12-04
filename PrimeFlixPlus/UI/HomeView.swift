@@ -7,6 +7,7 @@ struct HomeView: View {
     var onPlayChannel: (Channel) -> Void
     var onAddPlaylist: () -> Void
     var onSettings: () -> Void
+    var onSearch: () -> Void // New Callback
     
     @FocusState private var focusedSectionId: UUID?
     @FocusState private var isTabFocused: Bool
@@ -56,11 +57,24 @@ struct HomeView: View {
                 
                 Spacer()
                 
-                // Settings
-                Button(action: onSettings) {
-                    Image(systemName: "gearshape")
+                // Header Actions
+                HStack(spacing: 20) {
+                    // Search Button
+                    Button(action: onSearch) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.headline)
+                            .padding(10)
+                    }
+                    .buttonStyle(.card) // Circle/Card style for focus
+                    
+                    // Settings Button
+                    Button(action: onSettings) {
+                        Image(systemName: "gearshape")
+                            .font(.headline)
+                            .padding(10)
+                    }
+                    .buttonStyle(.card)
                 }
-                .buttonStyle(.plain)
             }
             .padding(.top, 20)
             .padding(.horizontal, 60)
@@ -101,7 +115,6 @@ struct HomeView: View {
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     LazyHStack(spacing: 40) {
                                         ForEach(section.items) { channel in
-                                            // FIX: Extracted view logic to prevent compiler hang
                                             cardView(for: channel, sectionType: section.type)
                                         }
                                     }
