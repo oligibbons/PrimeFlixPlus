@@ -1,7 +1,6 @@
 import SwiftUI
 
 // Navigation State
-// FIXED: Added Hashable conformance to satisfy Sidebar focus requirements
 enum NavigationDestination: Hashable {
     case home
     case search
@@ -10,7 +9,6 @@ enum NavigationDestination: Hashable {
     case settings
     case addPlaylist
     
-    // Explicit Equatable Logic (Keep logic strictly on URLs for channels)
     static func == (lhs: NavigationDestination, rhs: NavigationDestination) -> Bool {
         switch (lhs, rhs) {
         case (.home, .home): return true
@@ -23,14 +21,13 @@ enum NavigationDestination: Hashable {
         }
     }
     
-    // Explicit Hashable Logic (CRITICAL FIX)
     func hash(into hasher: inout Hasher) {
         switch self {
         case .home: hasher.combine(0)
         case .search: hasher.combine(1)
         case .details(let c):
             hasher.combine(2)
-            hasher.combine(c.url) // Hash the URL to match Equatable logic
+            hasher.combine(c.url)
         case .player(let c):
             hasher.combine(3)
             hasher.combine(c.url)
@@ -46,9 +43,6 @@ struct ContentView: View {
     
     @EnvironmentObject var repository: PrimeFlixRepository
     
-    // Focus state to manage interaction between sidebar and content
-    @FocusState private var isSidebarFocused: Bool
-    
     var body: some View {
         ZStack {
             // 1. Global Cinematic Background
@@ -59,7 +53,6 @@ struct ContentView: View {
             HStack(spacing: 0) {
                 
                 // LEFT: Glassmorphic Sidebar
-                // We hide the sidebar in Player mode for full immersion
                 if !isPlayerMode {
                     SidebarView(currentSelection: $currentDestination)
                         .zIndex(2)
@@ -86,7 +79,6 @@ struct ContentView: View {
                         DetailsView(
                             channel: channel,
                             onPlay: { playable in
-                                // Push to stack so we can return to Details
                                 navigate(to: .player(playable))
                             },
                             onBack: { goBack() }
@@ -112,11 +104,14 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // Use a subtle fade when switching main tabs, moves for details
                 .animation(.easeInOut(duration: 0.35), value: currentDestination)
+                // MARK: - CRITICAL FIX
+                // Marking the content area as a focus section ensures that when the user
+                // returns to it from the Sidebar, focus is restored to the last used item
+                // (e.g. returning to "Continue Watching" row instead of resetting to top).
+                .focusSection()
             }
         }
-        // Handle physical Menu button on Apple TV Remote
         .onExitCommand {
             if !navigationStack.isEmpty {
                 goBack()

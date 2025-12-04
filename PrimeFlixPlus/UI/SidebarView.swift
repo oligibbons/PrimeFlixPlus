@@ -21,14 +21,14 @@ struct SidebarView: View {
                 Image("CinemeltLogo")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 180, height: 100) // Larger logo
+                    .frame(width: 180, height: 100)
             }
             .frame(maxWidth: .infinity)
             .padding(.top, 50)
             .padding(.bottom, 40)
             
             // 2. Navigation Items
-            VStack(spacing: 20) { // Tighter spacing
+            VStack(spacing: 20) {
                 ForEach(menuItems, id: \.destination.hashValue) { item in
                     Button(action: {
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
@@ -65,7 +65,7 @@ struct SidebarView: View {
                             }
                         }
                         .padding(.vertical, 12)
-                        .padding(.horizontal, 16) // Tightened padding
+                        .padding(.horizontal, 16)
                         .background(
                             ZStack {
                                 if focusedItem == item.destination {
@@ -84,6 +84,11 @@ struct SidebarView: View {
                 }
             }
             .padding(.horizontal, 16)
+            // MARK: - CRITICAL FIX
+            // This creates a "Focus Group". When navigating out of this group (Right),
+            // tvOS will automatically find the best target in the next group (Content),
+            // regardless of specific vertical alignment.
+            .focusSection()
             
             Spacer()
             
@@ -94,13 +99,12 @@ struct SidebarView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 30)
         }
-        .frame(width: 280) // Slimmer width
+        .frame(width: 280)
         .background(
             Rectangle()
                 .fill(.ultraThinMaterial)
                 .ignoresSafeArea()
         )
         .zIndex(100)
-        .edgesIgnoringSafeArea(.vertical)
     }
 }

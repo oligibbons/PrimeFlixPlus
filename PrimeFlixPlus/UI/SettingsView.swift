@@ -72,25 +72,24 @@ struct SettingsView: View {
                             .cinemeltGlow()
                         
                         // Language Selector Card
-                        Button(action: { /* Handled via NavLink usually, simulating inline for now */ }) {
-                            NavigationLink(destination: LanguageSelectionView(viewModel: viewModel)) {
-                                HStack {
-                                    VStack(alignment: .leading) {
-                                        Text("Default Language")
-                                            .font(CinemeltTheme.fontBody(24))
-                                            .foregroundColor(CinemeltTheme.cream)
-                                        Text(viewModel.preferredLanguage)
-                                            .font(CinemeltTheme.fontBody(20))
-                                            .foregroundColor(CinemeltTheme.accent)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .foregroundColor(.gray)
+                        // Note: Using NavigationLink directly inside Button label or a wrapper for tvOS navigation
+                        NavigationLink(destination: LanguageSelectionView(viewModel: viewModel)) {
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text("Default Language")
+                                        .font(CinemeltTheme.fontBody(24))
+                                        .foregroundColor(CinemeltTheme.cream)
+                                    Text(viewModel.preferredLanguage)
+                                        .font(CinemeltTheme.fontBody(20))
+                                        .foregroundColor(CinemeltTheme.accent)
                                 }
-                                .padding(20)
-                                .background(Color.white.opacity(0.05))
-                                .cornerRadius(16)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.gray)
                             }
+                            .padding(20)
+                            .background(Color.white.opacity(0.05))
+                            .cornerRadius(16)
                         }
                         .buttonStyle(CinemeltCardButtonStyle())
                         

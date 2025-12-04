@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreData
 
 @main
 struct PrimeFlixPlusApp: App {
@@ -23,7 +24,7 @@ struct PrimeFlixPlusApp: App {
             ZStack {
                 if showSplash {
                     SplashView()
-                        .transition(.opacity.animation(.easeOut(duration: 0.8)))
+                        .transition(.opacity.animation(.easeOut(duration: 0.5)))
                         .zIndex(2)
                 } else {
                     ZStack {
@@ -37,23 +38,39 @@ struct PrimeFlixPlusApp: App {
                             .environmentObject(repository)
                             .zIndex(100)
                     }
-                    .transition(.opacity.animation(.easeIn(duration: 0.8)))
+                    .transition(.opacity.animation(.easeIn(duration: 0.5)))
                     .zIndex(1)
                 }
             }
             .onAppear {
-                // 4. App Launch Logic
-                Task {
-                    // Hold splash for 2.5 seconds for branding
-                    try? await Task.sleep(nanoseconds: 2_500_000_000)
-                    
-                    await MainActor.run {
-                        withAnimation {
-                            showSplash = false
-                        }
-                    }
-                    
-                    // Start background sync
+                handleLaunch()
+            }
+        }
+    }
+    
+    private func handleLaunch() {
+        // 1. Determine if we have existing content to show
+        let context = persistenceController.container.viewContext
+        let request = NSFetchRequest<NSFetchRequestResult>(entityName: "Playlist")
+        let hasPlaylists = (try? context.count(for: request)) ?? 0 > 0
+        
+        // 2. If we have content, dismiss splash quickly. If fresh install, hold slightly longer for branding.
+        let delay = hasPlaylists ? 1.0 : 2.5
+        
+        Task {
+            // Wait for branding
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            
+            await MainActor.run {
+                withAnimation {
+                    showSplash = false
+                }
+            }
+            
+            // 3. Trigger Background Sync (Fire and Forget)
+            // This runs in background priority and won't block the Main Thread or UI transitions
+            if hasPlaylists {
+                Task.detached(priority: .background) {
                     await repository.syncAll()
                 }
             }
