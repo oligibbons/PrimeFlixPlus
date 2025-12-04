@@ -12,7 +12,41 @@ struct ChannelStruct {
     let canonicalTitle: String?
     let quality: String?
     
-    /// Converts this struct into a live database object
+    // MARK: - High Performance Helpers
+    
+    /// Generates a hash to quickly compare if the content has changed without loading the object.
+    /// We combine Title and Group, as these are the main metadata fields that might update.
+    var contentHash: Int {
+        var hasher = Hasher()
+        hasher.combine(title)
+        hasher.combine(group)
+        // We generally ignore cover/quality updates for pure sync speed,
+        // unless you strictly need them updated every time.
+        return hasher.finalize()
+    }
+    
+    /// Converts struct to a Dictionary for NSBatchInsertRequest (Direct SQLite Write).
+    /// This bypasses the overhead of creating NSManagedObjects.
+    func toDictionary() -> [String: Any] {
+        var dict: [String: Any] = [
+            "url": url,
+            "playlistUrl": playlistUrl,
+            "title": title,
+            "group": group,
+            "type": type,
+            "addedAt": Date(),
+            "isFavorite": false // Default for new items
+        ]
+        
+        if let cover = cover { dict["cover"] = cover }
+        if let canonical = canonicalTitle { dict["canonicalTitle"] = canonical }
+        if let quality = quality { dict["quality"] = quality }
+        
+        return dict
+    }
+    
+    // MARK: - Legacy Factory Methods (Preserved)
+    
     func toManagedObject(context: NSManagedObjectContext) -> Channel {
         return Channel(
             context: context,
@@ -27,13 +61,9 @@ struct ChannelStruct {
         )
     }
     
-    // MARK: - Factory Methods
-    
     static func from(_ item: XtreamChannelInfo.LiveStream, playlistUrl: String, input: XtreamInput, categoryMap: [String: String]) -> ChannelStruct {
         let rawName = item.name ?? ""
         let info = TitleNormalizer.parse(rawTitle: rawName)
-        
-        // Resolve Category Name from ID, default to "Uncategorized" if missing
         let catId = item.categoryId ?? ""
         let groupName = categoryMap[catId] ?? "Uncategorized"
         
@@ -41,7 +71,7 @@ struct ChannelStruct {
             url: "\(input.basicUrl)/live/\(input.username)/\(input.password)/\(item.streamId).ts",
             playlistUrl: playlistUrl,
             title: info.normalizedTitle,
-            group: groupName, // SAVES REAL NAME NOW
+            group: groupName,
             cover: item.streamIcon,
             type: "live",
             canonicalTitle: rawName,
@@ -52,7 +82,6 @@ struct ChannelStruct {
     static func from(_ item: XtreamChannelInfo.VodStream, playlistUrl: String, input: XtreamInput, categoryMap: [String: String]) -> ChannelStruct {
         let rawName = item.name ?? ""
         let info = TitleNormalizer.parse(rawTitle: rawName)
-        
         let catId = item.categoryId ?? ""
         let groupName = categoryMap[catId] ?? "Movies"
         
@@ -71,7 +100,6 @@ struct ChannelStruct {
     static func from(_ item: XtreamChannelInfo.Series, playlistUrl: String, categoryMap: [String: String]) -> ChannelStruct {
         let rawName = item.name ?? ""
         let info = TitleNormalizer.parse(rawTitle: rawName)
-        
         let catId = item.categoryId ?? ""
         let groupName = categoryMap[catId] ?? "Series"
         

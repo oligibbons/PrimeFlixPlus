@@ -2,45 +2,66 @@ import Foundation
 
 class M3UParser {
     
-    // Optimized line-by-line parsing for memory efficiency
+    /// Parses M3U content in parallel to handle large (20k+) playlists instantly.
     static func parse(content: String, playlistUrl: String) async -> [ChannelStruct] {
-        var channels: [ChannelStruct] = []
-        // Pre-allocate to reduce array resizing overhead
-        channels.reserveCapacity(1000)
+        // 1. Split content into lines to prepare for parallel processing
+        // omittingEmptySubsequences is crucial for cleanup
+        let lines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
         
+        if lines.isEmpty { return [] }
+        
+        // 2. Determine Chunk Size for Parallelism
+        // For 20k items, ~2000 lines per chunk gives us ~10 parallel tasks, keeping all cores busy.
+        let totalLines = lines.count
+        let chunkSize = 2500
+        
+        return await withTaskGroup(of: [ChannelStruct].self) { group in
+            var startIndex = 0
+            
+            while startIndex < totalLines {
+                let endIndex = min(startIndex + chunkSize, totalLines)
+                let chunk = Array(lines[startIndex..<endIndex])
+                
+                // Spawn a background task for this chunk
+                group.addTask {
+                    return parseChunk(lines: chunk, playlistUrl: playlistUrl)
+                }
+                
+                startIndex = endIndex
+            }
+            
+            // 3. Aggregate Results
+            var allChannels: [ChannelStruct] = []
+            // Pre-allocate to avoid resizing overhead
+            allChannels.reserveCapacity(totalLines / 2)
+            
+            for await batch in group {
+                allChannels.append(contentsOf: batch)
+            }
+            
+            return allChannels
+        }
+    }
+    
+    // MARK: - Internal Chunk Logic
+    
+    /// Pure function running on background threads. No shared state.
+    private static func parseChunk(lines: [String], playlistUrl: String) -> [ChannelStruct] {
+        var channels: [ChannelStruct] = []
         var currentData: M3UData? = nil
         
-        // Use enumerateLines to avoid loading the entire string array into memory
-        content.enumerateLines { line, _ in
-            let l = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if l.isEmpty { return }
+        for line in lines {
+            let l = line.trimmingCharacters(in: .whitespaces)
             
             if l.hasPrefix("#EXTINF:") {
-                // Format: #EXTINF:-1 tvg-id=".." group-title="..",Channel Name
-                
-                // 1. Extract Title (Everything after the last comma)
-                var title = "Unknown Channel"
-                var metaPart = l
-                
-                if let lastCommaIndex = l.lastIndex(of: ",") {
-                    title = String(l[l.index(after: lastCommaIndex)...]).trimmingCharacters(in: .whitespaces)
-                    metaPart = String(l[..<lastCommaIndex])
-                }
-                
-                // 2. Extract Attributes
-                let group = extractAttribute(line: metaPart, key: "group-title") ?? "Uncategorized"
-                let logo = extractAttribute(line: metaPart, key: "tvg-logo")
-                let tvgId = extractAttribute(line: metaPart, key: "tvg-id")
-                
-                currentData = M3UData(title: title, url: "", group: group, logo: logo, tvgId: tvgId)
-                
+                // Parse Metadata
+                currentData = parseExtInf(line: l)
             } else if !l.hasPrefix("#") && currentData != nil {
-                // This line is the URL
-                let rawUrl = l
-                if let data = currentData {
-                    let channel = mapToStruct(data: data, streamUrl: rawUrl, playlistUrl: playlistUrl)
-                    channels.append(channel)
-                }
+                // Parse URL & Create Struct
+                // This triggers TitleNormalizer (Regex) which is CPU intensive,
+                // so running this in parallel chunks is a huge win.
+                let channel = mapToStruct(data: currentData!, streamUrl: l, playlistUrl: playlistUrl)
+                channels.append(channel)
                 currentData = nil
             }
         }
@@ -48,20 +69,43 @@ class M3UParser {
         return channels
     }
     
+    // MARK: - Helpers
+    
+    private static func parseExtInf(line: String) -> M3UData {
+        // Format: #EXTINF:-1 tvg-id=".." group-title="..",Channel Name
+        var title = "Unknown Channel"
+        var metaPart = line
+        
+        if let lastCommaIndex = line.lastIndex(of: ",") {
+            title = String(line[line.index(after: lastCommaIndex)...]).trimmingCharacters(in: .whitespaces)
+            metaPart = String(line[..<lastCommaIndex])
+        }
+        
+        let group = extractAttribute(line: metaPart, key: "group-title") ?? "Uncategorized"
+        let logo = extractAttribute(line: metaPart, key: "tvg-logo")
+        let tvgId = extractAttribute(line: metaPart, key: "tvg-id")
+        
+        return M3UData(title: title, url: "", group: group, logo: logo, tvgId: tvgId)
+    }
+    
     private static func extractAttribute(line: String, key: String) -> String? {
-        // 1. Try Quoted Value: key="value"
-        let keyStr = "\(key)=\""
-        if let range = line.range(of: keyStr) {
+        // Optimization: Quick check before regex/scanning
+        guard line.contains(key) else { return nil }
+        
+        // 1. Try Quoted: key="value"
+        let keyQuote = "\(key)=\""
+        if let range = line.range(of: keyQuote) {
             let substring = line[range.upperBound...]
-            if let endRange = substring.range(of: "\"") {
-                return String(substring[..<endRange.lowerBound])
+            if let endRange = substring.firstIndex(of: "\"") {
+                return String(substring[..<endRange])
             }
         }
         
-        // 2. Try Unquoted Value: key=value (Stop at space or comma)
+        // 2. Try Unquoted: key=value
         let keySimple = "\(key)="
         if let range = line.range(of: keySimple) {
             let substring = line[range.upperBound...]
+            // Stop at space or comma
             if let endRange = substring.rangeOfCharacter(from: CharacterSet(charactersIn: " ,")) {
                 return String(substring[..<endRange.lowerBound])
             } else {
@@ -74,9 +118,7 @@ class M3UParser {
     
     private static func mapToStruct(data: M3UData, streamUrl: String, playlistUrl: String) -> ChannelStruct {
         let rawTitle = data.title ?? "Unknown Channel"
-        
-        // Normalize Title using our optimized normalizer
-        let info = TitleNormalizer.parse(rawTitle: rawTitle)
+        let info = TitleNormalizer.parse(rawTitle: rawTitle) // CPU Heavy Step
         
         // Heuristic Type Detection
         let type: String
@@ -93,11 +135,11 @@ class M3UParser {
         return ChannelStruct(
             url: streamUrl,
             playlistUrl: playlistUrl,
-            title: info.normalizedTitle, // Display Clean Title
+            title: info.normalizedTitle,
             group: data.group ?? "Uncategorized",
             cover: data.logo,
             type: type,
-            canonicalTitle: rawTitle,    // Store Raw
+            canonicalTitle: rawTitle,
             quality: info.quality
         )
     }
