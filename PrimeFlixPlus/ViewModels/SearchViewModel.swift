@@ -99,8 +99,9 @@ class SearchViewModel: ObservableObject {
             guard let results = safeResults, !Task.isCancelled else { return }
             
             // 3. Update UI on Main Actor
-            await MainActor.run {
-                guard let self = self else { return }
+            // FIX: Explicitly capture [weak self] here to satisfy compiler safety checks for concurrent code
+            await MainActor.run { [weak self] in
+                guard let strongSelf = self else { return }
                 
                 let viewContext = repo.container.viewContext
                 
@@ -134,11 +135,11 @@ class SearchViewModel: ObservableObject {
                     }
                 }
                 
-                self.movieResults = finalMovies
-                self.seriesResults = finalSeries
-                self.liveResults = processedLive
-                self.isSearching = false
-                self.isEmpty = finalMovies.isEmpty && finalSeries.isEmpty && processedLive.isEmpty
+                strongSelf.movieResults = finalMovies
+                strongSelf.seriesResults = finalSeries
+                strongSelf.liveResults = processedLive
+                strongSelf.isSearching = false
+                strongSelf.isEmpty = finalMovies.isEmpty && finalSeries.isEmpty && processedLive.isEmpty
             }
         }
     }
