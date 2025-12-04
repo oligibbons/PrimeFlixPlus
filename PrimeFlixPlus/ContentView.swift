@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Navigation State
+// Navigation State (Kept from original, extended for hashable sidebar)
 enum NavigationDestination: Equatable {
     case home
     case search
@@ -28,84 +28,95 @@ struct ContentView: View {
     
     @EnvironmentObject var repository: PrimeFlixRepository
     
+    // Focus state to manage interaction between sidebar and content
+    @FocusState private var isSidebarFocused: Bool
+    
     var body: some View {
         ZStack {
-            // Switcher Logic
-            switch currentDestination {
-            case .home:
-                HomeView(
-                    onPlayChannel: { channel in
-                        navigateToContent(channel)
-                    },
-                    onAddPlaylist: { navigate(to: .addPlaylist) },
-                    onSettings: { navigate(to: .settings) },
-                    onSearch: { navigate(to: .search) }
-                )
-                .transition(.opacity)
+            // 1. Global Cinematic Background
+            CinemeltTheme.mainBackground
+                .ignoresSafeArea()
+            
+            // 2. Main Layout (Sidebar + Content)
+            HStack(spacing: 0) {
                 
-            case .search:
-                SearchView(
-                    onPlay: { channel in
-                        navigateToContent(channel)
+                // LEFT: Glassmorphic Sidebar
+                // We hide the sidebar in Player mode for full immersion
+                if !isPlayerMode {
+                    SidebarView(currentSelection: $currentDestination)
+                        .zIndex(2)
+                        .transition(.move(edge: .leading))
+                }
+                
+                // RIGHT: Content Area
+                ZStack {
+                    switch currentDestination {
+                    case .home:
+                        HomeView(
+                            onPlayChannel: { channel in navigateToContent(channel) },
+                            onAddPlaylist: { currentDestination = .addPlaylist },
+                            onSettings: { currentDestination = .settings },
+                            onSearch: { currentDestination = .search }
+                        )
+                        
+                    case .search:
+                        SearchView(
+                            onPlay: { channel in navigateToContent(channel) }
+                        )
+                        
+                    case .details(let channel):
+                        DetailsView(
+                            channel: channel,
+                            onPlay: { playable in
+                                // Push to stack so we can return to Details
+                                navigate(to: .player(playable))
+                            },
+                            onBack: { goBack() }
+                        )
+                        
+                    case .player(let channel):
+                        PlayerView(
+                            channel: channel,
+                            onBack: { goBack() }
+                        )
+                        
+                    case .settings:
+                        SettingsView(onBack: { goBack() })
+                        
+                    case .addPlaylist:
+                        AddPlaylistView(
+                            onPlaylistAdded: {
+                                navigationStack.removeAll()
+                                currentDestination = .home
+                            },
+                            onBack: { goBack() }
+                        )
                     }
-                )
-                .transition(.move(edge: .top))
-                
-            case .details(let channel):
-                DetailsView(
-                    channel: channel,
-                    onPlay: { playableChannel in
-                        // Player is transient; we don't stack it usually, but let's just go direct
-                        navigate(to: .player(playableChannel))
-                    },
-                    onBack: {
-                        goBack()
-                    }
-                )
-                .transition(.move(edge: .trailing))
-                
-            case .player(let channel):
-                PlayerView(
-                    channel: channel,
-                    onBack: {
-                        // When exiting player, pop back to previous (Details or Home/Search)
-                        goBack()
-                    }
-                )
-                .transition(.move(edge: .bottom))
-                
-            case .settings:
-                SettingsView(onBack: { goBack() })
-                    .transition(.move(edge: .trailing))
-                
-            case .addPlaylist:
-                AddPlaylistView(
-                    onPlaylistAdded: {
-                        // Reset stack on major state change
-                        navigationStack.removeAll()
-                        currentDestination = .home
-                    },
-                    onBack: { goBack() }
-                )
-                .transition(.move(edge: .trailing))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Use a subtle fade when switching main tabs, moves for details
+                .animation(.easeInOut(duration: 0.35), value: currentDestination)
             }
         }
-        .animation(.easeInOut(duration: 0.35), value: currentDestination)
-        // Handle physical Menu button on Apple TV Remote to go back
+        // Handle physical Menu button on Apple TV Remote
         .onExitCommand {
-            if currentDestination != .home {
+            if !navigationStack.isEmpty {
                 goBack()
+            } else if currentDestination != .home {
+                currentDestination = .home
             }
         }
     }
     
-    // MARK: - Navigation Helpers
+    // MARK: - Helpers
+    
+    var isPlayerMode: Bool {
+        if case .player = currentDestination { return true }
+        return false
+    }
     
     private func navigate(to destination: NavigationDestination) {
-        // Don't stack if we are just swapping tabs or redundant clicks
         if currentDestination == destination { return }
-        
-        // Push current to stack
         navigationStack.append(currentDestination)
         currentDestination = destination
     }
@@ -114,7 +125,6 @@ struct ContentView: View {
         if let previous = navigationStack.popLast() {
             currentDestination = previous
         } else {
-            // Default fallback
             currentDestination = .home
         }
     }

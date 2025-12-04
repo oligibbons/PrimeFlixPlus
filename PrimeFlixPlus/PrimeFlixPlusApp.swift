@@ -18,18 +18,19 @@ struct PrimeFlixPlusApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
+                // 1. Main App Content (Sidebar + Views)
                 ContentView()
-                    // Inject the repository so all Views can access it
                     .environmentObject(repository)
-                    // Inject Core Data context
                     .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 
-                // 3. Global Notification Overlay
+                // 2. Global Sync Overlay
+                // Sits on top of everything (Z-Index)
                 SyncStatusOverlay()
                     .environmentObject(repository)
+                    .zIndex(100)
             }
             .onAppear {
-                // 4. Auto-Sync on App Launch
+                // 3. Auto-Sync on App Launch
                 Task {
                     // Slight delay to allow UI to settle before hammering network
                     try? await Task.sleep(nanoseconds: 1 * 1_000_000_000)

@@ -6,63 +6,74 @@ struct MovieCard: View {
     
     @FocusState private var isFocused: Bool
     
+    // Standard Poster Ratio 2:3
+    // A10X can handle high-res, but we limit frame size for grid density
+    private let width: CGFloat = 200
+    private let height: CGFloat = 300
+    
     var body: some View {
         Button(action: onClick) {
             ZStack(alignment: .bottom) {
                 
-                // 1. Image Layer
+                // 1. Poster Image
                 AsyncImage(url: URL(string: channel.cover ?? "")) { phase in
                     switch phase {
                     case .success(let image):
                         image
                             .resizable()
-                            .aspectRatio(contentMode: .fill) // Fill the frame
+                            .aspectRatio(contentMode: .fill)
                     case .failure, .empty:
-                        // Fallback
+                        // "Cosy" Fallback
                         ZStack {
-                            Color(white: 0.15)
+                            CinemeltTheme.backgroundStart
+                            Image(systemName: "film")
+                                .font(.system(size: 50))
+                                .foregroundColor(CinemeltTheme.accent.opacity(0.3))
+                            
                             Text(String(channel.title.prefix(1)))
-                                .font(.system(size: 50, weight: .bold, design: .rounded))
-                                .foregroundColor(.gray)
+                                .font(CinemeltTheme.fontTitle(80))
+                                .foregroundColor(CinemeltTheme.cream.opacity(0.1))
                         }
                     @unknown default:
                         EmptyView()
                     }
                 }
-                .frame(width: 200, height: 300) // STRICT POSTER SIZE
-                .clipped() // Cut off any image overflow
+                .frame(width: width, height: height)
+                .clipped()
                 
-                // 2. Gradient Overlay (Readability)
-                if isFocused || channel.cover == nil {
+                // 2. Focused Overlay (Glass Gradient)
+                // Only show text/gradient when focused to keep the UI "Pristine"
+                if isFocused {
                     LinearGradient(
-                        colors: [.clear, .black.opacity(0.9)],
+                        colors: [.clear, CinemeltTheme.backgroundEnd.opacity(0.9)],
                         startPoint: .center,
                         endPoint: .bottom
                     )
-                }
-                
-                // 3. Text Layer
-                if isFocused || channel.cover == nil {
-                    Text(channel.title)
-                        .font(.caption) // System font is safer for long titles
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                        .lineLimit(2)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(channel.title)
+                            .font(CinemeltTheme.fontTitle(20))
+                            .foregroundColor(CinemeltTheme.cream)
+                            .lineLimit(2)
+                            .shadow(color: .black, radius: 2, x: 0, y: 1)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
-        .buttonStyle(.card)
+        .buttonStyle(.card) // Native tvOS parallax
         .focused($isFocused)
-        .frame(width: 200, height: 300) // Ensure button takes same space
-        // Neon Glow Effect
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(isFocused ? Color.cyan : Color.clear, lineWidth: 3)
-                .shadow(color: isFocused ? Color.cyan.opacity(0.8) : .clear, radius: 15, x: 0, y: 0)
+        .frame(width: width, height: height)
+        .cornerRadius(12) // Softer corners
+        // The "Cinemelt" Glow
+        .shadow(
+            color: isFocused ? CinemeltTheme.accent.opacity(0.6) : .black.opacity(0.5),
+            radius: isFocused ? 20 : 5,
+            x: 0,
+            y: isFocused ? 10 : 2
         )
         .scaleEffect(isFocused ? 1.1 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isFocused)
+        .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isFocused)
     }
 }

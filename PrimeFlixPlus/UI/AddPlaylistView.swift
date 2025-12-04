@@ -19,30 +19,28 @@ struct AddPlaylistView: View {
     @FocusState private var focusedField: Field?
     
     var body: some View {
-        HStack(spacing: 50) {
+        HStack(spacing: 80) {
             
-            // Left: Branding & Instructions
-            VStack(alignment: .leading, spacing: 20) {
-                ZStack {
-                    Circle()
-                        .fill(Color.cyan.opacity(0.1))
-                        .frame(width: 150, height: 150)
-                        .blur(radius: 20)
+            // Left: Branding & Instructions (Cinemelt Style)
+            VStack(alignment: .leading, spacing: 30) {
+                
+                // Icon / Logo Placeholder
+                Image(systemName: "tv.badge.wifi.fill")
+                    .font(.system(size: 100))
+                    .foregroundColor(CinemeltTheme.accent)
+                    .shadow(color: CinemeltTheme.accent.opacity(0.5), radius: 20, x: 0, y: 10)
+                
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Connect Provider")
+                        .font(CinemeltTheme.fontTitle(60))
+                        .foregroundColor(CinemeltTheme.cream)
                     
-                    Image(systemName: "person.crop.circle.badge.plus")
-                        .font(.system(size: 100))
-                        .foregroundColor(.cyan)
+                    Text("Enter your Xtream Codes API details.\nCredentials are encrypted and stored locally.")
+                        .font(CinemeltTheme.fontBody(28))
+                        .foregroundColor(.gray)
+                        .lineSpacing(6)
+                        .multilineTextAlignment(.leading)
                 }
-                
-                Text("Connect Provider")
-                    .font(.custom("Exo2-Bold", size: 48)) // Custom Font
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-                
-                Text("Enter your Xtream Codes API details.\nCredentials are encrypted and stored locally.")
-                    .font(.headline)
-                    .foregroundColor(.gray)
-                    .multilineTextAlignment(.leading)
                 
                 Spacer()
                 
@@ -51,27 +49,29 @@ struct AddPlaylistView: View {
                         Image(systemName: "arrow.left")
                         Text("Cancel")
                     }
+                    .font(CinemeltTheme.fontBody(24))
+                    .foregroundColor(CinemeltTheme.cream.opacity(0.6))
                 }
                 .buttonStyle(.plain)
-                .foregroundColor(.white.opacity(0.7))
             }
-            .frame(width: 500)
+            .frame(width: 550)
             
-            // Right: Form
-            VStack(spacing: 24) {
+            // Right: Glassmorphic Form
+            VStack(spacing: 30) {
                 if viewModel.isLoading {
                     VStack(spacing: 20) {
                         ProgressView()
+                            .tint(CinemeltTheme.accent)
                             .scaleEffect(2.0)
                         Text("Authenticating...")
-                            .font(.headline)
-                            .foregroundColor(.cyan)
+                            .font(CinemeltTheme.fontBody(24))
+                            .foregroundColor(CinemeltTheme.accent)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     // 1. Server URL
-                    neonInput(
-                        title: "SERVER URL",
+                    glassInput(
+                        title: "Server URL",
                         placeholder: "http://line.example.com",
                         text: $viewModel.serverUrl,
                         field: .url,
@@ -79,8 +79,8 @@ struct AddPlaylistView: View {
                     )
                     
                     // 2. Username
-                    neonInput(
-                        title: "USERNAME",
+                    glassInput(
+                        title: "Username",
                         placeholder: "User123",
                         text: $viewModel.username,
                         field: .username,
@@ -88,8 +88,8 @@ struct AddPlaylistView: View {
                     )
                     
                     // 3. Password
-                    neonInput(
-                        title: "PASSWORD",
+                    glassInput(
+                        title: "Password",
                         placeholder: "••••••",
                         text: $viewModel.password,
                         field: .password,
@@ -102,7 +102,7 @@ struct AddPlaylistView: View {
                             Image(systemName: "exclamationmark.triangle.fill")
                             Text(error)
                         }
-                        .font(.headline)
+                        .font(CinemeltTheme.fontBody(20))
                         .foregroundColor(.red)
                         .padding(.top, 10)
                         .transition(.opacity)
@@ -120,33 +120,34 @@ struct AddPlaylistView: View {
                         }
                     }) {
                         Text("Connect Account")
-                            .font(.headline)
-                            .fontWeight(.bold)
+                            .font(CinemeltTheme.fontTitle(24))
+                            .foregroundColor(.black) // Black text on Amber button
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
+                            .padding(.vertical, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(CinemeltTheme.accent)
+                            )
                     }
                     .buttonStyle(.card)
                     .focused($focusedField, equals: .connectButton)
                     .disabled(viewModel.serverUrl.isEmpty || viewModel.username.isEmpty || viewModel.password.isEmpty)
+                    .opacity(viewModel.serverUrl.isEmpty ? 0.5 : 1.0)
                 }
             }
             .padding(60)
-            .background(Color(white: 0.1).blur(radius: 20)) // Fallback for material
-            .cornerRadius(30)
-            .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 10)
+            .background(.ultraThinMaterial) // Apple TV Glass
+            .background(Color.white.opacity(0.05)) // Subtle tint
+            .cornerRadius(40)
+            .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 15)
         }
-        .padding(50)
+        .padding(60)
         .background(
-            ZStack {
-                Color.black
-                // Optional: Background Image here
-            }
-            .ignoresSafeArea()
+            CinemeltTheme.mainBackground.ignoresSafeArea()
         )
         .onAppear {
             viewModel.configure(repository: repository)
-            // Fix for initial focus on tvOS 15
-            // Only set focus if nothing is currently focused
+            // Fix for initial focus on tvOS
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if self.focusedField == nil {
                     self.focusedField = .url
@@ -155,50 +156,38 @@ struct AddPlaylistView: View {
         }
     }
     
-    // MARK: - Helper for Consistent Styling
+    // MARK: - Helper for Consistent Styling (Glassmorphic)
     @ViewBuilder
-    private func neonInput(title: String, placeholder: String, text: Binding<String>, field: Field, nextField: Field, isSecure: Bool = false) -> some View {
+    private func glassInput(title: String, placeholder: String, text: Binding<String>, field: Field, nextField: Field, isSecure: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.caption)
-                .fontWeight(.bold)
-                .foregroundColor(focusedField == field ? .cyan : .gray)
+                .font(CinemeltTheme.fontTitle(20))
+                .foregroundColor(focusedField == field ? CinemeltTheme.accent : .gray)
                 .padding(.leading, 4)
                 .animation(.easeInOut, value: focusedField)
             
-            if isSecure {
-                SecureField(placeholder, text: text)
-                    .focused($focusedField, equals: field)
-                    .submitLabel(.next)
-                    .onSubmit { focusedField = nextField }
-                    .padding(20)
-                    .background(Color(white: 0.15))
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(focusedField == field ? Color.cyan : Color.clear, lineWidth: 3)
-                            .shadow(color: focusedField == field ? .cyan.opacity(0.6) : .clear, radius: 15, x: 0, y: 0)
-                    )
-                    .scaleEffect(focusedField == field ? 1.02 : 1.0)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.4), value: focusedField)
-            } else {
-                TextField(placeholder, text: text)
-                    .focused($focusedField, equals: field)
-                    .submitLabel(.next)
-                    .onSubmit { focusedField = nextField }
-                    .keyboardType(.URL)
-                    .disableAutocorrection(true)
-                    .padding(20)
-                    .background(Color(white: 0.15))
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(focusedField == field ? Color.cyan : Color.clear, lineWidth: 3)
-                            .shadow(color: focusedField == field ? .cyan.opacity(0.6) : .clear, radius: 15, x: 0, y: 0)
-                    )
-                    .scaleEffect(focusedField == field ? 1.02 : 1.0)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.4), value: focusedField)
+            Group {
+                if isSecure {
+                    SecureField(placeholder, text: text)
+                } else {
+                    TextField(placeholder, text: text)
+                        .keyboardType(.URL)
+                        .disableAutocorrection(true)
+                }
             }
+            .font(CinemeltTheme.fontBody(24))
+            .focused($focusedField, equals: field)
+            .submitLabel(.next)
+            .onSubmit { focusedField = nextField }
+            .padding(20)
+            .background(Color.black.opacity(0.3)) // Darker inset for fields
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(focusedField == field ? CinemeltTheme.accent : Color.white.opacity(0.1), lineWidth: 2)
+            )
+            .scaleEffect(focusedField == field ? 1.02 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.5), value: focusedField)
         }
     }
 }

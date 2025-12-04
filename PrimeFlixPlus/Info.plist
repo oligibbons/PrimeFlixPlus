@@ -35,5 +35,10 @@
     </array>
     <key>UIUserInterfaceStyle</key>
     <string>Dark</string>
+    <key>UIAppFonts</key>
+    <array>
+        <string>Zain-Bold.ttf</string>
+        <string>Zain-Regular.ttf</string>
+    </array>
 </dict>
 </plist>

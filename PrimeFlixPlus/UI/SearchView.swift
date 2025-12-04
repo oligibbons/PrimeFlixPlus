@@ -11,34 +11,35 @@ struct SearchView: View {
     var body: some View {
         VStack(spacing: 0) {
             
-            // 1. Search Header
+            // 1. Glassmorphic Search Header
             VStack(spacing: 20) {
-                HStack {
+                HStack(spacing: 15) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 40))
-                        .foregroundColor(.cyan)
+                        .font(.system(size: 30))
+                        .foregroundColor(isSearchFieldFocused ? CinemeltTheme.accent : .gray)
                     
-                    Text("Search")
-                        .font(.custom("Exo2-Bold", size: 40))
-                        .foregroundColor(.white)
-                    
-                    Spacer()
+                    TextField("Search movies, series...", text: $viewModel.searchText)
+                        .font(CinemeltTheme.fontBody(30))
+                        .focused($isSearchFieldFocused)
+                        .submitLabel(.search)
                 }
-                
-                NeonTextField(
-                    title: "FIND MOVIES, SERIES, OR LIVE EVENTS",
-                    placeholder: "Type to search...",
-                    text: $viewModel.searchText
+                .padding(20)
+                .background(.ultraThinMaterial)
+                .background(Color.white.opacity(0.05))
+                .cornerRadius(16)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(isSearchFieldFocused ? CinemeltTheme.accent.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 2)
                 )
-                .focused($isSearchFieldFocused)
-                .submitLabel(.search)
+                .shadow(color: isSearchFieldFocused ? CinemeltTheme.accent.opacity(0.3) : .clear, radius: 15)
+                .padding(.horizontal, 100)
+                .padding(.top, 40)
             }
-            .padding(.horizontal, 60)
-            .padding(.top, 40)
             .padding(.bottom, 20)
             .background(
-                LinearGradient(colors: [.black.opacity(0.8), .clear], startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: [CinemeltTheme.backgroundStart, .clear], startPoint: .top, endPoint: .bottom)
             )
+            .zIndex(1)
             
             // 2. Results Area
             ScrollView {
@@ -48,9 +49,11 @@ struct SearchView: View {
                         HStack {
                             Spacer()
                             ProgressView()
+                                .tint(CinemeltTheme.accent)
+                                .scaleEffect(1.5)
                             Spacer()
                         }
-                        .padding(.top, 50)
+                        .padding(.top, 100)
                     } else if !viewModel.isEmpty {
                         
                         // Movies
@@ -63,24 +66,33 @@ struct SearchView: View {
                             ResultSection(title: "Series", items: viewModel.seriesResults, onPlay: onPlay)
                         }
                         
-                        // Live TV (Custom Card for EPG info)
+                        // Live TV (Custom Section)
                         if !viewModel.liveResults.isEmpty {
                             LiveResultSection(items: viewModel.liveResults, onPlay: onPlay)
                         }
                         
+                    } else if !viewModel.searchText.isEmpty {
                         // No Results State
-                        if viewModel.movieResults.isEmpty && viewModel.seriesResults.isEmpty && viewModel.liveResults.isEmpty {
-                            Text("No results found for \"\(viewModel.searchText)\"")
-                                .font(.headline)
-                                .foregroundColor(.gray)
-                                .padding(.leading, 60)
+                        HStack {
+                            Spacer()
+                            VStack(spacing: 10) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 60))
+                                    .foregroundColor(.gray.opacity(0.5))
+                                Text("No results found for \"\(viewModel.searchText)\"")
+                                    .font(CinemeltTheme.fontBody(24))
+                                    .foregroundColor(.gray)
+                            }
+                            Spacer()
                         }
+                        .padding(.top, 100)
                     }
                 }
                 .padding(.bottom, 100)
+                .padding(.top, 20)
             }
         }
-        .background(Color.black.ignoresSafeArea())
+        .background(CinemeltTheme.mainBackground.ignoresSafeArea())
         .onAppear {
             viewModel.configure(repository: repository)
             // Auto-focus search on appear
@@ -99,11 +111,10 @@ struct ResultSection: View {
     let onPlay: (Channel) -> Void
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 15) {
             Text(title)
-                .font(.title3)
-                .fontWeight(.bold)
-                .foregroundColor(.white)
+                .font(CinemeltTheme.fontTitle(28))
+                .foregroundColor(CinemeltTheme.cream)
                 .padding(.leading, 60)
             
             ScrollView(.horizontal, showsIndicators: false) {
@@ -115,7 +126,7 @@ struct ResultSection: View {
                     }
                 }
                 .padding(.horizontal, 60)
-                .padding(.vertical, 20)
+                .padding(.vertical, 30) // Focus expansion space
             }
         }
     }
@@ -126,11 +137,10 @@ struct LiveResultSection: View {
     let onPlay: (Channel) -> Void
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 15) {
             Text("Live TV & Events")
-                .font(.title3)
-                .fontWeight(.bold)
-                .foregroundColor(.white)
+                .font(CinemeltTheme.fontTitle(28))
+                .foregroundColor(CinemeltTheme.cream)
                 .padding(.leading, 60)
             
             ScrollView(.horizontal, showsIndicators: false) {
@@ -142,7 +152,7 @@ struct LiveResultSection: View {
                     }
                 }
                 .padding(.horizontal, 60)
-                .padding(.vertical, 20)
+                .padding(.vertical, 30)
             }
         }
     }
@@ -167,35 +177,35 @@ struct LiveSearchCard: View {
                 }
                 .padding(20)
                 .frame(width: 250, height: 140)
-                .background(Color(white: 0.15))
+                .background(Color.white.opacity(0.05))
                 
                 // Info Area
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.channel.title)
-                        .font(.headline)
+                        .font(CinemeltTheme.fontBody(20))
                         .fontWeight(.bold)
-                        .foregroundColor(isFocused ? .black : .white)
+                        .foregroundColor(isFocused ? .black : CinemeltTheme.cream)
                         .lineLimit(1)
                     
                     if let prog = item.currentProgram {
                         Text("ON NOW: \(prog.title)")
-                            .font(.caption)
+                            .font(CinemeltTheme.fontBody(16))
                             .fontWeight(.bold)
-                            .foregroundColor(isFocused ? .black.opacity(0.8) : .cyan)
+                            .foregroundColor(isFocused ? .black.opacity(0.8) : CinemeltTheme.accent)
                             .lineLimit(1)
                         
                         Text("\(formatTime(prog.start)) - \(formatTime(prog.end))")
-                            .font(.caption2)
+                            .font(CinemeltTheme.fontBody(14))
                             .foregroundColor(isFocused ? .black.opacity(0.6) : .gray)
                     } else {
                         Text("LIVE")
-                            .font(.caption)
+                            .font(CinemeltTheme.fontBody(16))
                             .foregroundColor(.gray)
                     }
                 }
                 .padding(12)
                 .frame(width: 250, alignment: .leading)
-                .background(isFocused ? Color.cyan : Color(white: 0.1))
+                .background(isFocused ? CinemeltTheme.accent : CinemeltTheme.backgroundEnd.opacity(0.5))
             }
         }
         .buttonStyle(.card)

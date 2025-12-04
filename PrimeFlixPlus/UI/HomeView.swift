@@ -7,29 +7,23 @@ struct HomeView: View {
     var onPlayChannel: (Channel) -> Void
     var onAddPlaylist: () -> Void
     var onSettings: () -> Void
-    var onSearch: () -> Void // New Callback
+    var onSearch: () -> Void
     
     @FocusState private var focusedSectionId: UUID?
-    @FocusState private var isTabFocused: Bool
+    @FocusState private var focusedTab: StreamType?
     
-    // Grid Columns for Drill Down
+    // Grid for drill-down views
     let gridColumns = [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 40)]
     
     var body: some View {
         ZStack {
-            // Background
-            Color.black.ignoresSafeArea()
-            
             if viewModel.selectedPlaylist == nil {
-                // PROFILE SELECTOR
                 profileSelector
             } else if let categoryTitle = viewModel.drillDownCategory {
-                // DRILL DOWN GRID VIEW
                 drillDownView(title: categoryTitle)
                     .transition(.move(edge: .trailing))
             } else {
-                // MAIN RAILS VIEW
-                mainDashboard
+                mainContent
                     .transition(.opacity)
             }
         }
@@ -37,69 +31,47 @@ struct HomeView: View {
         .onAppear { viewModel.configure(repository: repository) }
     }
     
-    // MARK: - Main Dashboard
-    var mainDashboard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            
-            // 1. Header / Tabs
-            HStack(spacing: 40) {
-                // Branding
-                Text("PrimeFlix+")
-                    .font(.custom("Exo2-Bold", size: 32))
-                    .foregroundColor(.cyan)
+    // MARK: - Main Feed
+    var mainContent: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 30) {
                 
-                Spacer()
+                // 1. Header: Greeting & Profile
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text("Welcome Back")
+                            .cinemeltBody()
+                            .opacity(0.7)
+                        Text(viewModel.selectedPlaylist?.title ?? "Guest")
+                            .cinemeltTitle()
+                    }
+                    Spacer()
+                }
+                .padding(.top, 40)
+                .padding(.horizontal, 50)
                 
-                // Tabs
-                tabButton(title: "Series", type: .series)
-                tabButton(title: "Movies", type: .movie)
-                tabButton(title: "Live TV", type: .live)
-                
-                Spacer()
-                
-                // Header Actions
+                // 2. LOGIC RESTORED: Content Filter Bar (Movies | Series | Live)
                 HStack(spacing: 20) {
-                    // Search Button
-                    Button(action: onSearch) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.headline)
-                            .padding(10)
-                    }
-                    .buttonStyle(.card) // Circle/Card style for focus
-                    
-                    // Settings Button
-                    Button(action: onSettings) {
-                        Image(systemName: "gearshape")
-                            .font(.headline)
-                            .padding(10)
-                    }
-                    .buttonStyle(.card)
+                    filterTab(title: "Movies", type: .movie)
+                    filterTab(title: "Series", type: .series)
+                    filterTab(title: "Live TV", type: .live)
                 }
-            }
-            .padding(.top, 20)
-            .padding(.horizontal, 60)
-            .padding(.bottom, 20)
-            .background(LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom))
-            
-            // 2. Content Rails
-            if viewModel.isLoading {
-                VStack {
-                    Spacer()
-                    ProgressView("Curating Content...")
-                    Spacer()
-                }
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 40) {
+                .padding(.horizontal, 50)
+                .padding(.bottom, 20)
+                
+                // 3. Content Lanes
+                if viewModel.isLoading {
+                    loadingState
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 50) {
                         ForEach(viewModel.sections) { section in
-                            VStack(alignment: .leading, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 15) {
                                 // Section Header
                                 Button(action: { viewModel.openCategory(section) }) {
-                                    HStack {
+                                    HStack(spacing: 10) {
                                         Text(section.title)
-                                            .font(.title3)
-                                            .fontWeight(.bold)
-                                            .foregroundColor(focusedSectionId == section.id ? .cyan : .white)
+                                            .font(CinemeltTheme.fontTitle(28))
+                                            .foregroundColor(focusedSectionId == section.id ? CinemeltTheme.accent : CinemeltTheme.cream)
                                         
                                         Image(systemName: "chevron.right")
                                             .font(.caption)
@@ -109,17 +81,17 @@ struct HomeView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .focused($focusedSectionId, equals: section.id)
-                                .padding(.horizontal, 60)
+                                .padding(.horizontal, 50)
                                 
-                                // Horizontal Rail
+                                // Horizontal Lane
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     LazyHStack(spacing: 40) {
                                         ForEach(section.items) { channel in
                                             cardView(for: channel, sectionType: section.type)
                                         }
                                     }
-                                    .padding(.horizontal, 60)
-                                    .padding(.vertical, 30)
+                                    .padding(.horizontal, 50)
+                                    .padding(.vertical, 30) // Vertical padding ensures scale effect doesn't clip
                                 }
                             }
                         }
@@ -130,7 +102,55 @@ struct HomeView: View {
         }
     }
     
-    // MARK: - Helper to Prevent Compiler Hangs
+    // MARK: - Components
+    
+    // The Restored Filter Button
+    private func filterTab(title: String, type: StreamType) -> some View {
+        Button(action: {
+            withAnimation {
+                viewModel.selectTab(type)
+            }
+        }) {
+            Text(title)
+                .font(CinemeltTheme.fontTitle(22))
+                .fontWeight(.bold)
+                .foregroundColor(viewModel.selectedTab == type ? .black : CinemeltTheme.cream)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 10)
+                .background(
+                    ZStack {
+                        if viewModel.selectedTab == type {
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(CinemeltTheme.accent)
+                                .shadow(color: CinemeltTheme.accent.opacity(0.6), radius: 10)
+                        } else {
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.white.opacity(0.1))
+                        }
+                    }
+                )
+        }
+        .buttonStyle(.card)
+        .focused($focusedTab, equals: type)
+        .scaleEffect(focusedTab == type ? 1.1 : 1.0)
+    }
+    
+    var loadingState: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 20) {
+                ProgressView()
+                    .tint(CinemeltTheme.accent)
+                    .scaleEffect(1.5)
+                Text("Loading Library...")
+                    .font(CinemeltTheme.fontBody(20))
+                    .foregroundColor(.gray)
+            }
+            Spacer()
+        }
+        .padding(.top, 100)
+    }
+    
     @ViewBuilder
     private func cardView(for channel: Channel, sectionType: HomeSection.SectionType) -> some View {
         if case .continueWatching = sectionType {
@@ -144,7 +164,8 @@ struct HomeView: View {
         }
     }
     
-    // MARK: - Drill Down Grid
+    // MARK: - Drill Down (Grid)
+    
     func drillDownView(title: String) -> some View {
         VStack(alignment: .leading) {
             HStack {
@@ -152,14 +173,14 @@ struct HomeView: View {
                     HStack {
                         Image(systemName: "arrow.left")
                         Text(title)
-                            .font(.title)
-                            .fontWeight(.bold)
+                            .font(CinemeltTheme.fontTitle(36))
+                            .foregroundColor(CinemeltTheme.cream)
                     }
                 }
                 .buttonStyle(.plain)
+                .padding(50)
                 Spacer()
             }
-            .padding(60)
             
             ScrollView {
                 LazyVGrid(columns: gridColumns, spacing: 60) {
@@ -169,55 +190,57 @@ struct HomeView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 60)
+                .padding(.horizontal, 50)
                 .padding(.bottom, 100)
             }
         }
-        .background(Color.black)
+        .background(CinemeltTheme.mainBackground)
         .onExitCommand {
             viewModel.closeDrillDown()
         }
     }
     
-    // MARK: - Components
+    // MARK: - Profile Selector
     
     private var profileSelector: some View {
-        VStack(spacing: 40) {
-            Text("Who is watching?").font(.title).foregroundColor(.white)
-            HStack(spacing: 40) {
+        VStack(spacing: 50) {
+            Text("Who is watching?")
+                .font(CinemeltTheme.fontTitle(48))
+                .foregroundColor(CinemeltTheme.cream)
+            
+            HStack(spacing: 60) {
                 Button(action: onAddPlaylist) {
                     VStack {
-                        Image(systemName: "plus").font(.largeTitle)
+                        Image(systemName: "plus")
+                            .font(.system(size: 50))
+                            .padding()
                         Text("Add Profile")
+                            .font(CinemeltTheme.fontBody(24))
                     }
-                    .frame(width: 250, height: 180)
+                    .frame(width: 250, height: 250)
+                    .background(CinemeltTheme.glassSurface)
+                    .clipShape(Circle())
                 }
                 .buttonStyle(.card)
                 
                 ForEach(viewModel.playlists) { playlist in
                     Button(action: { viewModel.selectPlaylist(playlist) }) {
                         VStack {
-                            Image(systemName: "person.fill").font(.largeTitle)
+                            Text(String(playlist.title.prefix(1)).uppercased())
+                                .font(CinemeltTheme.fontTitle(80))
+                                .foregroundColor(CinemeltTheme.accent)
+                            
                             Text(playlist.title)
+                                .font(CinemeltTheme.fontBody(24))
+                                .foregroundColor(CinemeltTheme.cream)
                         }
-                        .frame(width: 250, height: 180)
+                        .frame(width: 250, height: 250)
+                        .background(CinemeltTheme.glassSurface)
+                        .clipShape(Circle())
                     }
                     .buttonStyle(.card)
                 }
             }
         }
-    }
-    
-    private func tabButton(title: String, type: StreamType) -> some View {
-        Button(action: { viewModel.selectTab(type) }) {
-            Text(title)
-                .font(.headline)
-                .fontWeight(.bold)
-                .foregroundColor(viewModel.selectedTab == type ? .cyan : .gray)
-                .scaleEffect(viewModel.selectedTab == type ? 1.1 : 1.0)
-                .animation(.spring(), value: viewModel.selectedTab)
-        }
-        .buttonStyle(.plain)
-        .focused($isTabFocused)
     }
 }

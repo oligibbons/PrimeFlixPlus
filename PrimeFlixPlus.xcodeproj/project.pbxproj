@@ -48,6 +48,12 @@
 		D292D6842EDF576500E8845A /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6832EDF576500E8845A /* PlayerView.swift */; };
 		D2AC8AF62EE0ADE900D440C3 /* SearchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8AF52EE0ADE900D440C3 /* SearchViewModel.swift */; };
 		D2AC8AF82EE0AE0E00D440C3 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8AF72EE0AE0E00D440C3 /* SearchView.swift */; };
+		D2AC8AFA2EE1419400D440C3 /* CinemeltStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8AF92EE1419400D440C3 /* CinemeltStyle.swift */; };
+		D2AC8AFC2EE141AE00D440C3 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8AFB2EE141AE00D440C3 /* SidebarView.swift */; };
+		D2AC8AFE2EE1475700D440C3 /* GlassTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8AFD2EE1475700D440C3 /* GlassTextField.swift */; };
+		D2AC8B002EE148C100D440C3 /* EpisodeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8AFF2EE148C100D440C3 /* EpisodeCard.swift */; };
+		D2AC8B042EE14DDD00D440C3 /* Zain-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D2AC8B022EE14D7A00D440C3 /* Zain-Bold.ttf */; };
+		D2AC8B052EE14DE100D440C3 /* Zain-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D2AC8B032EE14D7A00D440C3 /* Zain-Regular.ttf */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -114,6 +120,12 @@
 		D292D6832EDF576500E8845A /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		D2AC8AF52EE0ADE900D440C3 /* SearchViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchViewModel.swift; sourceTree = "<group>"; };
 		D2AC8AF72EE0AE0E00D440C3 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
+		D2AC8AF92EE1419400D440C3 /* CinemeltStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CinemeltStyle.swift; sourceTree = "<group>"; };
+		D2AC8AFB2EE141AE00D440C3 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		D2AC8AFD2EE1475700D440C3 /* GlassTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassTextField.swift; sourceTree = "<group>"; };
+		D2AC8AFF2EE148C100D440C3 /* EpisodeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeCard.swift; sourceTree = "<group>"; };
+		D2AC8B022EE14D7A00D440C3 /* Zain-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "Zain-Bold.ttf"; path = "../../../../Downloads/Exo_2,Inter,Nunito,Zain/Zain/Zain-Bold.ttf"; sourceTree = "<group>"; };
+		D2AC8B032EE14D7A00D440C3 /* Zain-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "Zain-Regular.ttf"; path = "../../../../Downloads/Exo_2,Inter,Nunito,Zain/Zain/Zain-Regular.ttf"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -165,6 +177,7 @@
 		D292D6252EDF458100E8845A /* PrimeFlixPlus */ = {
 			isa = PBXGroup;
 			children = (
+				D2AC8B012EE14D5C00D440C3 /* Fonts */,
 				D292D67A2EDF4D9100E8845A /* UI */,
 				D292D6732EDF4C0900E8845A /* Components */,
 				D292D6702EDF4B6600E8845A /* ViewModels */,
@@ -270,6 +283,7 @@
 			children = (
 				D292D6742EDF4C1800E8845A /* MovieCard.swift */,
 				D292D6762EDF4C3300E8845A /* HomeComponents.swift */,
+				D2AC8AFF2EE148C100D440C3 /* EpisodeCard.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -285,8 +299,20 @@
 				D228AD162EDF7311007C6114 /* SyncStatusOverlay.swift */,
 				D228AD1E2EDFA961007C6114 /* DetailsView.swift */,
 				D2AC8AF72EE0AE0E00D440C3 /* SearchView.swift */,
+				D2AC8AF92EE1419400D440C3 /* CinemeltStyle.swift */,
+				D2AC8AFB2EE141AE00D440C3 /* SidebarView.swift */,
+				D2AC8AFD2EE1475700D440C3 /* GlassTextField.swift */,
 			);
 			path = UI;
+			sourceTree = "<group>";
+		};
+		D2AC8B012EE14D5C00D440C3 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				D2AC8B022EE14D7A00D440C3 /* Zain-Bold.ttf */,
+				D2AC8B032EE14D7A00D440C3 /* Zain-Regular.ttf */,
+			);
+			path = Fonts;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -394,6 +420,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				D292D62E2EDF458300E8845A /* Preview Assets.xcassets in Resources */,
+				D2AC8B052EE14DE100D440C3 /* Zain-Regular.ttf in Resources */,
+				D2AC8B042EE14DDD00D440C3 /* Zain-Bold.ttf in Resources */,
 				D292D62B2EDF458300E8845A /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -421,11 +449,13 @@
 			files = (
 				D292D6722EDF4B7B00E8845A /* HomeViewModel.swift in Sources */,
 				D2AC8AF62EE0ADE900D440C3 /* SearchViewModel.swift in Sources */,
+				D2AC8AFE2EE1475700D440C3 /* GlassTextField.swift in Sources */,
 				D292D6802EDF56AF00E8845A /* SettingsView.swift in Sources */,
 				D228AD132EDF66A3007C6114 /* AddPlaylistView.swift in Sources */,
 				D292D6772EDF4C3300E8845A /* HomeComponents.swift in Sources */,
 				D292D6642EDF49C900E8845A /* Programme.swift in Sources */,
 				D292D6522EDF45C000E8845A /* DataSource.swift in Sources */,
+				D2AC8AFA2EE1419400D440C3 /* CinemeltStyle.swift in Sources */,
 				D292D6602EDF492100E8845A /* Channel.swift in Sources */,
 				D292D6292EDF458100E8845A /* ContentView.swift in Sources */,
 				D228AD0B2EDF5A22007C6114 /* Persistence.swift in Sources */,
@@ -439,6 +469,7 @@
 				D292D6752EDF4C1800E8845A /* MovieCard.swift in Sources */,
 				D292D65A2EDF46EA00E8845A /* WatchProgress.swift in Sources */,
 				D292D6542EDF45FE00E8845A /* XtreamModels.swift in Sources */,
+				D2AC8AFC2EE141AE00D440C3 /* SidebarView.swift in Sources */,
 				D228AD172EDF7311007C6114 /* SyncStatusOverlay.swift in Sources */,
 				D228AD1B2EDF7952007C6114 /* UnsafeSession.swift in Sources */,
 				D228AD152EDF67FB007C6114 /* NeonTextField.swift in Sources */,
@@ -447,6 +478,7 @@
 				D292D6692EDF4A4600E8845A /* M3UData.swift in Sources */,
 				D292D67C2EDF4D9E00E8845A /* HomeView.swift in Sources */,
 				D292D6272EDF458100E8845A /* PrimeFlixPlusApp.swift in Sources */,
+				D2AC8B002EE148C100D440C3 /* EpisodeCard.swift in Sources */,
 				D2AC8AF82EE0AE0E00D440C3 /* SearchView.swift in Sources */,
 				D292D6582EDF46CF00E8845A /* Playlist.swift in Sources */,
 				D292D65E2EDF47D500E8845A /* TitleNormalizer.swift in Sources */,

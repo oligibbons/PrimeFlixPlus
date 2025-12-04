@@ -11,9 +11,8 @@ struct ContinueWatchingLane: View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 15) {
                 Text(title)
-                    .font(.headline)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
+                    .font(CinemeltTheme.fontTitle(32))
+                    .foregroundColor(CinemeltTheme.cream)
                     .padding(.leading, 50) // Align with grid start
                 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -25,7 +24,7 @@ struct ContinueWatchingLane: View {
                         }
                     }
                     .padding(.horizontal, 50)
-                    .padding(.vertical, 20) // Space for focus expansion
+                    .padding(.vertical, 30) // Space for focus expansion
                 }
             }
         }
@@ -63,66 +62,82 @@ struct ContinueWatchingCard: View {
         Button(action: onClick) {
             VStack(spacing: 0) {
                 // Image Area
-                ZStack {
+                ZStack(alignment: .bottomLeading) {
                     AsyncImage(url: URL(string: channel.cover ?? "")) { image in
                         image.resizable().aspectRatio(contentMode: .fill)
                     } placeholder: {
-                        Color(white: 0.1)
-                        Text(String(channel.title.prefix(1)))
-                            .font(.headline)
-                            .foregroundColor(.gray)
+                        ZStack {
+                            CinemeltTheme.backgroundStart
+                            Text(String(channel.title.prefix(1)))
+                                .font(CinemeltTheme.fontTitle(40))
+                                .foregroundColor(CinemeltTheme.cream.opacity(0.2))
+                        }
                     }
-                }
-                .frame(width: 320, height: 180) // 16:9 Aspect Ratio
-                .clipped()
-                
-                // Progress Bar Area
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
+                    .frame(width: 320, height: 180) // 16:9 Aspect Ratio
+                    .clipped()
                     
+                    // Gradient scrim for text/bar readability
+                    LinearGradient(
+                        colors: [.black.opacity(0.8), .clear],
+                        startPoint: .bottom,
+                        endPoint: .center
+                    )
+                    
+                    // Progress Bar Area
                     GeometryReader { geo in
-                        Rectangle()
-                            .fill(Color.cyan)
-                            .frame(width: geo.size.width * progressPercentage)
+                        ZStack(alignment: .leading) {
+                            Rectangle()
+                                .fill(Color.white.opacity(0.3))
+                                .frame(height: 4)
+                            
+                            Rectangle()
+                                .fill(CinemeltTheme.accent) // Warm Amber
+                                .frame(width: geo.size.width * progressPercentage, height: 4)
+                        }
                     }
+                    .frame(height: 4)
+                    .padding(.bottom, 0)
                 }
-                .frame(height: 4)
                 
-                // Text Area
-                HStack {
-                    Text(channel.title)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(isFocused ? .white : .gray)
-                        .lineLimit(1)
-                    
-                    Spacer()
-                    
-                    // "Up Next" Badge if progress is 0 (Next Episode)
-                    if progressPercentage == 0 && channel.type == "series" {
-                        Text("UP NEXT")
-                            .font(.system(size: 10, weight: .bold))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.2))
-                            .cornerRadius(4)
-                            .foregroundColor(.cyan)
+                // Text Area (Visible on Focus)
+                if isFocused {
+                    HStack {
+                        Text(channel.title)
+                            .font(CinemeltTheme.fontBody(20))
+                            .fontWeight(.semibold)
+                            .foregroundColor(CinemeltTheme.cream)
+                            .lineLimit(1)
+                        
+                        Spacer()
+                        
+                        // "Up Next" Badge if progress is 0 (Next Episode)
+                        if progressPercentage == 0 && channel.type == "series" {
+                            Text("UP NEXT")
+                                .font(CinemeltTheme.fontTitle(14))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(CinemeltTheme.accent)
+                                .cornerRadius(4)
+                                .foregroundColor(.black)
+                        }
                     }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(CinemeltTheme.backgroundEnd)
                 }
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(white: 0.15))
             }
         }
         .buttonStyle(.card)
         .focused($isFocused)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(isFocused ? Color.cyan : Color.clear, lineWidth: 3)
+        .frame(width: 320)
+        .cornerRadius(12)
+        // Cinemelt Shadow
+        .shadow(
+            color: isFocused ? CinemeltTheme.accent.opacity(0.5) : .black.opacity(0.3),
+            radius: isFocused ? 20 : 5,
+            y: 5
         )
         .scaleEffect(isFocused ? 1.05 : 1.0)
-        .animation(.easeOut(duration: 0.2), value: isFocused)
-        .frame(width: 320)
+        .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isFocused)
     }
 }
