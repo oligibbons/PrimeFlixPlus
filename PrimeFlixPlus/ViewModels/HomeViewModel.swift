@@ -276,22 +276,37 @@ class HomeViewModel: ObservableObject {
         guard let repo = repository, let pl = selectedPlaylist else { return }
         let type = selectedTab.rawValue
         
-        switch section.type {
-        case .genre(let g), .provider(let g):
-            self.drillDownCategory = g
-            self.displayedGridChannels = repo.getBrowsingContent(playlistUrl: pl.url, type: type, group: g)
-        case .recent:
-            self.drillDownCategory = "Recently Added"
-            self.displayedGridChannels = repo.getRecentFallback(type: type, limit: 200)
-        case .favorites:
-            self.drillDownCategory = "My List"
-            self.displayedGridChannels = repo.getFavorites(type: type)
-        case .continueWatching:
-            self.drillDownCategory = "Continue Watching"
-            self.displayedGridChannels = section.items
-        case .trending:
-            self.drillDownCategory = "Trending Now"
-            self.displayedGridChannels = section.items
+        // OPTIMIZATION: Moved to background task to prevent UI freeze on large categories
+        Task {
+            let results: [Channel]
+            
+            switch section.type {
+            case .genre(let g), .provider(let g):
+                self.drillDownCategory = g
+                // This repository call can be heavy due to deduplication, so we await it
+                results = repo.getBrowsingContent(playlistUrl: pl.url, type: type, group: g)
+                
+            case .recent:
+                self.drillDownCategory = "Recently Added"
+                results = repo.getRecentFallback(type: type, limit: 200)
+                
+            case .favorites:
+                self.drillDownCategory = "My List"
+                results = repo.getFavorites(type: type)
+                
+            case .continueWatching:
+                self.drillDownCategory = "Continue Watching"
+                results = section.items
+                
+            case .trending:
+                self.drillDownCategory = "Trending Now"
+                results = section.items
+            }
+            
+            // Update UI on MainActor
+            await MainActor.run {
+                self.displayedGridChannels = results
+            }
         }
     }
     

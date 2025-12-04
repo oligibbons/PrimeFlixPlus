@@ -95,7 +95,6 @@ class PrimeFlixRepository: ObservableObject {
         return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type, group: group)
     }
     
-    // Fixed: Added missing synchronous method to satisfy compiler calls from legacy code
     func getTrendingMatches(type: String, tmdbResults: [String]) -> [Channel] {
         return channelRepo.getTrendingMatches(type: type, tmdbResults: tmdbResults)
     }
@@ -126,23 +125,21 @@ class PrimeFlixRepository: ObservableObject {
     
     // MARK: - Thread-Safe / Background Accessors (Optimized)
     
-    /// Fetches trending matches on a background context to avoid blocking the Main Thread
     nonisolated func getTrendingMatchesAsync(type: String, tmdbResults: [String]) async -> [NSManagedObjectID] {
         let bgContext = container.newBackgroundContext()
         
-        // Correctly return value from the async perform block
         return await bgContext.perform {
             var matches: [NSManagedObjectID] = []
             var seenTitles = Set<String>()
             
             for title in tmdbResults {
                 let req = NSFetchRequest<Channel>(entityName: "Channel")
-                // Note: CONTAINS is expensive, which is why we run this on background
                 req.predicate = NSPredicate(format: "type == %@ AND title CONTAINS[cd] %@", type, title)
                 req.fetchLimit = 1
                 
                 if let match = try? bgContext.fetch(req).first {
-                    let norm = TitleNormalizer.parse(rawTitle: match.title).normalizedTitle
+                    let rawForDedup = match.canonicalTitle ?? match.title
+                    let norm = TitleNormalizer.parse(rawTitle: rawForDedup).normalizedTitle
                     if !seenTitles.contains(norm) {
                         matches.append(match.objectID)
                         seenTitles.insert(norm)
@@ -198,17 +195,20 @@ class PrimeFlixRepository: ObservableObject {
             self.syncStatusMessage = "Connecting..."
         }
         
-        // 1. Snapshot existing content to avoid duplicates (Smart Sync)
-        var existingUrls = Set<String>()
+        // 1. Snapshot existing content to avoid duplicates AND allow updates
+        var existingMap: [String: NSManagedObjectID] = [:]
+        
         let context = container.newBackgroundContext()
         context.performAndWait {
-            let req = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
+            let req = NSFetchRequest<Channel>(entityName: "Channel")
             req.predicate = NSPredicate(format: "playlistUrl == %@", playlistUrl)
+            // Just need URL and ObjectID to map
             req.propertiesToFetch = ["url"]
-            req.resultType = .dictionaryResultType
             
-            if let results = try? context.fetch(req) as? [[String: String]] {
-                existingUrls = Set(results.compactMap { $0["url"] })
+            if let results = try? context.fetch(req) {
+                for ch in results {
+                    existingMap[ch.url] = ch.objectID
+                }
             }
         }
         
@@ -219,14 +219,12 @@ class PrimeFlixRepository: ObservableObject {
                 let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
                 
                 do {
-                    // Try Bulk Sync
-                    let newUrls = try await syncXtreamBulk(input: input, playlistUrl: playlistUrl, existing: existingUrls)
+                    let newUrls = try await syncXtreamBulk(input: input, playlistUrl: playlistUrl, existingMap: existingMap)
                     processedUrls.formUnion(newUrls)
                 } catch {
-                    // Fallback to Category Sync
                     if let xErr = error as? XtreamError, case .invalidResponse(let code, _) = xErr, [512, 513, 504].contains(code) {
                         await MainActor.run { self.syncStatusMessage = "Deep Sync (Safe Mode)..." }
-                        let newUrls = try await syncXtreamByCategories(input: input, playlistUrl: playlistUrl, existing: existingUrls)
+                        let newUrls = try await syncXtreamByCategories(input: input, playlistUrl: playlistUrl, existingMap: existingMap)
                         processedUrls.formUnion(newUrls)
                     } else {
                         throw error
@@ -234,11 +232,12 @@ class PrimeFlixRepository: ObservableObject {
                 }
                 
             } else if source == .m3u {
-                let newUrls = try await syncM3U(playlistUrl: playlistUrl)
+                let newUrls = try await syncM3U(playlistUrl: playlistUrl, existingMap: existingMap)
                 processedUrls.formUnion(newUrls)
             }
             
             // 2. Orphan Deletion
+            let existingUrls = Set(existingMap.keys)
             let orphans = existingUrls.subtracting(processedUrls)
             if !orphans.isEmpty {
                 await deleteOrphans(urls: Array(orphans), playlistUrl: playlistUrl)
@@ -271,36 +270,33 @@ class PrimeFlixRepository: ObservableObject {
         }
     }
     
-    // MARK: - Sync Helpers
+    // MARK: - Sync Helpers (Updated for Upsert)
     
-    private func syncXtreamBulk(input: XtreamInput, playlistUrl: String, existing: Set<String>) async throws -> Set<String> {
+    private func syncXtreamBulk(input: XtreamInput, playlistUrl: String, existingMap: [String: NSManagedObjectID]) async throws -> Set<String> {
         var verified = Set<String>()
         
         await MainActor.run { self.syncStatusMessage = "Checking Live..." }
         let live = try await xtreamClient.getLiveStreams(input: input)
         let liveStructs = live.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
         verified.formUnion(liveStructs.map { $0.url })
-        let newLive = liveStructs.filter { !existing.contains($0.url) }
-        await saveBatch(items: newLive)
+        await saveBatch(items: liveStructs, existingMap: existingMap)
         
         await MainActor.run { self.syncStatusMessage = "Checking Movies..." }
         let vod = try await xtreamClient.getVodStreams(input: input)
         let vodStructs = vod.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
         verified.formUnion(vodStructs.map { $0.url })
-        let newVod = vodStructs.filter { !existing.contains($0.url) }
-        await saveBatch(items: newVod)
+        await saveBatch(items: vodStructs, existingMap: existingMap)
         
         await MainActor.run { self.syncStatusMessage = "Checking Series..." }
         let series = try await xtreamClient.getSeries(input: input)
         let seriesStructs = series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) }
         verified.formUnion(seriesStructs.map { $0.url })
-        let newSeries = seriesStructs.filter { !existing.contains($0.url) }
-        await saveBatch(items: newSeries)
+        await saveBatch(items: seriesStructs, existingMap: existingMap)
         
         return verified
     }
     
-    private func syncXtreamByCategories(input: XtreamInput, playlistUrl: String, existing: Set<String>) async throws -> Set<String> {
+    private func syncXtreamByCategories(input: XtreamInput, playlistUrl: String, existingMap: [String: NSManagedObjectID]) async throws -> Set<String> {
         var verified = Set<String>()
         
         let liveCats = try await xtreamClient.getLiveCategories(input: input)
@@ -309,8 +305,7 @@ class PrimeFlixRepository: ObservableObject {
             if let streams = try? await xtreamClient.getLiveStreams(input: input, categoryId: cat.categoryId) {
                 let structs = streams.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
                 verified.formUnion(structs.map { $0.url })
-                let newItems = structs.filter { !existing.contains($0.url) }
-                await saveBatch(items: newItems)
+                await saveBatch(items: structs, existingMap: existingMap)
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
@@ -321,8 +316,7 @@ class PrimeFlixRepository: ObservableObject {
             if let streams = try? await xtreamClient.getVodStreams(input: input, categoryId: cat.categoryId) {
                 let structs = streams.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
                 verified.formUnion(structs.map { $0.url })
-                let newItems = structs.filter { !existing.contains($0.url) }
-                await saveBatch(items: newItems)
+                await saveBatch(items: structs, existingMap: existingMap)
             }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
@@ -330,14 +324,13 @@ class PrimeFlixRepository: ObservableObject {
         if let series = try? await xtreamClient.getSeries(input: input) {
             let structs = series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) }
             verified.formUnion(structs.map { $0.url })
-            let newItems = structs.filter { !existing.contains($0.url) }
-            await saveBatch(items: newItems)
+            await saveBatch(items: structs, existingMap: existingMap)
         }
         
         return verified
     }
     
-    private func syncM3U(playlistUrl: String) async throws -> Set<String> {
+    private func syncM3U(playlistUrl: String, existingMap: [String: NSManagedObjectID]) async throws -> Set<String> {
         await MainActor.run { self.syncStatusMessage = "Downloading M3U..." }
         guard let url = URL(string: playlistUrl) else { throw URLError(.badURL) }
         let (data, response) = try await UnsafeSession.shared.data(from: url)
@@ -346,19 +339,33 @@ class PrimeFlixRepository: ObservableObject {
         if let content = String(data: data, encoding: .utf8) {
             await MainActor.run { self.syncStatusMessage = "Parsing..." }
             let channels = await M3UParser.parse(content: content, playlistUrl: playlistUrl)
-            await saveBatch(items: channels)
+            await saveBatch(items: channels, existingMap: existingMap)
             return Set(channels.map { $0.url })
         }
         return []
     }
     
-    private func saveBatch(items: [ChannelStruct]) async {
+    private func saveBatch(items: [ChannelStruct], existingMap: [String: NSManagedObjectID]) async {
         guard !items.isEmpty else { return }
         
         await container.performBackgroundTask { context in
             context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+            
             for item in items {
-                _ = item.toManagedObject(context: context)
+                // UPSERT LOGIC
+                if let existingID = existingMap[item.url], let existingChannel = try? context.existingObject(with: existingID) as? Channel {
+                    // Update existing
+                    existingChannel.title = item.title
+                    existingChannel.group = item.group
+                    existingChannel.cover = item.cover
+                    // Important: Update the canonical title if it was missing
+                    if existingChannel.canonicalTitle == nil {
+                        existingChannel.canonicalTitle = item.canonicalTitle
+                    }
+                } else {
+                    // Insert new
+                    _ = item.toManagedObject(context: context)
+                }
             }
             try? context.save()
         }

@@ -7,16 +7,11 @@ class SettingsViewModel: ObservableObject {
     
     // --- User Preferences (Persisted) ---
     
-    // These properties are saved to UserDefaults.
-    // The UI binds directly to these, and DetailsViewModel reads them
-    // to decide which file version to play automatically.
-    
     @AppStorage("preferredLanguage") var preferredLanguage: String = "English"
     @AppStorage("preferredResolution") var preferredResolution: String = "4K UHD"
     
     // --- Configuration Options ---
     
-    // Lists used by the Settings View Pickers
     let availableLanguages = [
         "English",
         "Arabic",
@@ -54,7 +49,6 @@ class SettingsViewModel: ObservableObject {
     
     func configure(repository: PrimeFlixRepository) {
         self.repository = repository
-        // Initial load of playlists for the management list
         loadPlaylists()
     }
     
@@ -66,20 +60,17 @@ class SettingsViewModel: ObservableObject {
     // --- Actions ---
     
     func deletePlaylist(_ playlist: Playlist) {
-        // Forward the deletion request to the repository
         repository?.deletePlaylist(playlist)
-        // Refresh our local list to update the UI immediately
         loadPlaylists()
     }
     
     func syncAll() async {
         // Trigger a global sync via the repository
+        // This will now use the new logic to clean titles and populate metadata
         await repository?.syncAll()
     }
     
     func clearCache() {
-        // Clears the URLCache used by AsyncImage
-        // This frees up disk space and forces fresh image downloads next time
         URLCache.shared.removeAllCachedResponses()
         print("✅ Image Cache Cleared")
     }

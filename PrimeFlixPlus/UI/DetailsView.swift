@@ -26,7 +26,7 @@ struct DetailsView: View {
             
             // 1. Background (GPU Optimized)
             backgroundLayer
-                .drawingGroup() // CRITICAL: Offloads heavy blur/gradient to GPU
+                .drawingGroup()
             
             // 2. Content
             if viewModel.isLoading {
@@ -40,10 +40,8 @@ struct DetailsView: View {
             viewModel.configure(repository: repository)
         }
         .task {
-            // Async load ensures navigation animation finishes first
             await viewModel.loadData()
             
-            // Smart Focus: Only set focus once data is ready to avoid "focus jumping"
             if focusedField == nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     focusedField = .play
@@ -103,7 +101,7 @@ struct DetailsView: View {
     
     private var contentScrollView: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 30) {
+            VStack(alignment: .leading, spacing: 40) {
                 
                 Spacer().frame(height: 350)
                 
@@ -126,20 +124,24 @@ struct DetailsView: View {
                         .padding(.top, 10)
                 }
                 .padding(.horizontal, 80)
+                .focusSection() // Group Title/Meta as one focus block
                 
                 // --- Buttons ---
                 actionButtons
                     .padding(.horizontal, 80)
+                    .focusSection() // CRITICAL: Allows navigating DOWN from here
                 
                 // --- Version Selector (New) ---
                 if viewModel.availableVersions.count > 1 {
                     versionSelector
                         .padding(.horizontal, 80)
+                        .focusSection()
                 }
                 
                 // --- Cast ---
                 if !viewModel.cast.isEmpty {
                     castRail
+                        .focusSection() // CRITICAL: Allows navigating INTO this scroll view
                 }
                 
                 // --- Seasons/Episodes (Series Only) ---
@@ -149,7 +151,6 @@ struct DetailsView: View {
                 
                 Spacer(minLength: 150)
             }
-            .focusSection()
         }
     }
     
@@ -222,7 +223,6 @@ struct DetailsView: View {
         }
     }
     
-    // FIX: Replaced incompatible 'Menu' with Button + confirmationDialog
     private var versionSelector: some View {
         Button(action: { viewModel.showVersionSelector = true }) {
             HStack {
@@ -310,6 +310,7 @@ struct DetailsView: View {
                 .padding(.horizontal, 80)
                 .padding(.vertical, 20)
             }
+            .focusSection()
             
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 50) {
@@ -324,6 +325,7 @@ struct DetailsView: View {
                 .padding(.horizontal, 80)
                 .padding(.vertical, 40)
             }
+            .focusSection()
         }
     }
     
