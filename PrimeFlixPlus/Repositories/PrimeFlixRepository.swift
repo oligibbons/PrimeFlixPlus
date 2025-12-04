@@ -3,6 +3,14 @@ import CoreData
 import Combine
 import SwiftUI
 
+// MARK: - Helper Structs
+// Critical Fix: Defined at file scope so it is visible to nonisolated/async contexts
+fileprivate struct ExistingData {
+    let id: NSManagedObjectID
+    let group: String
+    let title: String
+}
+
 @MainActor
 class PrimeFlixRepository: ObservableObject {
     
@@ -19,13 +27,6 @@ class PrimeFlixRepository: ObservableObject {
     
     // Main Context Accessor
     private let channelRepo: ChannelRepository
-    
-    // FIX: Moved struct to class level so helper methods can access it
-    private struct ExistingData {
-        let id: NSManagedObjectID
-        let group: String
-        let title: String
-    }
     
     init(container: NSPersistentContainer) {
         self.container = container

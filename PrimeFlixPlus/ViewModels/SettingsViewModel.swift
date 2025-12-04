@@ -7,6 +7,9 @@ import Combine
 class CategoryPreferences {
     static let shared = CategoryPreferences()
     
+    // NOTIFICATION: Broadcasts when categories change so HomeView can refresh
+    static let didChangeNotification = Notification.Name("CategoryPreferencesDidChange")
+    
     private let hiddenKey = "userHiddenCategories"
     private var hiddenCategories: Set<String> {
         get {
@@ -15,13 +18,15 @@ class CategoryPreferences {
         }
         set {
             UserDefaults.standard.set(Array(newValue), forKey: hiddenKey)
+            // Notify observers (HomeViewModel)
+            NotificationCenter.default.post(name: CategoryPreferences.didChangeNotification, object: nil)
         }
     }
     
     // Define prefixes to KEEP for each language.
-    // If a group starts with a country code NOT in this list, it is filtered out.
+    // If a group starts with a country code NOT in this list, it is filtered out by isForeign().
     private let languagePrefixes: [String: [String]] = [
-        "English": ["EN", "US", "UK", "CA", "AU", "IE", "4K", "UHD", "VIP"],
+        "English": ["EN", "US", "UK", "CA", "AU", "IE", "4K", "UHD", "VIP", "DOC"],
         "Dutch": ["NL", "BE", "EU"],
         "French": ["FR", "BE", "CH", "CA"],
         "German": ["DE", "AT", "CH"],
@@ -49,31 +54,52 @@ class CategoryPreferences {
         hiddenCategories = current
     }
     
+    /// Mass hides a list of categories (Used for Auto-Hide feature)
+    func bulkHide(_ groups: [String]) {
+        var current = hiddenCategories
+        var changed = false
+        for group in groups {
+            if !current.contains(group) {
+                current.insert(group)
+                changed = true
+            }
+        }
+        if changed {
+            hiddenCategories = current
+        }
+    }
+    
     // MARK: - Core Logic
     
     func shouldShow(group: String, language: String) -> Bool {
         // 1. Manual Hide check
         if isCategoryHidden(group) { return false }
+        return true
+    }
+    
+    /// Determines if a category is considered "Foreign" based on the user's language.
+    func isForeign(group: String, language: String) -> Bool {
+        guard let prefix = extractPrefix(from: group) else { return false }
         
-        // 2. Language Filter
-        // If the group has a prefix like "NL |", check if "NL" is allowed for the current language.
-        if let prefix = extractPrefix(from: group) {
-            let allowed = languagePrefixes[language] ?? []
-            // If the prefix is a known country code (2-3 letters), but NOT in our allowed list, hide it.
-            // We verify it's a country code by length to avoid hiding "Action" or "Sci-Fi".
-            if prefix.count <= 3 && !allowed.contains(prefix) {
-                // Special case: "4K", "3D", "VIP" are usually universal, keep them if unsure
-                if ["4K", "3D", "VIP", "UHD"].contains(prefix) { return true }
+        let allowed = languagePrefixes[language] ?? []
+        
+        // If the prefix is a known country code (2-3 letters), but NOT in our allowed list, it's foreign.
+        if prefix.count >= 2 && prefix.count <= 3 {
+            // Safety check: Don't hide technical tags
+            if ["4K", "3D", "VIP", "UHD", "HDR", "VOD", "FHD", "HEVC"].contains(prefix) {
                 return false
+            }
+            
+            if !allowed.contains(prefix) {
+                return true
             }
         }
         
-        return true
+        return false
     }
     
     func cleanName(_ group: String) -> String {
         // Regex to find "XX | " or "XX : " pattern
-        // We strip it ONLY if it matches the standard IPTV format
         if let range = group.range(of: "^[A-Z]{2,3}\\s*[|:-]\\s*", options: .regularExpression) {
             let clean = String(group[range.upperBound...])
             return clean.isEmpty ? group : clean
@@ -86,7 +112,7 @@ class CategoryPreferences {
         let parts = group.components(separatedBy: CharacterSet(charactersIn: "|:-"))
         if let first = parts.first {
             let trimmed = first.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            // Check if it looks like a country code (2-3 uppercase letters)
+            // Check if it looks like a country code
             if trimmed.count >= 2 && trimmed.count <= 3 && trimmed.allSatisfy({ $0.isLetter || $0.isNumber }) {
                 return trimmed
             }
@@ -101,6 +127,7 @@ class SettingsViewModel: ObservableObject {
     // --- User Preferences ---
     @AppStorage("preferredLanguage") var preferredLanguage: String = "English"
     @AppStorage("preferredResolution") var preferredResolution: String = "4K UHD"
+    @AppStorage("autoHideForeign") var autoHideForeign: Bool = false
     
     // --- Configuration Options ---
     let availableLanguages = [
@@ -170,5 +197,38 @@ class SettingsViewModel: ObservableObject {
     
     func clearCache() {
         URLCache.shared.removeAllCachedResponses()
+    }
+    
+    // MARK: - Auto-Hide Logic
+    
+    /// Scans all known categories and hides those that do not match the preferred language.
+    func runAutoHidingLogic() {
+        guard autoHideForeign else { return }
+        
+        // Ensure we have data to process
+        if allCategories.isEmpty {
+            loadCategories()
+        }
+        
+        let language = preferredLanguage
+        
+        // Identify "Foreign" categories
+        let foreignCategories = allCategories.filter { group in
+            CategoryPreferences.shared.isForeign(group: group, language: language)
+        }
+        
+        guard !foreignCategories.isEmpty else {
+            print("⚠️ No foreign categories found to hide.")
+            return
+        }
+        
+        print("🌍 Auto-Hiding \(foreignCategories.count) foreign categories for language: \(language)")
+        
+        // Bulk hide them (Adding to the blacklist)
+        // This triggers the Notification due to the setter in CategoryPreferences
+        CategoryPreferences.shared.bulkHide(foreignCategories)
+        
+        // Refresh UI
+        objectWillChange.send()
     }
 }

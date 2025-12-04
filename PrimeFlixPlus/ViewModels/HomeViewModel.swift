@@ -78,7 +78,7 @@ class HomeViewModel: ObservableObject {
         // Initial load of cached data
         refreshContent(forceLoadingState: sections.isEmpty)
         
-        // Listen specifically for Sync Status changes to auto-refresh when sync completes
+        // 1. Listen specifically for Sync Status changes to auto-refresh when sync completes
         repository.$isSyncing
             .removeDuplicates()
             .receive(on: RunLoop.main)
@@ -97,6 +97,15 @@ class HomeViewModel: ObservableObject {
                     // Sync started. Do nothing. Let the user browse cached data undisturbed.
                     print("⏳ Sync started. Pausing UI updates.")
                 }
+            }
+            .store(in: &cancellables)
+        
+        // 2. Listen for Category/Settings Changes (Auto-refresh on Hide/Unhide/Auto-Hide)
+        NotificationCenter.default.publisher(for: CategoryPreferences.didChangeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                print("🔄 Categories changed. Refreshing Home UI immediately.")
+                self?.refreshContent(forceLoadingState: false)
             }
             .store(in: &cancellables)
     }
@@ -229,7 +238,7 @@ class HomeViewModel: ObservableObject {
                         // B. CLEAN: Remove prefixes like "NL | "
                         let cleanTitle = CategoryPreferences.shared.cleanName(rawGroup)
                         
-                        // C. DEDUP: Skip if we already added this RAW group
+                        // C. DEDUP: Skip if we already added this RAW group or a cleaned version of it
                         if addedGroups.contains(rawGroup) { continue }
                         
                         // D. FETCH CONTENT

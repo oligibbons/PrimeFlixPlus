@@ -46,7 +46,7 @@ struct SettingsView: View {
                 Spacer()
                 
                 // Version Info
-                Text("PrimeFlix v1.1")
+                Text("PrimeFlix v1.2")
                     .font(CinemeltTheme.fontBody(18))
                     .foregroundColor(.gray)
                     .padding(.horizontal, 20)
@@ -66,7 +66,7 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 50) {
                         
-                        // --- SECTION 1: CONTENT & FILTERING (NEW) ---
+                        // --- SECTION 1: CONTENT & FILTERING ---
                         VStack(alignment: .leading, spacing: 25) {
                             Text("Content Preferences")
                                 .font(CinemeltTheme.fontTitle(32))
@@ -111,7 +111,7 @@ struct SettingsView: View {
                                                 .font(CinemeltTheme.fontBody(22))
                                                 .fontWeight(.bold)
                                                 .foregroundColor(CinemeltTheme.cream)
-                                            Text("Hide unwanted groups")
+                                            Text("Unhide specific items")
                                                 .font(CinemeltTheme.fontBody(16))
                                                 .foregroundColor(.gray)
                                         }
@@ -124,6 +124,50 @@ struct SettingsView: View {
                                 }
                                 .buttonStyle(CinemeltCardButtonStyle())
                             }
+                            
+                            // NEW: Auto-Hide Custom Toggle (Replaces standard Toggle for tvOS compatibility)
+                            Button(action: {
+                                viewModel.autoHideForeign.toggle()
+                                if viewModel.autoHideForeign {
+                                    viewModel.runAutoHidingLogic()
+                                }
+                            }) {
+                                HStack {
+                                    Image(systemName: viewModel.autoHideForeign ? "eye.slash.fill" : "eye")
+                                        .foregroundColor(CinemeltTheme.accent)
+                                        .font(.title2)
+                                        .frame(width: 40)
+                                    
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Auto-Hide Foreign Content")
+                                            .font(CinemeltTheme.fontBody(22))
+                                            .fontWeight(.bold)
+                                            .foregroundColor(CinemeltTheme.cream)
+                                        
+                                        Text(viewModel.autoHideForeign ? "Hiding categories not in \(viewModel.preferredLanguage)" : "Show all content languages")
+                                            .font(CinemeltTheme.fontBody(16))
+                                            .foregroundColor(.gray)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    // Custom Switch Visual
+                                    ZStack {
+                                        Capsule()
+                                            .fill(viewModel.autoHideForeign ? CinemeltTheme.accent : Color.white.opacity(0.2))
+                                            .frame(width: 60, height: 32)
+                                        
+                                        Circle()
+                                            .fill(.white)
+                                            .frame(width: 24, height: 24)
+                                            .offset(x: viewModel.autoHideForeign ? 14 : -14)
+                                    }
+                                }
+                                .padding(20)
+                                .background(Color.white.opacity(0.05))
+                                .cornerRadius(16)
+                            }
+                            .buttonStyle(CinemeltCardButtonStyle())
                         }
                         .padding(40)
                         .cinemeltGlass()
@@ -237,10 +281,9 @@ struct SettingsView: View {
                     .padding(50)
                     .padding(.bottom, 100)
                 }
-                .background(Color.clear) // Keep generic background visible
+                .background(Color.clear)
             }
-            .navigationViewStyle(.stack) // Crucial for embedding in split view
-            // FIX: Enable Smart Navigation for the content pane to prevent focus trapping
+            .navigationViewStyle(.stack)
             .focusSection()
         }
         .background(CinemeltTheme.mainBackground)
@@ -309,6 +352,10 @@ struct LanguageSelectionView: View {
                         ForEach(viewModel.availableLanguages, id: \.self) { lang in
                             Button(action: {
                                 viewModel.preferredLanguage = lang
+                                // Trigger Auto-Hide again if enabled when language changes
+                                if viewModel.autoHideForeign {
+                                    viewModel.runAutoHidingLogic()
+                                }
                                 presentationMode.wrappedValue.dismiss()
                             }) {
                                 HStack {
