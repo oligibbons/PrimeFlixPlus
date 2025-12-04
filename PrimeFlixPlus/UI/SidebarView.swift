@@ -18,14 +18,13 @@ struct SidebarView: View {
             
             // Logo Area
             VStack(spacing: 10) {
-                // Uses the asset you added to Assets.xcassets
                 Image("CinemeltLogo")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(height: 60) // Adjust height to fit your logo's aspect ratio
+                    .frame(height: 60)
                     .shadow(color: CinemeltTheme.accent.opacity(0.5), radius: 15, x: 0, y: 5)
                 
-                // Fallback text if image fails or isn't set yet
+                // Use image if available, otherwise text fallback
                 if UIImage(named: "CinemeltLogo") == nil {
                     Text("Cinemelt")
                         .font(.custom("Zain-Bold", size: 30))
@@ -47,20 +46,19 @@ struct SidebarView: View {
                     HStack(spacing: 15) {
                         Image(systemName: item.icon)
                             .font(.system(size: 24, weight: .semibold))
-                            .frame(width: 35) // Fixed width for alignment
+                            .frame(width: 35) // Fixed width icon for alignment
                         
                         Text(item.label)
                             .font(CinemeltTheme.fontBody(24))
                             .fontWeight(.semibold)
                         
-                        Spacer() // CRITICAL: Forces content to the left
+                        Spacer() // Forces text to left align comfortably
                     }
                     .padding(.vertical, 12)
                     .padding(.horizontal, 20)
                 }
                 .buttonStyle(.card)
                 .focused($focusedItem, equals: item.destination)
-                // Visual Indicator logic
                 .background(
                     ZStack {
                         if currentSelection == item.destination {
@@ -80,7 +78,7 @@ struct SidebarView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 40)
-        .frame(width: 300) // Slightly wider for better breathing room
+        .frame(width: 300)
         .background(.ultraThinMaterial)
         .ignoresSafeArea()
     }

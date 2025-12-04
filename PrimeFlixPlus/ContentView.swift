@@ -1,7 +1,8 @@
 import SwiftUI
 
-// Navigation State (Kept from original, extended for hashable sidebar)
-enum NavigationDestination: Equatable {
+// Navigation State
+// FIXED: Added Hashable conformance to satisfy Sidebar focus requirements
+enum NavigationDestination: Hashable {
     case home
     case search
     case details(Channel)
@@ -9,6 +10,7 @@ enum NavigationDestination: Equatable {
     case settings
     case addPlaylist
     
+    // Explicit Equatable Logic (Keep logic strictly on URLs for channels)
     static func == (lhs: NavigationDestination, rhs: NavigationDestination) -> Bool {
         switch (lhs, rhs) {
         case (.home, .home): return true
@@ -18,6 +20,22 @@ enum NavigationDestination: Equatable {
         case (.player(let c1), .player(let c2)): return c1.url == c2.url
         case (.details(let c1), .details(let c2)): return c1.url == c2.url
         default: return false
+        }
+    }
+    
+    // Explicit Hashable Logic (CRITICAL FIX)
+    func hash(into hasher: inout Hasher) {
+        switch self {
+        case .home: hasher.combine(0)
+        case .search: hasher.combine(1)
+        case .details(let c):
+            hasher.combine(2)
+            hasher.combine(c.url) // Hash the URL to match Equatable logic
+        case .player(let c):
+            hasher.combine(3)
+            hasher.combine(c.url)
+        case .settings: hasher.combine(4)
+        case .addPlaylist: hasher.combine(5)
         }
     }
 }

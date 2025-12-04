@@ -1,10 +1,8 @@
 import SwiftUI
 
 struct EpisodeCard: View {
+    // This type comes from DetailsViewModel, make sure DetailsViewModel is compiling
     let episode: DetailsViewModel.MergedEpisode
-    
-    // Focus is handled by the parent Button in DetailsView,
-    // so we just define the visual layout here.
     
     var body: some View {
         HStack(spacing: 20) {
@@ -61,7 +59,6 @@ struct EpisodeCard: View {
         .padding(12)
         .background(Color.white.opacity(0.05))
         .cornerRadius(16)
-        // Ensure the card stretches to fill the button's focus frame
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
