@@ -39,6 +39,10 @@ class HomeViewModel: ObservableObject {
     @Published var drillDownCategory: String? = nil // If non-nil, show Grid View
     @Published var displayedGridChannels: [Channel] = []
     
+    // Dynamic Greeting State
+    @Published var timeGreeting: String = "Welcome Back"
+    @Published var witGreeting: String = "Ready to watch?"
+    
     private var repository: PrimeFlixRepository?
     private let tmdbClient = TmdbClient() // Used for trending logic
     
@@ -48,10 +52,12 @@ class HomeViewModel: ObservableObject {
         if selectedPlaylist == nil, let first = playlists.first {
             selectedPlaylist = first
         }
+        updateGreeting()
     }
     
     func selectPlaylist(_ playlist: Playlist) {
         self.selectedPlaylist = playlist
+        updateGreeting()
         refreshContent()
     }
     
@@ -59,6 +65,40 @@ class HomeViewModel: ObservableObject {
         self.selectedTab = tab
         self.drillDownCategory = nil
         refreshContent()
+    }
+    
+    // MARK: - The "Wit" Engine (Greetings)
+    private func updateGreeting() {
+        // 1. Calculate Time Greeting (Top Line)
+        let hour = Calendar.current.component(.hour, from: Date())
+        if hour < 5 { self.timeGreeting = "Up late?" }
+        else if hour < 12 { self.timeGreeting = "Good Morning" }
+        else if hour < 17 { self.timeGreeting = "Good Afternoon" }
+        else { self.timeGreeting = "Good Evening" }
+        
+        // 2. Calculate Wit Message (Bottom Line)
+        let playfulMessages = [
+            "Popcorn ready?",
+            "Let's find something amazing.",
+            "Cinema mode: On.",
+            "Your library looks great.",
+            "Time to relax.",
+            "Ready for the next episode?",
+            "The show must go on.",
+            "Discover something new.",
+            "It's movie night.",
+            "Press play and drift away."
+        ]
+        
+        // Context-aware overrides
+        if playlists.isEmpty {
+            self.witGreeting = "Let's get you set up."
+        } else if sections.isEmpty {
+            self.witGreeting = "Building your cinema..."
+        } else {
+            // Pick a random message
+            self.witGreeting = playfulMessages.randomElement() ?? "Ready to watch?"
+        }
     }
     
     // MARK: - Main Refresh Logic
@@ -182,6 +222,7 @@ class HomeViewModel: ObservableObject {
             await MainActor.run {
                 self.sections = newSections
                 self.isLoading = false
+                self.updateGreeting() // Refresh greeting after load
             }
         }
     }

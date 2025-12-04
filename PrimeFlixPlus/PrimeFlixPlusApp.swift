@@ -9,6 +9,9 @@ struct PrimeFlixPlusApp: App {
     // 2. Initialize Repository (The Brain)
     @StateObject private var repository: PrimeFlixRepository
     
+    // 3. Splash Screen State
+    @State private var showSplash = true
+    
     init() {
         // Initialize repository using the persistent container
         let repo = PrimeFlixRepository(container: PersistenceController.shared.container)
@@ -18,22 +21,39 @@ struct PrimeFlixPlusApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
-                // 1. Main App Content (Sidebar + Views)
-                ContentView()
-                    .environmentObject(repository)
-                    .environment(\.managedObjectContext, persistenceController.container.viewContext)
-                
-                // 2. Global Sync Overlay
-                // Sits on top of everything (Z-Index)
-                SyncStatusOverlay()
-                    .environmentObject(repository)
-                    .zIndex(100)
+                if showSplash {
+                    SplashView()
+                        .transition(.opacity.animation(.easeOut(duration: 0.8)))
+                        .zIndex(2)
+                } else {
+                    ZStack {
+                        // 1. Main App Content
+                        ContentView()
+                            .environmentObject(repository)
+                            .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                        
+                        // 2. Global Sync Overlay (Toasts)
+                        SyncStatusOverlay()
+                            .environmentObject(repository)
+                            .zIndex(100)
+                    }
+                    .transition(.opacity.animation(.easeIn(duration: 0.8)))
+                    .zIndex(1)
+                }
             }
             .onAppear {
-                // 3. Auto-Sync on App Launch
+                // 4. App Launch Logic
                 Task {
-                    // Slight delay to allow UI to settle before hammering network
-                    try? await Task.sleep(nanoseconds: 1 * 1_000_000_000)
+                    // Hold splash for 2.5 seconds for branding
+                    try? await Task.sleep(nanoseconds: 2_500_000_000)
+                    
+                    await MainActor.run {
+                        withAnimation {
+                            showSplash = false
+                        }
+                    }
+                    
+                    // Start background sync
                     await repository.syncAll()
                 }
             }

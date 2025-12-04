@@ -9,7 +9,6 @@ struct HomeView: View {
     var onSettings: () -> Void
     var onSearch: () -> Void
     
-    // Dynamic Hero Background State
     @State private var heroChannel: Channel?
     
     var body: some View {
@@ -48,7 +47,11 @@ struct HomeView: View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 10) {
                 
-                HomeHeaderView(title: viewModel.selectedPlaylist?.title ?? "Guest")
+                // UPDATED HEADER: Uses Time Greeting + Wit Message
+                HomeHeaderView(
+                    greeting: viewModel.timeGreeting,
+                    title: viewModel.witGreeting
+                )
                 
                 HomeFilterBar(
                     selectedTab: viewModel.selectedTab,
@@ -74,7 +77,7 @@ struct HomeView: View {
     }
 }
 
-// MARK: - SUBVIEWS (Extracted to fix Compiler Timeout)
+// MARK: - SUBVIEWS
 
 struct HomeBackgroundView: View {
     let heroChannel: Channel?
@@ -103,23 +106,26 @@ struct HomeBackgroundView: View {
 }
 
 struct HomeHeaderView: View {
+    let greeting: String
     let title: String
     
     var body: some View {
         HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Welcome Back,")
+            VStack(alignment: .leading, spacing: 6) {
+                Text(greeting)
                     .cinemeltBody()
-                    .opacity(0.6)
+                    .font(CinemeltTheme.fontBody(28))
+                    .opacity(0.8)
+                
                 Text(title)
                     .cinemeltTitle()
                     .font(CinemeltTheme.fontTitle(60))
-                    .cinemeltGlow()
+                    // Glow removed per request
             }
             Spacer()
         }
-        .padding(.top, 40)
-        .padding(.horizontal, 60)
+        .padding(.top, 50)
+        .padding(.horizontal, 80)
     }
 }
 
@@ -134,9 +140,9 @@ struct HomeFilterBar: View {
             tabButton(title: "Series", type: .series)
             tabButton(title: "Live TV", type: .live)
         }
-        .padding(.horizontal, 60)
-        .padding(.top, 20)
-        .padding(.bottom, 30)
+        .padding(.horizontal, 80)
+        .padding(.top, 30)
+        .padding(.bottom, 40)
     }
     
     private func tabButton(title: String, type: StreamType) -> some View {
@@ -144,16 +150,16 @@ struct HomeFilterBar: View {
             Text(title)
                 .font(CinemeltTheme.fontTitle(24))
                 .foregroundColor(selectedTab == type ? .black : CinemeltTheme.cream)
-                .padding(.horizontal, 30)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 35)
+                .padding(.vertical, 14)
                 .background(
                     ZStack {
                         if selectedTab == type {
-                            RoundedRectangle(cornerRadius: 20)
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
                                 .fill(CinemeltTheme.accent)
                                 .shadow(color: CinemeltTheme.accent.opacity(0.6), radius: 15)
                         } else {
-                            RoundedRectangle(cornerRadius: 20)
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
                                 .fill(CinemeltTheme.glassSurface)
                         }
                     }
@@ -186,7 +192,7 @@ struct HomeLanesView: View {
     let onFocus: (Channel) -> Void
     
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 40) {
+        LazyVStack(alignment: .leading, spacing: 50) {
             ForEach(sections) { section in
                 HomeSectionRow(
                     section: section,
@@ -213,23 +219,26 @@ struct HomeSectionRow: View {
             Button(action: onOpen) {
                 HStack(spacing: 15) {
                     Text(section.title)
-                        .font(CinemeltTheme.fontTitle(32))
-                        .foregroundColor(isHeaderFocused ? CinemeltTheme.accent : CinemeltTheme.cream)
-                        .shadow(color: isHeaderFocused ? CinemeltTheme.accent.opacity(0.6) : .clear, radius: 10)
+                        .font(CinemeltTheme.fontTitle(36))
+                        .foregroundColor(isHeaderFocused ? .black : CinemeltTheme.cream)
                     
                     Image(systemName: "chevron.right")
                         .font(.headline)
-                        .foregroundColor(CinemeltTheme.accent)
+                        .foregroundColor(isHeaderFocused ? .black : CinemeltTheme.accent)
                         .opacity(isHeaderFocused ? 1 : 0)
                         .offset(x: isHeaderFocused ? 5 : 0)
                 }
+                // FIXED PADDING: This forces the focus ring to expand
+                .padding(.vertical, 10)
+                .padding(.horizontal, 20)
+                .background(Color.clear)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.card)
             .focused($isHeaderFocused)
             .padding(.horizontal, 60)
             
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 50) {
+                LazyHStack(spacing: 60) {
                     ForEach(section.items) { channel in
                         if case .continueWatching = section.type {
                             ContinueWatchingCard(channel: channel) { onPlay(channel) }
@@ -242,8 +251,8 @@ struct HomeSectionRow: View {
                         }
                     }
                 }
-                .padding(.horizontal, 60)
-                .padding(.vertical, 40)
+                .padding(.horizontal, 80)
+                .padding(.vertical, 50)
             }
         }
     }
@@ -256,7 +265,7 @@ struct HomeDrillDownView: View {
     let onPlay: (Channel) -> Void
     let onFocus: (Channel) -> Void
     
-    let gridColumns = [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 60)]
+    let gridColumns = [GridItem(.adaptive(minimum: 200, maximum: 250), spacing: 60)]
     
     var body: some View {
         ZStack {
@@ -268,12 +277,14 @@ struct HomeDrillDownView: View {
                     Button(action: onClose) {
                         HStack(spacing: 15) {
                             Image(systemName: "arrow.left")
-                            Text(title).font(CinemeltTheme.fontTitle(50)).cinemeltGlow()
+                            Text(title).font(CinemeltTheme.fontTitle(50))
                         }
                         .foregroundColor(CinemeltTheme.cream)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 20)
                     }
-                    .buttonStyle(.plain)
-                    .padding(60)
+                    .buttonStyle(.card)
+                    .padding(80)
                     Spacer()
                 }
                 
@@ -287,7 +298,7 @@ struct HomeDrillDownView: View {
                             )
                         }
                     }
-                    .padding(.horizontal, 60)
+                    .padding(.horizontal, 80)
                     .padding(.bottom, 100)
                 }
             }
@@ -303,12 +314,20 @@ struct HomeProfileSelector: View {
     
     var body: some View {
         VStack(spacing: 60) {
-            Text("Who is watching?").cinemeltTitle()
+            Text("Who is watching?")
+                .cinemeltTitle()
+                .font(CinemeltTheme.fontTitle(60))
+            
             HStack(spacing: 80) {
                 Button(action: onAdd) {
                     VStack {
-                        Image(systemName: "plus").font(.system(size: 60)).padding(.bottom, 10)
-                        Text("Add Profile").cinemeltTitle()
+                        Image(systemName: "plus")
+                            .font(.system(size: 60))
+                            .foregroundColor(CinemeltTheme.accent)
+                            .padding(.bottom, 10)
+                        Text("Add Profile")
+                            .font(CinemeltTheme.fontTitle(28))
+                            .foregroundColor(CinemeltTheme.cream)
                     }
                     .frame(width: 300, height: 300)
                     .cinemeltGlass(radius: 150)

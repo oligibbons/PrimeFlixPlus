@@ -14,32 +14,32 @@ struct SidebarView: View {
     ]
     
     var body: some View {
-        VStack(alignment: .center, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             
-            // 1. Logo (Compact & Glowing)
-            VStack(spacing: 5) {
+            // 1. Logo
+            VStack {
                 Image("CinemeltLogo")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(height: 60)
-                    .shadow(color: CinemeltTheme.accent.opacity(0.8), radius: 15, x: 0, y: 0)
+                    .frame(width: 180, height: 100) // Larger logo
             }
+            .frame(maxWidth: .infinity)
             .padding(.top, 50)
-            .padding(.bottom, 50)
+            .padding(.bottom, 40)
             
             // 2. Navigation Items
-            VStack(spacing: 25) {
+            VStack(spacing: 20) { // Tighter spacing
                 ForEach(menuItems, id: \.destination.hashValue) { item in
                     Button(action: {
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                             currentSelection = item.destination
                         }
                     }) {
-                        HStack(spacing: 15) {
+                        HStack(spacing: 20) {
                             // Icon
                             Image(systemName: item.icon)
-                                .font(.system(size: 26, weight: .bold))
-                                .frame(width: 35)
+                                .font(.system(size: 24, weight: .semibold))
+                                .frame(width: 30)
                                 .foregroundColor(
                                     focusedItem == item.destination ? .black :
                                     currentSelection == item.destination ? CinemeltTheme.accent : .gray
@@ -56,29 +56,25 @@ struct SidebarView: View {
                             
                             Spacer()
                             
-                            // Active Indicator (Glowing Orb)
+                            // Active Indicator
                             if currentSelection == item.destination {
-                                Circle()
+                                Capsule()
                                     .fill(CinemeltTheme.accent)
-                                    .frame(width: 8, height: 8)
-                                    .shadow(color: CinemeltTheme.accent, radius: 6)
-                                    .matchedGeometryEffect(id: "activeOrb", in: animationNamespace)
+                                    .frame(width: 4, height: 20)
+                                    .matchedGeometryEffect(id: "activeIndicator", in: animationNamespace)
                             }
                         }
-                        .padding(.vertical, 14)
-                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16) // Tightened padding
                         .background(
                             ZStack {
-                                // Focused State (White Plate)
                                 if focusedItem == item.destination {
-                                    RoundedRectangle(cornerRadius: 14)
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
                                         .fill(CinemeltTheme.accent)
-                                        .shadow(color: CinemeltTheme.accent.opacity(0.6), radius: 12)
-                                }
-                                // Selected State (Subtle Glass)
-                                else if currentSelection == item.destination {
-                                    RoundedRectangle(cornerRadius: 14)
-                                        .fill(Color.white.opacity(0.08))
+                                        .shadow(color: CinemeltTheme.accent.opacity(0.5), radius: 15)
+                                } else if currentSelection == item.destination {
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .fill(Color.white.opacity(0.05))
                                 }
                             }
                         )
@@ -87,26 +83,24 @@ struct SidebarView: View {
                     .focused($focusedItem, equals: item.destination)
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 16)
             
             Spacer()
             
             // 3. Footer
             Text("v1.0")
-                .font(CinemeltTheme.fontBody(14))
-                .foregroundColor(.gray.opacity(0.5))
-                .padding(.bottom, 40)
+                .font(CinemeltTheme.fontBody(12))
+                .foregroundColor(.gray.opacity(0.4))
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 30)
         }
-        .frame(width: 300)
-        // Make it a floating capsule, not a full edge bar
+        .frame(width: 280) // Slimmer width
         .background(
-            RoundedRectangle(cornerRadius: 30)
+            Rectangle()
                 .fill(.ultraThinMaterial)
-                .background(Color.black.opacity(0.4))
-                .shadow(color: .black.opacity(0.5), radius: 30, x: 10, y: 0)
+                .ignoresSafeArea()
         )
-        .padding(.vertical, 40) // Detach from top/bottom
-        .padding(.leading, 40)  // Detach from left edge
         .zIndex(100)
+        .edgesIgnoringSafeArea(.vertical)
     }
 }

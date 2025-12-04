@@ -8,45 +8,46 @@ struct CinemeltTheme {
     static let accentDim = Color(red: 180/255, green: 90/255, blue: 40/255) // Deep amber
     static let cream = Color(red: 245/255, green: 240/255, blue: 230/255) // Soft off-white
     
-    // Core Background Colors
-    static let charcoal = Color(red: 30/255, green: 28/255, blue: 26/255)
-    static let coffee = Color(red: 15/255, green: 12/255, blue: 10/255)
+    // Deep Backgrounds
+    static let charcoal = Color(red: 20/255, green: 18/255, blue: 16/255)
+    static let coffee = Color(red: 10/255, green: 8/255, blue: 6/255)
+    static let glassSurface = Color.white.opacity(0.08)
     
-    // MARK: - Backward Compatibility
-    // These aliases prevent build errors in other files.
+    // Backward Compatibility
     static let backgroundStart = charcoal
     static let backgroundEnd = coffee
-    static let glassSurface = Color.white.opacity(0.1)
     
-    // MARK: - Gradients & Backgrounds
+    // MARK: - Atmospheric Background
     static var mainBackground: some View {
         ZStack {
-            // Base layer
+            // 1. Deep Base
             LinearGradient(
                 gradient: Gradient(colors: [charcoal, coffee]),
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             
-            // Ambient Orbs
+            // 2. The "Studio Light"
             GeometryReader { geo in
+                // Top Left Rim Light (White/Blueish)
+                Circle()
+                    .fill(Color.white.opacity(0.1))
+                    .blur(radius: 200)
+                    .frame(width: geo.size.width * 0.8)
+                    .position(x: 0, y: -100)
+                
+                // Bottom Right Warmth
                 Circle()
                     .fill(accent.opacity(0.15))
-                    .blur(radius: 120)
+                    .blur(radius: 150)
                     .frame(width: geo.size.width * 0.6)
-                    .position(x: 0, y: 0)
-                
-                Circle()
-                    .fill(Color.black.opacity(0.8))
-                    .blur(radius: 100)
-                    .frame(width: geo.size.width * 0.5)
                     .position(x: geo.size.width, y: geo.size.height)
             }
             
-            // Film Grain
+            // 3. Texture
             GrainOverlay()
-                .opacity(0.03)
-                .blendMode(.overlay)
+                .opacity(0.04)
+                .blendMode(.screen)
         }
         .ignoresSafeArea()
     }
@@ -66,11 +67,12 @@ struct GrainOverlay: View {
     var body: some View {
         GeometryReader { geo in
             Canvas { context, size in
-                for _ in 0..<Int(size.width * size.height / 300) {
+                for _ in 0..<Int(size.width * size.height / 400) {
                     let x = Double.random(in: 0...size.width)
                     let y = Double.random(in: 0...size.height)
-                    let rect = CGRect(x: x, y: y, width: 1, height: 1)
-                    context.fill(Path(rect), with: .color(.white))
+                    let opacity = Double.random(in: 0...0.5)
+                    let rect = CGRect(x: x, y: y, width: 1.5, height: 1.5)
+                    context.fill(Path(rect), with: .color(.white.opacity(opacity)))
                 }
             }
         }
@@ -86,26 +88,25 @@ struct CinemeltGlassModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(.ultraThinMaterial)
-            .background(LinearGradient(colors: [Color.white.opacity(0.08), Color.white.opacity(0.02)], startPoint: .top, endPoint: .bottom))
-            .cornerRadius(cornerRadius)
+            .background(Color.white.opacity(0.03))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .shadow(color: .black.opacity(0.4), radius: 15, x: 0, y: 10)
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
             )
     }
 }
 
 struct CinemeltTextGlow: ViewModifier {
     func body(content: Content) -> some View {
+        // GLOW REMOVED per request: Clean, crisp text.
         content
-            .shadow(color: CinemeltTheme.accent.opacity(0.4), radius: 10, x: 0, y: 0)
     }
 }
 
 // MARK: - Button Styles
 
-// Wrapper to handle focus state without deprecated modifiers
 struct CinemeltCardButtonView: View {
     let configuration: ButtonStyle.Configuration
     @Environment(\.isFocused) private var isFocused: Bool
@@ -115,17 +116,22 @@ struct CinemeltCardButtonView: View {
             .scaleEffect(configuration.isPressed ? 0.98 : (isFocused ? 1.1 : 1.0))
             // Ambilight Glow
             .shadow(
-                color: isFocused ? CinemeltTheme.accent.opacity(0.6) : .black.opacity(0.3),
+                color: isFocused ? CinemeltTheme.accent.opacity(0.7) : .black.opacity(0.3),
                 radius: isFocused ? 30 : 5,
                 x: 0,
                 y: isFocused ? 15 : 2
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.white.opacity(isFocused ? 0.5 : 0), lineWidth: 2)
-                    .blur(radius: 1)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.clear)
             )
-            .animation(.spring(response: 0.35, dampingFraction: 0.55), value: isFocused)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.white.opacity(isFocused ? 0.8 : 0), lineWidth: 2)
+                    .blur(radius: isFocused ? 1 : 0)
+            )
+            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isFocused)
+            .zIndex(isFocused ? 1 : 0)
     }
 }
 

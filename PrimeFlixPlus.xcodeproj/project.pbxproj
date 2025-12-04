@@ -54,6 +54,7 @@
 		D2AC8B002EE148C100D440C3 /* EpisodeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8AFF2EE148C100D440C3 /* EpisodeCard.swift */; };
 		D2AC8B042EE14DDD00D440C3 /* Zain-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D2AC8B022EE14D7A00D440C3 /* Zain-Bold.ttf */; };
 		D2AC8B052EE14DE100D440C3 /* Zain-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D2AC8B032EE14D7A00D440C3 /* Zain-Regular.ttf */; };
+		D2AC8B072EE1B8F400D440C3 /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B062EE1B8F400D440C3 /* SplashView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -126,6 +127,7 @@
 		D2AC8AFF2EE148C100D440C3 /* EpisodeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpisodeCard.swift; sourceTree = "<group>"; };
 		D2AC8B022EE14D7A00D440C3 /* Zain-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "Zain-Bold.ttf"; path = "../../../../Downloads/Exo_2,Inter,Nunito,Zain/Zain/Zain-Bold.ttf"; sourceTree = "<group>"; };
 		D2AC8B032EE14D7A00D440C3 /* Zain-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "Zain-Regular.ttf"; path = "../../../../Downloads/Exo_2,Inter,Nunito,Zain/Zain/Zain-Regular.ttf"; sourceTree = "<group>"; };
+		D2AC8B062EE1B8F400D440C3 /* SplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -302,6 +304,7 @@
 				D2AC8AF92EE1419400D440C3 /* CinemeltStyle.swift */,
 				D2AC8AFB2EE141AE00D440C3 /* SidebarView.swift */,
 				D2AC8AFD2EE1475700D440C3 /* GlassTextField.swift */,
+				D2AC8B062EE1B8F400D440C3 /* SplashView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -458,6 +461,7 @@
 				D2AC8AFA2EE1419400D440C3 /* CinemeltStyle.swift in Sources */,
 				D292D6602EDF492100E8845A /* Channel.swift in Sources */,
 				D292D6292EDF458100E8845A /* ContentView.swift in Sources */,
+				D2AC8B072EE1B8F400D440C3 /* SplashView.swift in Sources */,
 				D228AD0B2EDF5A22007C6114 /* Persistence.swift in Sources */,
 				D292D66F2EDF4B4100E8845A /* PrimeFlixRepository.swift in Sources */,
 				D292D6842EDF576500E8845A /* PlayerView.swift in Sources */,
