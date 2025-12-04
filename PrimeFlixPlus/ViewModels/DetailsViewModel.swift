@@ -81,7 +81,9 @@ class DetailsViewModel: ObservableObject {
         
         guard let repo = repository else { return }
         let channelObjectID = channel.objectID
-        let channelTitle = channel.title
+        
+        // Use Canonical Title (Raw) for Metadata fetching to ensure Year is present
+        let channelRawTitle = channel.canonicalTitle ?? channel.title
         let channelType = channel.type
         
         // 1. Fetch Versions in Background (Detached)
@@ -89,7 +91,6 @@ class DetailsViewModel: ObservableObject {
             let context = repo.container.newBackgroundContext()
             var versionIDs: [NSManagedObjectID] = []
             
-            // Synchronous background fetch
             context.performAndWait {
                 let bgRepo = ChannelRepository(context: context)
                 if let bgChannel = try? context.existingObject(with: channelObjectID) as? Channel {
@@ -98,7 +99,6 @@ class DetailsViewModel: ObservableObject {
                 }
             }
             
-            // FIX: Capture immutable copy for MainActor closure
             let safeIDs = versionIDs
             
             await MainActor.run {
@@ -108,8 +108,8 @@ class DetailsViewModel: ObservableObject {
         
         // 2. Parallel Data Fetching
         await withTaskGroup(of: Void.self) { group in
-            // Task A: TMDB Data
-            group.addTask { await self.fetchTmdbData(title: channelTitle, type: channelType) }
+            // Task A: TMDB Data (Network Bound) - Using RAW Title to capture Year/Tags
+            group.addTask { await self.fetchTmdbData(title: channelRawTitle, type: channelType) }
             
             // Task B: Series Data
             if channelType == "series" {
@@ -229,7 +229,6 @@ class DetailsViewModel: ObservableObject {
             }
             
             if found {
-                // FIX: Capture immutable values for MainActor
                 let finalPos = pos
                 let finalDur = dur
                 
@@ -246,10 +245,13 @@ class DetailsViewModel: ObservableObject {
     // MARK: - Data Fetching
     
     private func fetchTmdbData(title: String, type: String) async {
+        // Here we parse the RAW title (passed in via loadData)
+        // This allows us to extract the Year correctly, which might be missing from the UI title.
         let info = TitleNormalizer.parse(rawTitle: title)
         
         do {
             if type == "series" {
+                // Use the CLEAN title + EXTRACTED Year for the search
                 let results = try await tmdbClient.searchTv(query: info.normalizedTitle, year: info.year)
                 if let first = results.first {
                     let details = try await tmdbClient.getTvDetails(id: first.id)

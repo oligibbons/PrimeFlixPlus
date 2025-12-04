@@ -93,11 +93,11 @@ class M3UParser {
         return ChannelStruct(
             url: streamUrl,
             playlistUrl: playlistUrl,
-            title: rawTitle,
+            title: info.normalizedTitle, // Display Clean Title
             group: data.group ?? "Uncategorized",
             cover: data.logo,
             type: type,
-            canonicalTitle: info.normalizedTitle,
+            canonicalTitle: rawTitle,    // Store Raw
             quality: info.quality
         )
     }

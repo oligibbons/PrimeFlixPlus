@@ -28,42 +28,50 @@ struct ChannelStruct {
     }
     
     static func from(_ item: XtreamChannelInfo.LiveStream, playlistUrl: String, input: XtreamInput) -> ChannelStruct {
+        // OPTIMIZATION: Parse Live TV titles too to remove prefixes like "US | "
+        let rawName = item.name ?? ""
+        let info = TitleNormalizer.parse(rawTitle: rawName)
+        
         return ChannelStruct(
             url: "\(input.basicUrl)/live/\(input.username)/\(input.password)/\(item.streamId).ts",
             playlistUrl: playlistUrl,
-            title: item.name ?? "",
+            title: info.normalizedTitle, // Display Clean Title
             group: item.categoryId ?? "Uncategorized",
             cover: item.streamIcon,
             type: "live",
-            canonicalTitle: item.name,
-            quality: "SD"
+            canonicalTitle: rawName,     // Store Raw for reference
+            quality: "SD"                // Live TV rarely has reliable quality tags in name
         )
     }
     
     static func from(_ item: XtreamChannelInfo.VodStream, playlistUrl: String, input: XtreamInput) -> ChannelStruct {
-        let info = TitleNormalizer.parse(rawTitle: item.name ?? "")
+        let rawName = item.name ?? ""
+        let info = TitleNormalizer.parse(rawTitle: rawName)
+        
         return ChannelStruct(
             url: "\(input.basicUrl)/movie/\(input.username)/\(input.password)/\(item.streamId).\(item.containerExtension)",
             playlistUrl: playlistUrl,
-            title: item.name ?? "",
+            title: info.normalizedTitle, // Display Clean Title
             group: "Movies",
             cover: item.streamIcon,
             type: "movie",
-            canonicalTitle: info.normalizedTitle,
+            canonicalTitle: rawName,     // Store Raw for reference
             quality: info.quality
         )
     }
     
     static func from(_ item: XtreamChannelInfo.Series, playlistUrl: String) -> ChannelStruct {
-        let info = TitleNormalizer.parse(rawTitle: item.name ?? "")
+        let rawName = item.name ?? ""
+        let info = TitleNormalizer.parse(rawTitle: rawName)
+        
         return ChannelStruct(
             url: "series://\(item.seriesId)", // Placeholder URL for series parent
             playlistUrl: playlistUrl,
-            title: item.name ?? "",
+            title: info.normalizedTitle, // Display Clean Title
             group: "Series",
             cover: item.cover,
             type: "series",
-            canonicalTitle: info.normalizedTitle,
+            canonicalTitle: rawName,     // Store Raw for reference
             quality: nil
         )
     }

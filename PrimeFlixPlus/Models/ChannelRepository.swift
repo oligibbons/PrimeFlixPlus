@@ -24,7 +24,7 @@ class ChannelRepository {
         
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // 1. Search Channels
+        // 1. Search Channels (Targeting the clean 'title' for best UX)
         let channelReq = NSFetchRequest<Channel>(entityName: "Channel")
         channelReq.predicate = NSPredicate(format: "title CONTAINS[cd] %@", normalizedQuery)
         channelReq.fetchLimit = 50
@@ -33,7 +33,6 @@ class ChannelRepository {
         var series: [Channel] = []
         var live: [Channel] = []
         
-        // Use performAndWait to ensure thread safety if called from background
         context.performAndWait {
             if let channels = try? context.fetch(channelReq) {
                 for ch in channels {
@@ -50,7 +49,6 @@ class ChannelRepository {
         // 2. Search EPG
         let epgReq = NSFetchRequest<Programme>(entityName: "Programme")
         let now = Date()
-        // Optimization: Don't search excessively far into future for general search
         let threeHoursLater = now.addingTimeInterval(10800)
         
         epgReq.predicate = NSPredicate(
@@ -83,7 +81,7 @@ class ChannelRepository {
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -60, to: Date()) ?? Date()
         request.predicate = NSPredicate(format: "lastPlayed >= %@", cutoffDate as NSDate)
         request.sortDescriptors = [NSSortDescriptor(key: "lastPlayed", ascending: false)]
-        request.fetchLimit = 50 // Reduce limit for speed
+        request.fetchLimit = 50
         
         var results: [Channel] = []
         
@@ -169,8 +167,6 @@ class ChannelRepository {
         let sPadded = String(format: "%02d", season)
         let ePadded = String(format: "%02d", episode)
         
-        // Optimization: Use beginsWith for title search to hit DB index if possible
-        // We assume the series title is at the start
         let info = TitleNormalizer.parse(rawTitle: original.title)
         let prefix = String(info.normalizedTitle.prefix(5))
         
@@ -182,10 +178,8 @@ class ChannelRepository {
         
         guard let candidates = try? context.fetch(req) else { return nil }
         
-        // In-memory filter for the specific S/E logic
         return candidates.first { ch in
             let title = ch.title.uppercased()
-            // Ensure strict series match
             if !ch.title.localizedCaseInsensitiveContains(info.normalizedTitle) { return false }
             
             return title.contains("S\(sPadded)E\(ePadded)") ||
@@ -246,7 +240,9 @@ class ChannelRepository {
             req.fetchLimit = 1
             
             if let match = try? context.fetch(req).first {
-                let norm = TitleNormalizer.parse(rawTitle: match.title).normalizedTitle
+                // Use canonicalTitle if available for better deduping
+                let rawForDedup = match.canonicalTitle ?? match.title
+                let norm = TitleNormalizer.parse(rawTitle: rawForDedup).normalizedTitle
                 if !seenTitles.contains(norm) {
                     matches.append(match)
                     seenTitles.insert(norm)
@@ -277,32 +273,31 @@ class ChannelRepository {
         saveContext()
     }
     
-    // MARK: - CRITICAL PERFORMANCE FIX
-    // Previously: Fetched entire DB to sort in memory.
-    // Now: Fetches only candidates starting with the same letters, then refines.
+    // MARK: - CRITICAL PERFORMANCE FIX (Optimized)
     func getVersions(for channel: Channel) -> [Channel] {
-        let info = TitleNormalizer.parse(rawTitle: channel.title)
+        // Use canonicalTitle (Raw) to extract the truest normalized title form.
+        // This ensures that "Movie (2020)" and "Movie.2020.mkv" match, even if one was cleaned differently.
+        let rawSource = channel.canonicalTitle ?? channel.title
+        let info = TitleNormalizer.parse(rawTitle: rawSource)
         let targetTitle = info.normalizedTitle.lowercased()
         
-        // 1. Narrow down search space using Core Data Index (First 4 chars)
-        // If title is short, just use what we have.
+        // 1. Narrow down search using 'title' (Cleaned) index
         let prefix = String(targetTitle.prefix(4))
         
         let request = NSFetchRequest<Channel>(entityName: "Channel")
-        
-        // We use a loose check on title + type to get a small subset of the 20,000 items
         request.predicate = NSPredicate(
             format: "type == %@ AND title BEGINSWITH[cd] %@",
             channel.type, prefix
         )
-        // Cap it just in case something goes wrong
         request.fetchLimit = 100
         
         guard let candidates = try? context.fetch(request) else { return [channel] }
         
-        // 2. Perform expensive Normalization on the small subset
+        // 2. Precise Filter using Normalizer
         let variants = candidates.filter { candidate in
-            let candidateInfo = TitleNormalizer.parse(rawTitle: candidate.title)
+            // Use candidate's canonicalTitle if available for precision
+            let candRaw = candidate.canonicalTitle ?? candidate.title
+            let candidateInfo = TitleNormalizer.parse(rawTitle: candRaw)
             return candidateInfo.normalizedTitle.lowercased() == targetTitle
         }
         
@@ -320,7 +315,7 @@ class ChannelRepository {
         }
         request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
-        request.fetchLimit = 500 // Limit for grid view performance
+        request.fetchLimit = 500
         
         guard let allChannels = try? context.fetch(request) else { return [] }
         return deduplicateChannels(allChannels)
@@ -344,7 +339,9 @@ class ChannelRepository {
         uniqueMap.reserveCapacity(channels.count)
         
         for channel in channels {
-            let info = TitleNormalizer.parse(rawTitle: channel.title)
+            // Use canonicalTitle for deduping to ensure accuracy
+            let raw = channel.canonicalTitle ?? channel.title
+            let info = TitleNormalizer.parse(rawTitle: raw)
             let key = info.normalizedTitle.lowercased()
             if uniqueMap[key] == nil {
                 uniqueMap[key] = channel
