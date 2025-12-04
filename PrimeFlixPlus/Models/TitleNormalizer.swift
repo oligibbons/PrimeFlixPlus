@@ -1,5 +1,11 @@
 import Foundation
 
+// Wrapper to allow NSCache to store Structs (which are value types)
+class ContentInfoWrapper: NSObject {
+    let info: ContentInfo
+    init(_ info: ContentInfo) { self.info = info }
+}
+
 struct ContentInfo {
     let rawTitle: String
     let normalizedTitle: String
@@ -19,7 +25,10 @@ struct ContentInfo {
         else if q.contains("720") { score += 720 }
         else if q.contains("480") || q.contains("sd") { score += 480 }
         
-        // Bonus for HDR/Bitrate features (if detected in future)
+        // Bonus for Audio/Codec features
+        if q.contains("hevc") || q.contains("x265") { score += 100 }
+        if q.contains("10bit") { score += 50 }
+        if q.contains("5.1") || q.contains("atmos") { score += 50 }
         
         return score
     }
@@ -29,8 +38,11 @@ struct ContentInfo {
 /// Optimized with static Regex caching for high performance.
 enum TitleNormalizer {
     
+    // MARK: - Thread-Safe Caching
+    // CRITICAL FIX: Caches parsing results to prevent CPU spikes during scrolling.
+    private static let cache = NSCache<NSString, ContentInfoWrapper>()
+    
     // MARK: - Compiled Regex Patterns
-    // Compiling these once prevents massive CPU spikes during list scrolling.
     
     // 1. Year: Matches (1999), [2020], .2021., etc.
     private static let yearRegex = try! NSRegularExpression(
@@ -40,31 +52,31 @@ enum TitleNormalizer {
     
     // 2. Resolution: Catches 8K, 4K, UHD, 1080p/i, 720p/i, SD, etc.
     private static let resolutionRegex = try! NSRegularExpression(
-        pattern: "\\b(8k|4k|uhd|2160p|1440p|1080p|1080i|720p|720i|576p|576i|480p|480i|sd|hd|fhd|qhd|hevc)\\b",
+        pattern: "\\b(8k|4k|uhd|2160p|1440p|1080p|1080i|720p|720i|576p|576i|480p|480i|sd|hd|fhd|qhd|hevc|hq|raw|4k\\+|uhd\\+)\\b",
         options: [.caseInsensitive]
     )
     
-    // 3. Video Codecs: Catches h264, h265, av1, etc.
+    // 3. Video Codecs: Catches h264, h265, av1, 10bit, etc.
     private static let codecRegex = try! NSRegularExpression(
-        pattern: "\\b(h\\.?264|h\\.?265|x264|x265|av1|vp9|mpeg-?2|mpeg-?4|avc|hevc|xvid|divx)\\b",
+        pattern: "\\b(h\\.?264|h\\.?265|x264|x265|av1|vp9|mpeg-?2|mpeg-?4|avc|hevc|xvid|divx|10bit|12bit)\\b",
         options: [.caseInsensitive]
     )
     
-    // 4. Audio: Catches AAC, AC3, Atmos, TrueHD, DTS, etc.
+    // 4. Audio: Catches AAC, AC3, Atmos, TrueHD, DTS, 5.1, etc.
     private static let audioRegex = try! NSRegularExpression(
-        pattern: "\\b(aac|ac3|eac3|dts|dts-?hd|truehd|atmos|dd5\\.1|dd\\+|5\\.1|mp3|flac|opus|pcm|lpcm)\\b",
+        pattern: "\\b(aac|ac3|eac3|dts|dts-?hd|truehd|atmos|dd5\\.1|dd\\+|5\\.1|7\\.1|mp3|flac|opus|pcm|lpcm|mono|stereo)\\b",
         options: [.caseInsensitive]
     )
     
     // 5. Source & Quality Tags: Catches Bluray, Remux, Web-DL, HDR, etc.
     private static let sourceRegex = try! NSRegularExpression(
-        pattern: "\\b(bluray|remux|bdrip|brrip|web-?dl|web-?rip|hdtv|pdtv|dvdrip|cam|ts|tc|scr|screener|r5|dv|hdr|hdr10|10bit|imax)\\b",
+        pattern: "\\b(bluray|remux|bdrip|brrip|web-?dl|web-?rip|hdtv|pdtv|dvdrip|cam|ts|tc|scr|screener|r5|dv|hdr|hdr10|hdr10\\+|dolby|vision|imax|upscaled)\\b",
         options: [.caseInsensitive]
     )
     
     // 6. Editions/Junk: Catches "Director's Cut", "Extended", "Unrated"
     private static let junkRegex = try! NSRegularExpression(
-        pattern: "\\b(extended|uncut|unrated|remastered|director'?s? ?cut|theatrical|limited|complete|collection|anthology|trilogy|boxset|saga)\\b",
+        pattern: "\\b(extended|uncut|unrated|remastered|director'?s? ?cut|theatrical|limited|complete|collection|anthology|trilogy|boxset|saga|special ?edition|final ?cut)\\b",
         options: [.caseInsensitive]
     )
     
@@ -74,7 +86,20 @@ enum TitleNormalizer {
         options: [.caseInsensitive]
     )
     
-    // 8. General Cleanup: Brackets, parentheses, dots, underscores
+    // 8. IPTV Specific Artifacts (The "Dirty" Stuff)
+    // Removes: [COLOR red], |UK|, US :, ***, ==>, (1), (2), [Backup]
+    private static let iptvArtifactsRegex = try! NSRegularExpression(
+        pattern: "(\\[/?(COLOR|B|I)[^\\]]*\\])|(\\|[A-Z]+\\|)|(\\*{2,})|(==>)|(\\(\\d+\\))|(\\[\\d+\\])|(C:\\s*)|(G:\\s*)",
+        options: [.caseInsensitive]
+    )
+    
+    // 9. Prefixes: "UK :", "US - ", "001 - ", "VOD |"
+    private static let prefixRegex = try! NSRegularExpression(
+        pattern: "^(\\d+[\\.\\:\\- ]+)|([A-Z]{2,3}\\s*[\\|\\:\\-]\\s*)",
+        options: [.caseInsensitive]
+    )
+    
+    // 10. General Cleanup: Brackets, parentheses, dots, underscores
     private static let cleanupRegex = try! NSRegularExpression(pattern: "[._\\-\\[\\]\\(\\)]", options: [])
     private static let multiSpaceRegex = try! NSRegularExpression(pattern: "\\s+", options: [])
     
@@ -104,22 +129,26 @@ enum TitleNormalizer {
     // MARK: - Main Parsing
     
     static func parse(rawTitle: String) -> ContentInfo {
+        // 1. Check Cache
+        let key = rawTitle as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached.info
+        }
+        
         // Work with a mutable copy
-        // Pre-cleaning: replace strict separators with spaces to help regex boundaries
         var processingTitle = rawTitle.replacingOccurrences(of: "_", with: " ")
                                       .replacingOccurrences(of: ".", with: " ")
         
-        // 1. Extract Year
+        // 2. Extract Year (Before cleaning, as brackets might be removed)
         var year: String? = nil
         let range = NSRange(processingTitle.startIndex..<processingTitle.endIndex, in: processingTitle)
         
         if let match = yearRegex.firstMatch(in: processingTitle, options: [], range: range) {
-            let yearRange = match.range(at: 1) // The digits capture group
+            let yearRange = match.range(at: 1)
             if let r = Range(yearRange, in: processingTitle) {
                 let yStr = String(processingTitle[r])
                 if let yInt = Int(yStr), yInt >= 1900 && yInt <= 2099 {
                     year = yStr
-                    // Remove the year match from the title to clean it
                     if let fullRange = Range(match.range, in: processingTitle) {
                         processingTitle.replaceSubrange(fullRange, with: " ")
                     }
@@ -127,7 +156,7 @@ enum TitleNormalizer {
             }
         }
         
-        // 2. Detect Quality (Priority based)
+        // 3. Detect Quality (Priority based)
         let lower = processingTitle.lowercased()
         let quality: String
         if lower.contains("8k") { quality = "8K" }
@@ -137,11 +166,9 @@ enum TitleNormalizer {
         else if lower.contains("480") || lower.contains("sd") { quality = "SD" }
         else { quality = "SD" }
         
-        // 3. Detect Language (Token-based)
+        // 4. Detect Language
         var detectedLang: String? = nil
         let tokens = processingTitle.components(separatedBy: CharacterSet(charactersIn: " -[]()"))
-        
-        // Iterate backwards (languages are usually at the end)
         for token in tokens.reversed() {
             let up = token.uppercased()
             if up.count < 2 { continue }
@@ -151,21 +178,29 @@ enum TitleNormalizer {
             }
         }
         
-        // 4. Aggressive Scrubbing
-        // Remove all technical metadata to leave just the title
+        // 5. Aggressive Scrubbing
+        // Remove IPTV specific artifacts first (Kodi colors, weird pipes)
+        processingTitle = strip(processingTitle, regex: iptvArtifactsRegex)
+        
+        // Remove technical metadata
         processingTitle = strip(processingTitle, regex: resolutionRegex)
         processingTitle = strip(processingTitle, regex: codecRegex)
         processingTitle = strip(processingTitle, regex: audioRegex)
         processingTitle = strip(processingTitle, regex: sourceRegex)
         processingTitle = strip(processingTitle, regex: junkRegex)
-        processingTitle = strip(processingTitle, regex: seasonRegex) // Important for Series dedup
+        processingTitle = strip(processingTitle, regex: seasonRegex)
         processingTitle = strip(processingTitle, regex: langRegex)
         
-        // 5. Final Cleanup
+        // 6. Remove Prefixes (Country codes, numbers)
+        // Repeat twice to catch nested prefixes like "001 | UK | BBC"
+        processingTitle = strip(processingTitle, regex: prefixRegex)
+        processingTitle = strip(processingTitle, regex: prefixRegex)
+        
+        // 7. Final Cleanup
         // Remove brackets, dots, leftover symbols
         processingTitle = strip(processingTitle, regex: cleanupRegex, replacement: " ")
         
-        // Remove prefixes like "US | Movie Name"
+        // Remove prefixes like "US | Movie Name" if regex missed them
         if processingTitle.contains("|") {
             let parts = processingTitle.split(separator: "|")
             if let last = parts.last { processingTitle = String(last) }
@@ -176,13 +211,18 @@ enum TitleNormalizer {
         
         let finalTitle = processingTitle.trimmingCharacters(in: .whitespacesAndNewlines).capitalized
         
-        return ContentInfo(
+        let result = ContentInfo(
             rawTitle: rawTitle,
-            normalizedTitle: finalTitle.isEmpty ? rawTitle : finalTitle, // Fallback if we stripped everything
+            normalizedTitle: finalTitle.isEmpty ? rawTitle : finalTitle,
             quality: quality,
             language: detectedLang,
             year: year
         )
+        
+        // Cache the result
+        cache.setObject(ContentInfoWrapper(result), forKey: key)
+        
+        return result
     }
     
     /// Helper: Replaces regex matches with a replacement string

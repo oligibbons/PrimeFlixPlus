@@ -13,7 +13,7 @@ class DetailsViewModel: ObservableObject {
     
     // --- UI State ---
     @Published var isFavorite: Bool = false
-    @Published var isLoading: Bool = true // Start true by default
+    @Published var isLoading: Bool = true
     @Published var backgroundUrl: URL?
     @Published var posterUrl: URL?
     @Published var backdropOpacity: Double = 0.0
@@ -75,30 +75,46 @@ class DetailsViewModel: ObservableObject {
     // MARK: - Async Loading (Non-Blocking)
     
     func loadData() async {
-        // Ensure UI shows loading state immediately
-        self.isLoading = true
+        // PERFORMANCE FIX: Show basic UI immediately
+        withAnimation { self.isLoading = false }
+        withAnimation(.easeIn(duration: 0.5)) { self.backdropOpacity = 1.0 }
         
-        // 1. Fetch Versions in background
-        if let repo = repository {
-            self.availableVersions = repo.getVersions(for: channel)
-            resolveBestVersion()
+        guard let repo = repository else { return }
+        let channelObjectID = channel.objectID
+        let channelTitle = channel.title
+        let channelType = channel.type
+        
+        // 1. Fetch Versions in Background (Detached)
+        Task.detached(priority: .userInitiated) {
+            let context = repo.container.newBackgroundContext()
+            var versionIDs: [NSManagedObjectID] = []
+            
+            // Synchronous background fetch
+            context.performAndWait {
+                let bgRepo = ChannelRepository(context: context)
+                if let bgChannel = try? context.existingObject(with: channelObjectID) as? Channel {
+                    let versions = bgRepo.getVersions(for: bgChannel)
+                    versionIDs = versions.map { $0.objectID }
+                }
+            }
+            
+            // FIX: Capture immutable copy for MainActor closure
+            let safeIDs = versionIDs
+            
+            await MainActor.run {
+                self.processVersions(versionIDs: safeIDs)
+            }
         }
         
         // 2. Parallel Data Fetching
         await withTaskGroup(of: Void.self) { group in
             // Task A: TMDB Data
-            group.addTask { await self.fetchTmdbData() }
+            group.addTask { await self.fetchTmdbData(title: channelTitle, type: channelType) }
             
             // Task B: Series Data
-            if self.channel.type == "series" {
+            if channelType == "series" {
                 group.addTask { await self.fetchAggregatedSeriesData() }
             }
-        }
-        
-        // 3. Reveal UI
-        withAnimation(.easeIn(duration: 0.5)) {
-            self.backdropOpacity = 1.0
-            self.isLoading = false
         }
     }
     
@@ -110,12 +126,10 @@ class DetailsViewModel: ObservableObject {
         }
         
         if channel.type == "series" {
-            // Find first unwatched or default to S1E1
             let sorted = xtreamEpisodes.sorted {
                 if $0.season != $1.season { return $0.season < $1.season }
                 return $0.episodeNum < $1.episodeNum
             }
-            
             if let firstEp = sorted.first {
                 return constructChannelForEpisode(firstEp)
             }
@@ -132,13 +146,13 @@ class DetailsViewModel: ObservableObject {
         let safeUser = input.username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? input.username
         let safePass = input.password.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? input.password
         
-        let streamUrl = "\(input.basicUrl)/series/\(safeUser)/\(safePass)/\(ep.id).m3u8"
+        let streamUrl = "\(input.basicUrl)/series/\(safeUser)/\(safePass)/\(ep.id).\(ep.containerExtension)"
         
-        // Create Temp Core Data Object attached to the main context
         let ch = Channel(context: channel.managedObjectContext!)
         ch.url = streamUrl
         ch.title = "\(channel.title) - S\(ep.season)E\(ep.episodeNum)"
         ch.type = "series_episode"
+        ch.playlistUrl = sourceUrl
         return ch
     }
     
@@ -147,6 +161,18 @@ class DetailsViewModel: ObservableObject {
     }
     
     // MARK: - Versioning
+    
+    private func processVersions(versionIDs: [NSManagedObjectID]) {
+        guard let context = channel.managedObjectContext else { return }
+        let versions = versionIDs.compactMap { try? context.existingObject(with: $0) as? Channel }
+        self.availableVersions = versions
+        
+        resolveBestVersion()
+        
+        if channel.type == "series" && !versions.isEmpty {
+            Task { await fetchAggregatedSeriesData() }
+        }
+    }
     
     private func resolveBestVersion() {
         guard !availableVersions.isEmpty else { return }
@@ -182,49 +208,58 @@ class DetailsViewModel: ObservableObject {
     
     private func checkWatchHistory() {
         guard let repo = repository, let target = selectedVersion else { return }
-        let context = repo.container.viewContext
+        let targetUrl = target.url
         
-        context.perform {
+        Task.detached {
+            let context = repo.container.newBackgroundContext()
             let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
-            request.predicate = NSPredicate(format: "channelUrl == %@", target.url)
+            request.predicate = NSPredicate(format: "channelUrl == %@", targetUrl)
             request.fetchLimit = 1
             
-            if let results = try? context.fetch(request), let progress = results.first {
-                DispatchQueue.main.async {
-                    self.resumePosition = Double(progress.position) / 1000.0
-                    self.resumeDuration = Double(progress.duration) / 1000.0
-                    let pct = self.resumePosition / self.resumeDuration
+            var pos: Double = 0
+            var dur: Double = 0
+            var found = false
+            
+            context.performAndWait {
+                if let results = try? context.fetch(request), let progress = results.first {
+                    pos = Double(progress.position) / 1000.0
+                    dur = Double(progress.duration) / 1000.0
+                    found = true
+                }
+            }
+            
+            if found {
+                // FIX: Capture immutable values for MainActor
+                let finalPos = pos
+                let finalDur = dur
+                
+                await MainActor.run {
+                    self.resumePosition = finalPos
+                    self.resumeDuration = finalDur
+                    let pct = finalPos / finalDur
                     self.hasWatchHistory = pct > 0.02 && pct < 0.95
                 }
-            } else {
-                DispatchQueue.main.async { self.hasWatchHistory = false }
             }
         }
     }
     
     // MARK: - Data Fetching
     
-    private func fetchTmdbData() async {
-        let title = channel.title
-        let type = channel.type
-        
-        // Corrected: Removed invalid 'guard let' for non-optional return
-        let info = await Task.detached(priority: .userInitiated) {
-            return TitleNormalizer.parse(rawTitle: title)
-        }.value
+    private func fetchTmdbData(title: String, type: String) async {
+        let info = TitleNormalizer.parse(rawTitle: title)
         
         do {
             if type == "series" {
                 let results = try await tmdbClient.searchTv(query: info.normalizedTitle, year: info.year)
                 if let first = results.first {
                     let details = try await tmdbClient.getTvDetails(id: first.id)
-                    handleDetailsLoaded(details)
+                    await MainActor.run { self.handleDetailsLoaded(details) }
                 }
             } else {
                 let results = try await tmdbClient.searchMovie(query: info.normalizedTitle, year: info.year)
                 if let first = results.first {
                     let details = try await tmdbClient.getMovieDetails(id: first.id)
-                    handleDetailsLoaded(details)
+                    await MainActor.run { self.handleDetailsLoaded(details) }
                 }
             }
         } catch { print("TMDB Error: \(error)") }
@@ -242,24 +277,24 @@ class DetailsViewModel: ObservableObject {
     // MARK: - Optimized Series Aggregation
     
     private func fetchAggregatedSeriesData() async {
-        let versionsToFetch = availableVersions.isEmpty ? [channel] : availableVersions
+        let versionsSnapshot = availableVersions.isEmpty ? [channel] : availableVersions
+        let versionData = versionsSnapshot.map { (url: $0.url, playlistUrl: $0.playlistUrl) }
+        
         let client = self.xtreamClient
         
-        // Corrected: Explicit return type for the detached task to solve ambiguous type error
         let result = await Task.detached(priority: .userInitiated) { () -> ([XtreamChannelInfo.Episode], [String: String], [Int]) in
             var allEpisodes: [(XtreamChannelInfo.Episode, String)] = []
             
-            // Parallel Fetch for Versions
             await withTaskGroup(of: [(XtreamChannelInfo.Episode, String)].self) { group in
-                for version in versionsToFetch {
+                for vData in versionData {
                     group.addTask {
-                        let input = XtreamInput.decodeFromPlaylistUrl(version.playlistUrl)
-                        let seriesIdString = version.url.replacingOccurrences(of: "series://", with: "")
+                        let input = XtreamInput.decodeFromPlaylistUrl(vData.playlistUrl)
+                        let seriesIdString = vData.url.replacingOccurrences(of: "series://", with: "")
                         guard let seriesId = Int(seriesIdString) else { return [] }
                         
                         do {
                             let eps = try await client.getSeriesEpisodes(input: input, seriesId: seriesId)
-                            return eps.map { ($0, version.playlistUrl) }
+                            return eps.map { ($0, vData.playlistUrl) }
                         } catch {
                             return []
                         }
@@ -271,7 +306,6 @@ class DetailsViewModel: ObservableObject {
                 }
             }
             
-            // Deduplication Logic
             var uniqueEpisodes: [String: (XtreamChannelInfo.Episode, String)] = [:]
             for (ep, source) in allEpisodes {
                 let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
@@ -303,20 +337,17 @@ class DetailsViewModel: ObservableObject {
     func selectSeason(_ season: Int) async {
         self.selectedSeason = season
         
-        // Fetch TMDB Season Metadata (Lightweight)
         if tmdbEpisodes[season] == nil, let tmdbId = tmdbDetails?.id {
             if let seasonDetails = try? await tmdbClient.getTvSeason(tvId: tmdbId, seasonNumber: season) {
                 tmdbEpisodes[season] = seasonDetails.episodes
             }
         }
         
-        // Process Display Data in Background
         let xEps = self.xtreamEpisodes
         let tEps = self.tmdbEpisodes[season] ?? []
         let currentMap = self.episodeSourceMap
         let defaultPlaylist = self.channel.playlistUrl
         
-        // Corrected: Explicit return type to prevent type inference errors
         let merged = await Task.detached(priority: .userInitiated) { () -> [MergedEpisode] in
             let seasonEpisodes = xEps.filter { $0.season == season }.sorted { $0.episodeNum < $1.episodeNum }
             

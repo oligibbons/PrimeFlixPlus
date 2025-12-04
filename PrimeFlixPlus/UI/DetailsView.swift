@@ -16,7 +16,7 @@ struct DetailsView: View {
     @FocusState private var focusedField: FocusField?
     
     enum FocusField: Hashable {
-        case play, trailer, favorite, season(Int), episode(String)
+        case play, trailer, favorite, version, season(Int), episode(String)
     }
     
     var body: some View {
@@ -24,26 +24,30 @@ struct DetailsView: View {
             // 0. Base
             CinemeltTheme.charcoal.ignoresSafeArea()
             
-            // 1. Background (Optimized)
+            // 1. Background (GPU Optimized)
             backgroundLayer
+                .drawingGroup() // CRITICAL: Offloads heavy blur/gradient to GPU
             
             // 2. Content
             if viewModel.isLoading {
                 loadingState
             } else {
                 contentScrollView
+                    .transition(.opacity.animation(.easeIn(duration: 0.3)))
             }
         }
         .onAppear {
-            // Configure repository first
             viewModel.configure(repository: repository)
         }
         .task {
-            // Use .task for async data loading to not block the transition
+            // Async load ensures navigation animation finishes first
             await viewModel.loadData()
-            // Default focus to Play button after load
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                focusedField = .play
+            
+            // Smart Focus: Only set focus once data is ready to avoid "focus jumping"
+            if focusedField == nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    focusedField = .play
+                }
             }
         }
         .onExitCommand { onBack() }
@@ -64,17 +68,15 @@ struct DetailsView: View {
                                 LinearGradient(
                                     stops: [
                                         .init(color: .black, location: 0),
-                                        .init(color: .black.opacity(0.8), location: 0.4),
-                                        .init(color: .clear, location: 0.9)
+                                        .init(color: .black.opacity(0.6), location: 0.4),
+                                        .init(color: CinemeltTheme.charcoal, location: 1.0)
                                     ],
                                     startPoint: .top,
                                     endPoint: .bottom
                                 )
                             )
                             .opacity(viewModel.backdropOpacity)
-                    case .empty, .failure:
-                        CinemeltTheme.mainBackground
-                    @unknown default:
+                    default:
                         CinemeltTheme.mainBackground
                     }
                 }
@@ -83,39 +85,20 @@ struct DetailsView: View {
             }
         }
         .ignoresSafeArea()
-        .overlay(
-            // Horizontal Gradient Scrim
-            HStack {
-                LinearGradient(
-                    colors: [
-                        CinemeltTheme.charcoal,
-                        CinemeltTheme.charcoal.opacity(0.9),
-                        CinemeltTheme.charcoal.opacity(0.4),
-                        .clear
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .frame(width: 1200)
-                Spacer()
-            }
-            .ignoresSafeArea()
-        )
     }
     
     private var loadingState: some View {
         VStack(spacing: 30) {
             ProgressView()
                 .tint(CinemeltTheme.accent)
-                .scaleEffect(2.5)
+                .scaleEffect(2.0)
             
             Text("Loading Details...")
-                .font(CinemeltTheme.fontBody(28))
+                .font(CinemeltTheme.fontBody(24))
                 .foregroundColor(CinemeltTheme.cream.opacity(0.6))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.ultraThinMaterial) // Glass effect
-        .transition(.opacity)
+        .background(.ultraThinMaterial)
     }
     
     private var contentScrollView: some View {
@@ -148,6 +131,12 @@ struct DetailsView: View {
                 actionButtons
                     .padding(.horizontal, 80)
                 
+                // --- Version Selector (New) ---
+                if viewModel.availableVersions.count > 1 {
+                    versionSelector
+                        .padding(.horizontal, 80)
+                }
+                
                 // --- Cast ---
                 if !viewModel.cast.isEmpty {
                     castRail
@@ -160,17 +149,13 @@ struct DetailsView: View {
                 
                 Spacer(minLength: 150)
             }
-            // FIX: Proactively adding focusSection here ensures smooth vertical navigation
-            // between Buttons, Cast, Seasons, and Episodes even if counts differ.
             .focusSection()
         }
-        .transition(.opacity)
     }
     
     private var metadataRow: some View {
         HStack(spacing: 25) {
             if let v = viewModel.selectedVersion {
-                // Use stored quality if available to avoid re-parsing
                 Text(v.quality ?? "HD")
                     .font(CinemeltTheme.fontTitle(20))
                     .foregroundColor(.black)
@@ -184,6 +169,7 @@ struct DetailsView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "star.fill")
                         .foregroundColor(CinemeltTheme.accent)
+                        .font(.caption)
                     Text(String(format: "%.1f", score))
                         .font(CinemeltTheme.fontBody(24))
                         .foregroundColor(CinemeltTheme.cream)
@@ -223,25 +209,6 @@ struct DetailsView: View {
             .buttonStyle(CinemeltCardButtonStyle())
             .focused($focusedField, equals: .play)
             
-            // Trailer Button (Only if available)
-            if let videos = viewModel.tmdbDetails?.videos?.results, !videos.filter({ $0.type == "Trailer" }).isEmpty {
-                Button(action: { /* Trailer logic */ }) {
-                    HStack {
-                        Image(systemName: "video.fill")
-                        Text("Trailer")
-                    }
-                    .font(CinemeltTheme.fontTitle(28))
-                    .foregroundColor(CinemeltTheme.cream)
-                    .padding(.horizontal, 40)
-                    .padding(.vertical, 18)
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(16)
-                }
-                .buttonStyle(CinemeltCardButtonStyle())
-                .focused($focusedField, equals: .trailer)
-            }
-            
-            // Favorite Button
             Button(action: { viewModel.toggleFavorite() }) {
                 Image(systemName: viewModel.isFavorite ? "heart.fill" : "heart")
                     .font(.system(size: 30))
@@ -252,6 +219,35 @@ struct DetailsView: View {
             }
             .buttonStyle(CinemeltCardButtonStyle())
             .focused($focusedField, equals: .favorite)
+        }
+    }
+    
+    // FIX: Replaced incompatible 'Menu' with Button + confirmationDialog
+    private var versionSelector: some View {
+        Button(action: { viewModel.showVersionSelector = true }) {
+            HStack {
+                Image(systemName: "square.stack.3d.up")
+                Text("Versions (\(viewModel.availableVersions.count))")
+                if let selected = viewModel.selectedVersion {
+                    Text("- \(selected.quality ?? "Unknown")")
+                        .foregroundColor(.gray)
+                }
+            }
+            .font(CinemeltTheme.fontBody(22))
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(Color.white.opacity(0.05))
+            .cornerRadius(12)
+        }
+        .buttonStyle(CinemeltCardButtonStyle())
+        .focused($focusedField, equals: .version)
+        .confirmationDialog("Select Version", isPresented: $viewModel.showVersionSelector, titleVisibility: .visible) {
+            ForEach(viewModel.availableVersions, id: \.url) { version in
+                Button(version.title) {
+                    viewModel.userSelectedVersion(version)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
     
@@ -292,7 +288,6 @@ struct DetailsView: View {
     
     private var seriesContent: some View {
         VStack(alignment: .leading, spacing: 25) {
-            // Season Selector
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 20) {
                     ForEach(viewModel.seasons, id: \.self) { season in
@@ -316,7 +311,6 @@ struct DetailsView: View {
                 .padding(.vertical, 20)
             }
             
-            // Episodes List
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 50) {
                     ForEach(viewModel.displayedEpisodes) { ep in

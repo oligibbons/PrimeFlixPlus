@@ -24,48 +24,48 @@ class ChannelRepository {
         
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // 1. Search Channels (Movies, Series, Live)
-        // Optimization: Fetch only necessary objectIDs first if needed, but for <50 items, objects are fine.
+        // 1. Search Channels
         let channelReq = NSFetchRequest<Channel>(entityName: "Channel")
         channelReq.predicate = NSPredicate(format: "title CONTAINS[cd] %@", normalizedQuery)
-        channelReq.fetchLimit = 50 // Strict limit to prevent UI lockup
+        channelReq.fetchLimit = 50
         
         var movies: [Channel] = []
         var series: [Channel] = []
         var live: [Channel] = []
         
-        // Use autoreleasepool to ensure temporary objects from the fetch are cleared immediately
+        // Use performAndWait to ensure thread safety if called from background
         context.performAndWait {
-            autoreleasepool {
-                if let channels = try? context.fetch(channelReq) {
-                    for ch in channels {
-                        switch ch.type {
-                        case "movie": movies.append(ch)
-                        case "series": series.append(ch)
-                        case "live": live.append(ch)
-                        default: break
-                        }
+            if let channels = try? context.fetch(channelReq) {
+                for ch in channels {
+                    switch ch.type {
+                    case "movie": movies.append(ch)
+                    case "series": series.append(ch)
+                    case "live": live.append(ch)
+                    default: break
                     }
                 }
             }
         }
         
-        // 2. Search EPG (Live TV Guide)
+        // 2. Search EPG
         let epgReq = NSFetchRequest<Programme>(entityName: "Programme")
         let now = Date()
-        let oneHourLater = now.addingTimeInterval(3600)
+        // Optimization: Don't search excessively far into future for general search
+        let threeHoursLater = now.addingTimeInterval(10800)
         
-        // Optimization: Index 'title', 'start', and 'end' in Core Data Model for this to be fast
         epgReq.predicate = NSPredicate(
             format: "title CONTAINS[cd] %@ AND end > %@ AND start < %@",
-            normalizedQuery, now as NSDate, oneHourLater as NSDate
+            normalizedQuery, now as NSDate, threeHoursLater as NSDate
         )
         epgReq.fetchLimit = 20
         epgReq.sortDescriptors = [NSSortDescriptor(key: "start", ascending: true)]
         
-        let programs = (try? context.fetch(epgReq)) ?? []
+        var programs: [Programme] = []
+        context.performAndWait {
+            programs = (try? context.fetch(epgReq)) ?? []
+        }
         
-        // 3. Deduplicate Series (Heavy operation optimized by TitleNormalizer)
+        // 3. Deduplicate Series
         let uniqueSeries = deduplicateChannels(series)
         
         return SearchResults(
@@ -80,21 +80,17 @@ class ChannelRepository {
     
     func getSmartContinueWatching(type: String) -> [Channel] {
         let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
-        
-        // Only fetch items watched in the last 60 days to keep query fast
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -60, to: Date()) ?? Date()
         request.predicate = NSPredicate(format: "lastPlayed >= %@", cutoffDate as NSDate)
-        
         request.sortDescriptors = [NSSortDescriptor(key: "lastPlayed", ascending: false)]
-        request.fetchLimit = 100
-        
-        guard let history = try? context.fetch(request) else { return [] }
+        request.fetchLimit = 50 // Reduce limit for speed
         
         var results: [Channel] = []
-        var processedSeriesMap = [String: Bool]()
         
-        // Perform heavy logic in autoreleasepool
-        autoreleasepool {
+        context.performAndWait {
+            guard let history = try? context.fetch(request) else { return }
+            var processedSeriesMap = [String: Bool]()
+            
             for item in history {
                 if results.count >= 20 { break }
                 guard let channel = getChannel(byUrl: item.channelUrl), channel.type == type else { continue }
@@ -102,12 +98,10 @@ class ChannelRepository {
                 let percentage = Double(item.duration) > 0 ? Double(item.position) / Double(item.duration) : 0
                 
                 if channel.type == "movie" {
-                    // Movies: Show if between 5% and 95% watched
                     if percentage > 0.05 && percentage < 0.95 {
                         results.append(channel)
                     }
                 } else if channel.type == "series" {
-                    // Series: Complex logic to find next episode
                     let info = TitleNormalizer.parse(rawTitle: channel.title)
                     let seriesKey = info.normalizedTitle
                     
@@ -117,7 +111,6 @@ class ChannelRepository {
                         results.append(channel)
                         processedSeriesMap[seriesKey] = true
                     } else {
-                        // If finished, try to find the next episode
                         if let nextEp = findNextEpisode(currentChannel: channel) {
                             results.append(nextEp)
                             processedSeriesMap[seriesKey] = true
@@ -133,7 +126,6 @@ class ChannelRepository {
     
     private func findNextEpisode(currentChannel: Channel) -> Channel? {
         let raw = currentChannel.title
-        // Optimized regex patterns via TitleNormalizer knowledge
         if let (s, e) = extractSeasonEpisode(from: raw, pattern: "(?i)(S)(\\d+)\\s*(E)(\\d+)") {
             return findNext(currentChannel: currentChannel, season: s, episode: e)
         }
@@ -150,7 +142,6 @@ class ChannelRepository {
         
         guard let match = results.first, match.numberOfRanges >= 3 else { return nil }
         
-        // Handle varying regex group capture indices
         let sIndex = match.numberOfRanges == 5 ? 2 : 1
         let eIndex = match.numberOfRanges == 5 ? 4 : 2
         
@@ -164,11 +155,9 @@ class ChannelRepository {
     }
     
     private func findNext(currentChannel: Channel, season: Int, episode: Int) -> Channel? {
-        // 1. Try next episode in current season
         if let next = findEpisodeVariant(original: currentChannel, season: season, episode: episode + 1) {
             return next
         }
-        // 2. Try first episode of next season
         if let nextSeason = findEpisodeVariant(original: currentChannel, season: season + 1, episode: 1) {
             return nextSeason
         }
@@ -179,21 +168,26 @@ class ChannelRepository {
         let req = NSFetchRequest<Channel>(entityName: "Channel")
         let sPadded = String(format: "%02d", season)
         let ePadded = String(format: "%02d", episode)
-        let info = TitleNormalizer.parse(rawTitle: original.title)
         
-        // Fetch candidates from the same playlist/series
+        // Optimization: Use beginsWith for title search to hit DB index if possible
+        // We assume the series title is at the start
+        let info = TitleNormalizer.parse(rawTitle: original.title)
+        let prefix = String(info.normalizedTitle.prefix(5))
+        
         req.predicate = NSPredicate(
-            format: "playlistUrl == %@ AND type == 'series' AND title CONTAINS[cd] %@",
-            original.playlistUrl, info.normalizedTitle
+            format: "playlistUrl == %@ AND type == 'series' AND title BEGINSWITH[cd] %@",
+            original.playlistUrl, prefix
         )
-        // Optimization: Limit fetch to reduce memory usage, assuming series aren't infinitely long
-        req.fetchLimit = 50
+        req.fetchLimit = 100
         
         guard let candidates = try? context.fetch(req) else { return nil }
         
-        // In-memory filter is faster for complex regex checks than Core Data predicates
+        // In-memory filter for the specific S/E logic
         return candidates.first { ch in
             let title = ch.title.uppercased()
+            // Ensure strict series match
+            if !ch.title.localizedCaseInsensitiveContains(info.normalizedTitle) { return false }
+            
             return title.contains("S\(sPadded)E\(ePadded)") ||
                    title.contains("S\(season)E\(episode)") ||
                    title.contains("\(season)X\(ePadded)")
@@ -241,15 +235,9 @@ class ChannelRepository {
         return deduplicateChannels(raw)
     }
     
-    // MARK: - Trending
-    
-    // This was the method missing in your build error.
-    // It is used by HomeViewModel to map TMDB Trending Titles -> Local Channels.
     func getTrendingMatches(type: String, tmdbResults: [String]) -> [Channel] {
         var matches: [Channel] = []
         var seenTitles = Set<String>()
-        
-        // This is expensive, so we limit the input size
         let safeResults = Array(tmdbResults.prefix(20))
         
         for title in safeResults {
@@ -279,7 +267,6 @@ class ChannelRepository {
     
     func getChannel(byId channelId: String) -> Channel? {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
-        // Optimization: Use BeginsWith or Contains depending on ID format
         request.predicate = NSPredicate(format: "url CONTAINS[cd] '/' + %@ + '.'", channelId)
         request.fetchLimit = 1
         return try? context.fetch(request).first
@@ -290,24 +277,35 @@ class ChannelRepository {
         saveContext()
     }
     
+    // MARK: - CRITICAL PERFORMANCE FIX
+    // Previously: Fetched entire DB to sort in memory.
+    // Now: Fetches only candidates starting with the same letters, then refines.
     func getVersions(for channel: Channel) -> [Channel] {
         let info = TitleNormalizer.parse(rawTitle: channel.title)
         let targetTitle = info.normalizedTitle.lowercased()
         
-        let request = NSFetchRequest<Channel>(entityName: "Channel")
-        request.predicate = NSPredicate(format: "type == %@", channel.type)
+        // 1. Narrow down search space using Core Data Index (First 4 chars)
+        // If title is short, just use what we have.
+        let prefix = String(targetTitle.prefix(4))
         
-        // Fetch potential candidates first (e.g. by same first letter) to avoid scanning whole DB?
-        // For now, scanning is risky on large DBs. Ideally, we would add a 'normalizedTitleHash' to Core Data.
-        // Fallback to basic fetch.
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
+        
+        // We use a loose check on title + type to get a small subset of the 20,000 items
+        request.predicate = NSPredicate(
+            format: "type == %@ AND title BEGINSWITH[cd] %@",
+            channel.type, prefix
+        )
+        // Cap it just in case something goes wrong
+        request.fetchLimit = 100
         
         guard let candidates = try? context.fetch(request) else { return [channel] }
         
-        // Filter in memory using optimized Normalizer
+        // 2. Perform expensive Normalization on the small subset
         let variants = candidates.filter { candidate in
             let candidateInfo = TitleNormalizer.parse(rawTitle: candidate.title)
             return candidateInfo.normalizedTitle.lowercased() == targetTitle
         }
+        
         return variants.isEmpty ? [channel] : variants
     }
     
@@ -322,6 +320,7 @@ class ChannelRepository {
         }
         request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        request.fetchLimit = 500 // Limit for grid view performance
         
         guard let allChannels = try? context.fetch(request) else { return [] }
         return deduplicateChannels(allChannels)
@@ -342,7 +341,6 @@ class ChannelRepository {
     
     private func deduplicateChannels(_ channels: [Channel]) -> [Channel] {
         var uniqueMap = [String: Channel]()
-        // Reserve capacity to avoid resizing overhead
         uniqueMap.reserveCapacity(channels.count)
         
         for channel in channels {
