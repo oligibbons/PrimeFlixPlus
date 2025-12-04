@@ -14,116 +14,99 @@ struct SidebarView: View {
     ]
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .center, spacing: 0) {
             
-            // 1. Logo Section (Top)
-            VStack(spacing: 8) {
+            // 1. Logo (Compact & Glowing)
+            VStack(spacing: 5) {
                 Image("CinemeltLogo")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(height: 50)
-                    .shadow(color: CinemeltTheme.accent.opacity(0.6), radius: 12, x: 0, y: 0)
-                
-                // Fallback text if logo fails to load, styled elegantly
-                if UIImage(named: "CinemeltLogo") == nil {
-                    Text("CINEMELT")
-                        .font(CinemeltTheme.fontTitle(26))
-                        .tracking(4) // Wide tracking for premium feel
-                        .foregroundColor(CinemeltTheme.cream)
-                        .cinemeltGlow()
-                }
+                    .frame(height: 60)
+                    .shadow(color: CinemeltTheme.accent.opacity(0.8), radius: 15, x: 0, y: 0)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 60)
-            .padding(.bottom, 60)
+            .padding(.top, 50)
+            .padding(.bottom, 50)
             
             // 2. Navigation Items
-            VStack(spacing: 20) {
+            VStack(spacing: 25) {
                 ForEach(menuItems, id: \.destination.hashValue) { item in
                     Button(action: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                             currentSelection = item.destination
                         }
                     }) {
-                        HStack(spacing: 16) {
-                            // Icon with glowing effect when active
+                        HStack(spacing: 15) {
+                            // Icon
                             Image(systemName: item.icon)
-                                .font(.system(size: 24, weight: .bold))
-                                .frame(width: 30)
-                                .shadow(color: currentSelection == item.destination ? CinemeltTheme.accent.opacity(0.8) : .clear, radius: 8)
+                                .font(.system(size: 26, weight: .bold))
+                                .frame(width: 35)
+                                .foregroundColor(
+                                    focusedItem == item.destination ? .black :
+                                    currentSelection == item.destination ? CinemeltTheme.accent : .gray
+                                )
                             
                             // Label
                             Text(item.label)
-                                .font(CinemeltTheme.fontBody(26))
-                                .fontWeight(currentSelection == item.destination ? .bold : .regular)
+                                .font(CinemeltTheme.fontBody(24))
+                                .fontWeight(currentSelection == item.destination ? .bold : .medium)
+                                .foregroundColor(
+                                    focusedItem == item.destination ? .black :
+                                    currentSelection == item.destination ? CinemeltTheme.cream : .gray
+                                )
                             
                             Spacer()
                             
-                            // Small dot indicator for active state
+                            // Active Indicator (Glowing Orb)
                             if currentSelection == item.destination {
                                 Circle()
                                     .fill(CinemeltTheme.accent)
-                                    .frame(width: 6, height: 6)
-                                    .shadow(color: CinemeltTheme.accent, radius: 4)
+                                    .frame(width: 8, height: 8)
+                                    .shadow(color: CinemeltTheme.accent, radius: 6)
+                                    .matchedGeometryEffect(id: "activeOrb", in: animationNamespace)
                             }
                         }
-                        .foregroundColor(
-                            focusedItem == item.destination ? .black :
-                            currentSelection == item.destination ? CinemeltTheme.cream : .gray
-                        )
-                        .padding(.vertical, 16)
-                        .padding(.horizontal, 24)
+                        .padding(.vertical, 14)
+                        .padding(.horizontal, 20)
                         .background(
                             ZStack {
-                                // The "Sliding" Background for Active State
-                                if currentSelection == item.destination {
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(Color.white.opacity(0.1))
-                                        .matchedGeometryEffect(id: "activeTab", in: animationNamespace)
-                                }
-                                // The Focus Background (handled by button style, but added here for contrast)
+                                // Focused State (White Plate)
                                 if focusedItem == item.destination {
-                                    RoundedRectangle(cornerRadius: 16)
+                                    RoundedRectangle(cornerRadius: 14)
                                         .fill(CinemeltTheme.accent)
-                                        .shadow(color: CinemeltTheme.accent.opacity(0.5), radius: 10)
+                                        .shadow(color: CinemeltTheme.accent.opacity(0.6), radius: 12)
+                                }
+                                // Selected State (Subtle Glass)
+                                else if currentSelection == item.destination {
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(Color.white.opacity(0.08))
                                 }
                             }
                         )
                     }
-                    .buttonStyle(.card) // Uses system parallax internally
+                    .buttonStyle(.card)
                     .focused($focusedItem, equals: item.destination)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
             
             Spacer()
             
-            // 3. User / Version Info (Bottom)
-            VStack(spacing: 4) {
-                Text("v1.0")
-                    .font(CinemeltTheme.fontBody(14))
-                    .foregroundColor(.white.opacity(0.3))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.bottom, 40)
+            // 3. Footer
+            Text("v1.0")
+                .font(CinemeltTheme.fontBody(14))
+                .foregroundColor(.gray.opacity(0.5))
+                .padding(.bottom, 40)
         }
-        .frame(width: 280) // Slightly slimmer for elegance
+        .frame(width: 300)
+        // Make it a floating capsule, not a full edge bar
         .background(
-            // Glassmorphic Sidebar Background
-            Rectangle()
+            RoundedRectangle(cornerRadius: 30)
                 .fill(.ultraThinMaterial)
-                .background(Color.black.opacity(0.2))
-                .ignoresSafeArea()
-                .overlay(
-                    HStack {
-                        Spacer()
-                        // Right edge highlight
-                        Rectangle()
-                            .fill(LinearGradient(colors: [.clear, .white.opacity(0.1), .clear], startPoint: .top, endPoint: .bottom))
-                            .frame(width: 1)
-                    }
-                )
+                .background(Color.black.opacity(0.4))
+                .shadow(color: .black.opacity(0.5), radius: 30, x: 10, y: 0)
         )
+        .padding(.vertical, 40) // Detach from top/bottom
+        .padding(.leading, 40)  // Detach from left edge
         .zIndex(100)
     }
 }

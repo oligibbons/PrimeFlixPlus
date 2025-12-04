@@ -9,26 +9,33 @@ struct HomeView: View {
     var onSettings: () -> Void
     var onSearch: () -> Void
     
-    @FocusState private var focusedSectionId: UUID?
-    @FocusState private var focusedTab: StreamType?
-    
-    // Grid for drill-down views
-    let gridColumns = [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 50)]
+    // Dynamic Hero Background State
+    @State private var heroChannel: Channel?
     
     var body: some View {
         ZStack {
-            // 1. Global Mesh Background
-            CinemeltTheme.mainBackground
+            // 1. Dynamic Background Layer
+            HomeBackgroundView(heroChannel: heroChannel)
             
-            // 2. State Content
+            // 2. Main Content Switcher
             if viewModel.selectedPlaylist == nil {
-                profileSelector
-                    .transition(.opacity)
+                HomeProfileSelector(
+                    playlists: viewModel.playlists,
+                    onSelect: { pl in viewModel.selectPlaylist(pl) },
+                    onAdd: onAddPlaylist
+                )
+                .transition(.opacity)
             } else if let categoryTitle = viewModel.drillDownCategory {
-                drillDownView(title: categoryTitle)
-                    .transition(.move(edge: .trailing))
+                HomeDrillDownView(
+                    title: categoryTitle,
+                    channels: viewModel.displayedGridChannels,
+                    onClose: { viewModel.closeDrillDown() },
+                    onPlay: onPlayChannel,
+                    onFocus: { ch in withAnimation { heroChannel = ch } }
+                )
+                .transition(.move(edge: .trailing))
             } else {
-                mainContent
+                mainFeed
                     .transition(.opacity)
             }
         }
@@ -36,28 +43,75 @@ struct HomeView: View {
         .onAppear { viewModel.configure(repository: repository) }
     }
     
-    // MARK: - Main Feed Structure
-    
-    var mainContent: some View {
+    // MARK: - Main Feed
+    var mainFeed: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 10) {
-                headerSection
-                filterSection
-                lanesSection
+                
+                HomeHeaderView(title: viewModel.selectedPlaylist?.title ?? "Guest")
+                
+                HomeFilterBar(
+                    selectedTab: viewModel.selectedTab,
+                    onSelect: { tab in
+                        withAnimation { viewModel.selectTab(tab) }
+                    }
+                )
+                
+                if viewModel.isLoading {
+                    HomeLoadingState()
+                } else {
+                    HomeLanesView(
+                        sections: viewModel.sections,
+                        onOpenCategory: { sec in viewModel.openCategory(sec) },
+                        onPlay: onPlayChannel,
+                        onFocus: { ch in
+                            withAnimation(.easeInOut(duration: 0.5)) { heroChannel = ch }
+                        }
+                    )
+                }
             }
         }
     }
+}
+
+// MARK: - SUBVIEWS (Extracted to fix Compiler Timeout)
+
+struct HomeBackgroundView: View {
+    let heroChannel: Channel?
     
-    // MARK: - Sections
+    var body: some View {
+        ZStack {
+            CinemeltTheme.mainBackground
+            
+            if let hero = heroChannel {
+                GeometryReader { geo in
+                    AsyncImage(url: URL(string: hero.cover ?? "")) { image in
+                        image.resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .blur(radius: 80)
+                            .opacity(0.5)
+                            .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .clear, location: 0.7)], startPoint: .topTrailing, endPoint: .bottomLeading))
+                    } placeholder: { Color.clear }
+                }
+                .ignoresSafeArea()
+                .transition(.opacity.animation(.easeInOut(duration: 0.8)))
+                .id(hero.url)
+            }
+        }
+    }
+}
+
+struct HomeHeaderView: View {
+    let title: String
     
-    private var headerSection: some View {
+    var body: some View {
         HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Welcome Back,")
                     .cinemeltBody()
                     .opacity(0.6)
-                
-                Text(viewModel.selectedPlaylist?.title ?? "Guest")
+                Text(title)
                     .cinemeltTitle()
                     .font(CinemeltTheme.fontTitle(60))
                     .cinemeltGlow()
@@ -67,146 +121,154 @@ struct HomeView: View {
         .padding(.top, 40)
         .padding(.horizontal, 60)
     }
+}
+
+struct HomeFilterBar: View {
+    let selectedTab: StreamType
+    let onSelect: (StreamType) -> Void
+    @FocusState private var focusedTab: StreamType?
     
-    private var filterSection: some View {
-        HStack(spacing: 0) {
-            filterTab(title: "Movies", type: .movie)
-            filterTab(title: "Series", type: .series)
-            filterTab(title: "Live TV", type: .live)
+    var body: some View {
+        HStack(spacing: 30) {
+            tabButton(title: "Movies", type: .movie)
+            tabButton(title: "Series", type: .series)
+            tabButton(title: "Live TV", type: .live)
         }
-        .padding(6)
-        .background(.ultraThinMaterial)
-        .background(Color.white.opacity(0.05))
-        .cornerRadius(25)
-        .overlay(
-            RoundedRectangle(cornerRadius: 25)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
         .padding(.horizontal, 60)
         .padding(.top, 20)
         .padding(.bottom, 30)
     }
     
-    private var lanesSection: some View {
-        Group {
-            if viewModel.isLoading {
-                loadingState
-            } else {
-                LazyVStack(alignment: .leading, spacing: 40) {
-                    ForEach(viewModel.sections) { section in
-                        VStack(alignment: .leading, spacing: 20) {
-                            // Section Header
-                            Button(action: { viewModel.openCategory(section) }) {
-                                HStack(spacing: 15) {
-                                    Text(section.title)
-                                        .font(CinemeltTheme.fontTitle(32))
-                                        .foregroundColor(focusedSectionId == section.id ? CinemeltTheme.accent : CinemeltTheme.cream)
-                                        .shadow(color: focusedSectionId == section.id ? CinemeltTheme.accent.opacity(0.6) : .clear, radius: 10)
-                                    
-                                    Image(systemName: "chevron.right")
-                                        .font(.headline)
-                                        .foregroundColor(CinemeltTheme.accent)
-                                        .opacity(focusedSectionId == section.id ? 1 : 0)
-                                        .offset(x: focusedSectionId == section.id ? 5 : 0)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .focused($focusedSectionId, equals: section.id)
-                            .padding(.horizontal, 60)
-                            
-                            // Horizontal Lane
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                LazyHStack(spacing: 50) {
-                                    ForEach(section.items) { channel in
-                                        cardView(for: channel, sectionType: section.type)
-                                    }
-                                }
-                                .padding(.horizontal, 60)
-                                .padding(.vertical, 40)
-                            }
-                        }
-                    }
-                }
-                .padding(.bottom, 100)
-            }
-        }
-    }
-    
-    // MARK: - Components
-    
-    private func filterTab(title: String, type: StreamType) -> some View {
-        Button(action: {
-            withAnimation {
-                viewModel.selectTab(type)
-            }
-        }) {
+    private func tabButton(title: String, type: StreamType) -> some View {
+        Button(action: { onSelect(type) }) {
             Text(title)
                 .font(CinemeltTheme.fontTitle(24))
-                .foregroundColor(viewModel.selectedTab == type ? .black : CinemeltTheme.cream)
+                .foregroundColor(selectedTab == type ? .black : CinemeltTheme.cream)
                 .padding(.horizontal, 30)
                 .padding(.vertical, 12)
                 .background(
                     ZStack {
-                        if viewModel.selectedTab == type {
+                        if selectedTab == type {
                             RoundedRectangle(cornerRadius: 20)
                                 .fill(CinemeltTheme.accent)
-                                .matchedGeometryEffect(id: "activeFilter", in: Namespace().wrappedValue)
-                                .shadow(color: CinemeltTheme.accent.opacity(0.6), radius: 10)
+                                .shadow(color: CinemeltTheme.accent.opacity(0.6), radius: 15)
+                        } else {
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(CinemeltTheme.glassSurface)
                         }
                     }
                 )
         }
         .buttonStyle(.card)
         .focused($focusedTab, equals: type)
-        .scaleEffect(focusedTab == type ? 1.05 : 1.0)
+        .scaleEffect(focusedTab == type ? 1.1 : 1.0)
     }
-    
-    var loadingState: some View {
+}
+
+struct HomeLoadingState: View {
+    var body: some View {
         HStack {
             Spacer()
             VStack(spacing: 30) {
-                ProgressView()
-                    .tint(CinemeltTheme.accent)
-                    .scaleEffect(2.0)
-                Text("Loading Your Library...")
-                    .font(CinemeltTheme.fontBody(24))
-                    .foregroundColor(CinemeltTheme.cream.opacity(0.5))
+                ProgressView().tint(CinemeltTheme.accent).scaleEffect(2.0)
+                Text("Loading Library...").cinemeltBody()
             }
             Spacer()
         }
         .padding(.top, 100)
     }
+}
+
+struct HomeLanesView: View {
+    let sections: [HomeSection]
+    let onOpenCategory: (HomeSection) -> Void
+    let onPlay: (Channel) -> Void
+    let onFocus: (Channel) -> Void
     
-    @ViewBuilder
-    private func cardView(for channel: Channel, sectionType: HomeSection.SectionType) -> some View {
-        if case .continueWatching = sectionType {
-            ContinueWatchingCard(channel: channel) {
-                onPlayChannel(channel)
+    var body: some View {
+        LazyVStack(alignment: .leading, spacing: 40) {
+            ForEach(sections) { section in
+                HomeSectionRow(
+                    section: section,
+                    onOpen: { onOpenCategory(section) },
+                    onPlay: onPlay,
+                    onFocus: onFocus
+                )
             }
-        } else {
-            MovieCard(channel: channel) {
-                onPlayChannel(channel)
+        }
+        .padding(.bottom, 100)
+    }
+}
+
+struct HomeSectionRow: View {
+    let section: HomeSection
+    let onOpen: () -> Void
+    let onPlay: (Channel) -> Void
+    let onFocus: (Channel) -> Void
+    
+    @FocusState private var isHeaderFocused: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Button(action: onOpen) {
+                HStack(spacing: 15) {
+                    Text(section.title)
+                        .font(CinemeltTheme.fontTitle(32))
+                        .foregroundColor(isHeaderFocused ? CinemeltTheme.accent : CinemeltTheme.cream)
+                        .shadow(color: isHeaderFocused ? CinemeltTheme.accent.opacity(0.6) : .clear, radius: 10)
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.headline)
+                        .foregroundColor(CinemeltTheme.accent)
+                        .opacity(isHeaderFocused ? 1 : 0)
+                        .offset(x: isHeaderFocused ? 5 : 0)
+                }
+            }
+            .buttonStyle(.plain)
+            .focused($isHeaderFocused)
+            .padding(.horizontal, 60)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 50) {
+                    ForEach(section.items) { channel in
+                        if case .continueWatching = section.type {
+                            ContinueWatchingCard(channel: channel) { onPlay(channel) }
+                        } else {
+                            MovieCard(
+                                channel: channel,
+                                onClick: { onPlay(channel) },
+                                onFocus: { onFocus(channel) }
+                            )
+                        }
+                    }
+                }
+                .padding(.horizontal, 60)
+                .padding(.vertical, 40)
             }
         }
     }
+}
+
+struct HomeDrillDownView: View {
+    let title: String
+    let channels: [Channel]
+    let onClose: () -> Void
+    let onPlay: (Channel) -> Void
+    let onFocus: (Channel) -> Void
     
-    // MARK: - Drill Down (Grid)
+    let gridColumns = [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 60)]
     
-    func drillDownView(title: String) -> some View {
+    var body: some View {
         ZStack {
-            // Blurred backdrop for focus
             CinemeltTheme.mainBackground
             Rectangle().fill(.ultraThinMaterial).ignoresSafeArea()
             
             VStack(alignment: .leading) {
                 HStack {
-                    Button(action: { viewModel.closeDrillDown() }) {
+                    Button(action: onClose) {
                         HStack(spacing: 15) {
                             Image(systemName: "arrow.left")
-                            Text(title)
-                                .font(CinemeltTheme.fontTitle(50))
-                                .cinemeltGlow()
+                            Text(title).font(CinemeltTheme.fontTitle(50)).cinemeltGlow()
                         }
                         .foregroundColor(CinemeltTheme.cream)
                     }
@@ -217,10 +279,12 @@ struct HomeView: View {
                 
                 ScrollView {
                     LazyVGrid(columns: gridColumns, spacing: 80) {
-                        ForEach(viewModel.displayedGridChannels) { channel in
-                            MovieCard(channel: channel) {
-                                onPlayChannel(channel)
-                            }
+                        ForEach(channels) { channel in
+                            MovieCard(
+                                channel: channel,
+                                onClick: { onPlay(channel) },
+                                onFocus: { onFocus(channel) }
+                            )
                         }
                     }
                     .padding(.horizontal, 60)
@@ -228,55 +292,36 @@ struct HomeView: View {
                 }
             }
         }
-        .onExitCommand {
-            viewModel.closeDrillDown()
-        }
+        .onExitCommand { onClose() }
     }
+}
+
+struct HomeProfileSelector: View {
+    let playlists: [Playlist]
+    let onSelect: (Playlist) -> Void
+    let onAdd: () -> Void
     
-    // MARK: - Profile Selector
-    
-    private var profileSelector: some View {
+    var body: some View {
         VStack(spacing: 60) {
-            VStack(spacing: 10) {
-                Text("Who is watching?")
-                    .font(CinemeltTheme.fontTitle(60))
-                    .foregroundColor(CinemeltTheme.cream)
-                    .cinemeltGlow()
-                
-                Text("Select a profile to continue")
-                    .cinemeltBody()
-            }
-            
+            Text("Who is watching?").cinemeltTitle()
             HStack(spacing: 80) {
-                // Add Button
-                Button(action: onAddPlaylist) {
+                Button(action: onAdd) {
                     VStack {
-                        Image(systemName: "plus")
-                            .font(.system(size: 60))
-                            .foregroundColor(CinemeltTheme.accent)
-                            .padding(.bottom, 10)
-                        Text("Add Profile")
-                            .font(CinemeltTheme.fontTitle(28))
-                            .foregroundColor(CinemeltTheme.cream)
+                        Image(systemName: "plus").font(.system(size: 60)).padding(.bottom, 10)
+                        Text("Add Profile").cinemeltTitle()
                     }
                     .frame(width: 300, height: 300)
-                    .cinemeltGlass(radius: 150) // Circular Glass
+                    .cinemeltGlass(radius: 150)
                 }
                 .buttonStyle(CinemeltCardButtonStyle())
                 
-                // Existing Profiles
-                ForEach(viewModel.playlists) { playlist in
-                    Button(action: { viewModel.selectPlaylist(playlist) }) {
+                ForEach(playlists) { playlist in
+                    Button(action: { onSelect(playlist) }) {
                         VStack {
                             Text(String(playlist.title.prefix(1)).uppercased())
                                 .font(CinemeltTheme.fontTitle(100))
                                 .foregroundColor(CinemeltTheme.accent)
-                                .shadow(color: CinemeltTheme.accent.opacity(0.8), radius: 20)
-                            
-                            Text(playlist.title)
-                                .font(CinemeltTheme.fontTitle(32))
-                                .foregroundColor(CinemeltTheme.cream)
-                                .padding(.top, 10)
+                            Text(playlist.title).cinemeltTitle()
                         }
                         .frame(width: 300, height: 300)
                         .cinemeltGlass(radius: 150)

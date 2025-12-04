@@ -3,6 +3,7 @@ import SwiftUI
 struct MovieCard: View {
     let channel: Channel
     let onClick: () -> Void
+    var onFocus: (() -> Void)? = nil // Optional callback for Void Killer
     
     @FocusState private var isFocused: Bool
     
@@ -59,7 +60,7 @@ struct MovieCard: View {
                     
                     VStack(alignment: .leading, spacing: 2) {
                         Text(channel.title)
-                            .font(CinemeltTheme.fontTitle(22)) // Condensed Bold
+                            .font(CinemeltTheme.fontTitle(22))
                             .foregroundColor(CinemeltTheme.cream)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
@@ -78,10 +79,10 @@ struct MovieCard: View {
                 }
             }
         }
-        .buttonStyle(.card) // Native parallax support
+        .buttonStyle(.card)
         .focused($isFocused)
         .frame(width: width, height: height)
-        .background(CinemeltTheme.coffee) // Background prevents transparency glitches
+        .background(CinemeltTheme.coffee)
         .cornerRadius(16)
         // MARK: - THE AMBILIGHT GLOW
         .shadow(
@@ -90,7 +91,7 @@ struct MovieCard: View {
             x: 0,
             y: isFocused ? 15 : 2
         )
-        // Additional "Hard" glow for intensity
+        // Additional "Hard" glow
         .shadow(
             color: isFocused ? CinemeltTheme.accent.opacity(0.3) : .clear,
             radius: 5,
@@ -110,5 +111,8 @@ struct MovieCard: View {
                 )
         )
         .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isFocused)
+        .onChange(of: isFocused) { focused in
+            if focused { onFocus?() }
+        }
     }
 }

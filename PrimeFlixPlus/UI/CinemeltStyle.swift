@@ -5,15 +5,15 @@ struct CinemeltTheme {
     
     // MARK: - Colors
     static let accent = Color(red: 255/255, green: 140/255, blue: 60/255) // Warm glowing amber
-    static let accentDim = Color(red: 180/255, green: 90/255, blue: 40/255) // Darker amber
+    static let accentDim = Color(red: 180/255, green: 90/255, blue: 40/255) // Deep amber
     static let cream = Color(red: 245/255, green: 240/255, blue: 230/255) // Soft off-white
     
     // Core Background Colors
     static let charcoal = Color(red: 30/255, green: 28/255, blue: 26/255)
     static let coffee = Color(red: 15/255, green: 12/255, blue: 10/255)
     
-    // MARK: - Backward Compatibility (Fixes Build Errors)
-    // These map the old naming convention to the new palette so other files compile.
+    // MARK: - Backward Compatibility
+    // These aliases prevent build errors in other files.
     static let backgroundStart = charcoal
     static let backgroundEnd = coffee
     static let glassSurface = Color.white.opacity(0.1)
@@ -42,6 +42,11 @@ struct CinemeltTheme {
                     .frame(width: geo.size.width * 0.5)
                     .position(x: geo.size.width, y: geo.size.height)
             }
+            
+            // Film Grain
+            GrainOverlay()
+                .opacity(0.03)
+                .blendMode(.overlay)
         }
         .ignoresSafeArea()
     }
@@ -53,6 +58,23 @@ struct CinemeltTheme {
     
     static func fontBody(_ size: CGFloat) -> Font {
         return .custom("Zain-Regular", size: size)
+    }
+}
+
+// MARK: - Texture Generator
+struct GrainOverlay: View {
+    var body: some View {
+        GeometryReader { geo in
+            Canvas { context, size in
+                for _ in 0..<Int(size.width * size.height / 300) {
+                    let x = Double.random(in: 0...size.width)
+                    let y = Double.random(in: 0...size.height)
+                    let rect = CGRect(x: x, y: y, width: 1, height: 1)
+                    context.fill(Path(rect), with: .color(.white))
+                }
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 
@@ -83,7 +105,7 @@ struct CinemeltTextGlow: ViewModifier {
 
 // MARK: - Button Styles
 
-// A wrapper view to handle Focus State cleanly within a ButtonStyle
+// Wrapper to handle focus state without deprecated modifiers
 struct CinemeltCardButtonView: View {
     let configuration: ButtonStyle.Configuration
     @Environment(\.isFocused) private var isFocused: Bool
