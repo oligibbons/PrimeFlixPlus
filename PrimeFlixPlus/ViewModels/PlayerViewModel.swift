@@ -4,6 +4,7 @@ import AVFoundation
 import Combine
 import SwiftUI
 
+@MainActor
 class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate {
     
     // UI State
@@ -162,7 +163,7 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
     
     // MARK: - SSL Bypass (AVAssetResourceLoaderDelegate)
     
-    func resourceLoader(_ resourceLoader: AVAssetResourceLoader, shouldWaitForResponseTo authenticationChallenge: URLAuthenticationChallenge) -> Bool {
+    nonisolated func resourceLoader(_ resourceLoader: AVAssetResourceLoader, shouldWaitForResponseTo authenticationChallenge: URLAuthenticationChallenge) -> Bool {
         if let trust = authenticationChallenge.protectionSpace.serverTrust {
             let credential = URLCredential(trust: trust)
             authenticationChallenge.sender?.use(credential, for: authenticationChallenge)

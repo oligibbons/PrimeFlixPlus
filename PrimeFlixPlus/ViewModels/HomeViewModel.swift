@@ -4,19 +4,32 @@ import Combine
 import SwiftUI
 
 struct HomeSection: Identifiable {
-    // FIX: Use title as stable ID to preserve scroll position during data refreshes
-    var id: String { title }
+    // We use a combination of Title + Type to ensure uniqueness if two categories clean to the same name
+    var id: String { "\(title)_\(type)" }
     let title: String
     let type: SectionType
     let items: [Channel]
     
-    enum SectionType {
+    enum SectionType: Hashable {
         case continueWatching
         case favorites
         case trending
         case recent
-        case genre(String)
+        case recommended
+        case genre(String)   // Stores the RAW group name (e.g. "NL | Disney")
         case provider(String)
+        
+        func hash(into hasher: inout Hasher) {
+            switch self {
+            case .genre(let g): hasher.combine("genre"); hasher.combine(g)
+            case .provider(let p): hasher.combine("provider"); hasher.combine(p)
+            case .continueWatching: hasher.combine("cw")
+            case .favorites: hasher.combine("fav")
+            case .trending: hasher.combine("tr")
+            case .recent: hasher.combine("rc")
+            case .recommended: hasher.combine("rec")
+            }
+        }
     }
 }
 
@@ -45,6 +58,9 @@ class HomeViewModel: ObservableObject {
     @Published var timeGreeting: String = "Welcome Back"
     @Published var witGreeting: String = "Ready to watch?"
     
+    // Access User Preferences
+    @AppStorage("preferredLanguage") var preferredLanguage: String = "English"
+    
     private var repository: PrimeFlixRepository?
     private let tmdbClient = TmdbClient()
     private var cancellables = Set<AnyCancellable>()
@@ -62,8 +78,7 @@ class HomeViewModel: ObservableObject {
         // Initial load of cached data
         refreshContent(forceLoadingState: sections.isEmpty)
         
-        // FIX: Listen specifically for Sync Status changes, not generic object changes.
-        // This prevents the UI from refreshing violently during a sync.
+        // Listen specifically for Sync Status changes to auto-refresh when sync completes
         repository.$isSyncing
             .removeDuplicates()
             .receive(on: RunLoop.main)
@@ -131,6 +146,7 @@ class HomeViewModel: ObservableObject {
         let currentPlaylist = selectedPlaylist
         let client = self.tmdbClient
         let typeStr = currentTab.rawValue
+        let userLang = self.preferredLanguage
         
         // Run network logic in background task
         Task {
@@ -156,108 +172,80 @@ class HomeViewModel: ObservableObject {
             await MainActor.run {
                 var newSections: [HomeSection] = []
                 
-                // --- LIVE TV ---
-                if currentTab == .live {
-                    let favs = repo.getFavorites(type: typeStr)
-                    if !favs.isEmpty {
-                        newSections.append(HomeSection(title: "Favorite Channels", type: .favorites, items: favs))
+                // --- 1. Standard Lanes ---
+                
+                // Continue Watching
+                let resumeItems = repo.getSmartContinueWatching(type: typeStr)
+                if !resumeItems.isEmpty {
+                    newSections.append(HomeSection(title: "Continue Watching", type: .continueWatching, items: resumeItems))
+                }
+                
+                // Recommended For You
+                let recs = repo.getRecommended(type: typeStr)
+                if !recs.isEmpty {
+                    newSections.append(HomeSection(title: "Recommended For You", type: .recommended, items: recs))
+                }
+                
+                // Trending
+                if !trendingIDs.isEmpty {
+                    let context = repo.container.viewContext
+                    let trendingMatches = trendingIDs.compactMap { try? context.existingObject(with: $0) as? Channel }
+                    
+                    if !trendingMatches.isEmpty {
+                        newSections.append(HomeSection(title: "Trending Now", type: .trending, items: trendingMatches))
                     }
-                    
-                    let recent = repo.getSmartContinueWatching(type: typeStr)
-                    if !recent.isEmpty {
-                        newSections.append(HomeSection(title: "Recently Watched", type: .continueWatching, items: recent))
-                    }
-                    
-                    if let pl = currentPlaylist {
-                        let allGroups = repo.getGroups(playlistUrl: pl.url, type: currentTab)
-                        for group in allGroups {
-                            let items = repo.getByGenre(type: typeStr, groupName: group, limit: 20)
-                            if !items.isEmpty {
-                                newSections.append(HomeSection(title: group, type: .genre(group), items: items))
-                            }
-                        }
-                    }
-                    
-                } else {
-                    // --- MOVIES & SERIES ---
-                    
-                    // 1. Continue Watching
-                    let resumeItems = repo.getSmartContinueWatching(type: typeStr)
-                    if !resumeItems.isEmpty {
-                        newSections.append(HomeSection(title: "Continue Watching", type: .continueWatching, items: resumeItems))
-                    }
-                    
-                    // 2. Trending (Optimized)
-                    if !trendingIDs.isEmpty {
-                        // Rapidly resolve objects on Main Context using IDs found in background
-                        let context = repo.container.viewContext
-                        let trendingMatches = trendingIDs.compactMap { try? context.existingObject(with: $0) as? Channel }
-                        
-                        if !trendingMatches.isEmpty {
-                            newSections.append(HomeSection(title: "Trending Now", type: .trending, items: trendingMatches))
-                        }
-                    }
-                    
-                    // 3. Favorites
-                    let favs = repo.getFavorites(type: typeStr)
-                    if !favs.isEmpty {
-                        newSections.append(HomeSection(title: "My List", type: .favorites, items: favs))
-                    }
-                    
-                    // 4. Recently Added
+                }
+                
+                // Favorites
+                let favs = repo.getFavorites(type: typeStr)
+                if !favs.isEmpty {
+                    newSections.append(HomeSection(title: "My List", type: .favorites, items: favs))
+                }
+                
+                // Recent (Only for VOD)
+                if currentTab != .live {
                     let recent = repo.getRecentlyAdded(type: typeStr, limit: 20)
                     if !recent.isEmpty {
                         newSections.append(HomeSection(title: "Recently Added", type: .recent, items: recent))
-                    } else {
-                        let fallback = repo.getRecentFallback(type: typeStr, limit: 20)
-                        if !fallback.isEmpty {
-                            newSections.append(HomeSection(title: "New Arrivals", type: .recent, items: fallback))
-                        }
                     }
+                }
+                
+                // --- 2. Smart Category Lanes ---
+                
+                if let pl = currentPlaylist {
+                    let allGroups = repo.getGroups(playlistUrl: pl.url, type: currentTab)
+                    var addedGroups = Set<String>()
                     
-                    // 5. Providers & Genres
-                    if let pl = currentPlaylist {
-                        let allGroups = repo.getGroups(playlistUrl: pl.url, type: currentTab)
-                        
-                        let premiumKeywords = ["Netflix", "Disney", "Apple", "Amazon", "Hulu", "HBO", "4K", "UHD"]
-                        let standardKeywords = ["Action", "Comedy", "Drama", "Sci-Fi", "Horror", "Documentary", "Kids", "Family", "Thriller", "Adventure"]
-                        var addedGroups = Set<String>()
-                        
-                        // Providers
-                        for group in allGroups {
-                            if premiumKeywords.contains(where: { group.localizedCaseInsensitiveContains($0) }) {
-                                let items = repo.getByGenre(type: typeStr, groupName: group, limit: 20)
-                                if !items.isEmpty && !addedGroups.contains(group) {
-                                    newSections.append(HomeSection(title: group, type: .provider(group), items: items))
-                                    addedGroups.insert(group)
-                                }
-                            }
+                    // Smart Keywords for type detection (styling)
+                    let premiumKeywords = ["Netflix", "Disney", "Pixar", "Marvel", "Apple", "Amazon", "Hulu", "HBO", "4K", "UHD"]
+                    
+                    // Consolidated Loop: Filter, Clean, and Add
+                    for rawGroup in allGroups {
+                        // A. FILTER: Check against User Language & Hidden Categories (using SettingsViewModel logic)
+                        if !CategoryPreferences.shared.shouldShow(group: rawGroup, language: userLang) {
+                            continue
                         }
                         
-                        // Genres
-                        for group in allGroups {
-                            if standardKeywords.contains(where: { group.localizedCaseInsensitiveContains($0) }) {
-                                let items = repo.getByGenre(type: typeStr, groupName: group, limit: 20)
-                                if !items.isEmpty && !addedGroups.contains(group) {
-                                    newSections.append(HomeSection(title: group, type: .genre(group), items: items))
-                                    addedGroups.insert(group)
-                                }
-                            }
+                        // B. CLEAN: Remove prefixes like "NL | "
+                        let cleanTitle = CategoryPreferences.shared.cleanName(rawGroup)
+                        
+                        // C. DEDUP: Skip if we already added this RAW group
+                        if addedGroups.contains(rawGroup) { continue }
+                        
+                        // D. FETCH CONTENT
+                        let items = repo.getByGenre(type: typeStr, groupName: rawGroup, limit: 20)
+                        
+                        if !items.isEmpty {
+                            // Determine type for potential UI styling
+                            let isPremium = premiumKeywords.contains { rawGroup.localizedCaseInsensitiveContains($0) }
+                            let type: HomeSection.SectionType = isPremium ? .provider(rawGroup) : .genre(rawGroup)
+                            
+                            newSections.append(HomeSection(title: cleanTitle, type: type, items: items))
+                            addedGroups.insert(rawGroup)
                         }
                         
-                        // Fallback (Fill space)
-                        if newSections.count < 6 {
-                            for group in allGroups {
-                                if !addedGroups.contains(group) {
-                                    let items = repo.getByGenre(type: typeStr, groupName: group, limit: 20)
-                                    if !items.isEmpty {
-                                        newSections.append(HomeSection(title: group, type: .genre(group), items: items))
-                                        addedGroups.insert(group)
-                                    }
-                                    if newSections.count >= 15 { break }
-                                }
-                            }
-                        }
+                        // E. LIMIT: Prevent infinite scrolling performance issues
+                        if newSections.count >= 20 { break }
                     }
                 }
                 
@@ -276,15 +264,15 @@ class HomeViewModel: ObservableObject {
         guard let repo = repository, let pl = selectedPlaylist else { return }
         let type = selectedTab.rawValue
         
-        // OPTIMIZATION: Moved to background task to prevent UI freeze on large categories
+        // Fetch content for the "See All" grid
         Task {
             let results: [Channel]
             
             switch section.type {
-            case .genre(let g), .provider(let g):
-                self.drillDownCategory = g
-                // This repository call can be heavy due to deduplication, so we await it
-                results = repo.getBrowsingContent(playlistUrl: pl.url, type: type, group: g)
+            case .genre(let rawGroup), .provider(let rawGroup):
+                self.drillDownCategory = section.title // Show Clean Title in Header
+                // Use Raw Group ID/Name to fetch content
+                results = repo.getBrowsingContent(playlistUrl: pl.url, type: type, group: rawGroup)
                 
             case .recent:
                 self.drillDownCategory = "Recently Added"
@@ -301,6 +289,10 @@ class HomeViewModel: ObservableObject {
             case .trending:
                 self.drillDownCategory = "Trending Now"
                 results = section.items
+                
+            case .recommended:
+                self.drillDownCategory = "Recommended For You"
+                results = repo.getRecommended(type: type)
             }
             
             // Update UI on MainActor

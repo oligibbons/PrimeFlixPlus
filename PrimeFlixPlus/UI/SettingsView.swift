@@ -46,7 +46,7 @@ struct SettingsView: View {
                 Spacer()
                 
                 // Version Info
-                Text("PrimeFlix v1.0")
+                Text("PrimeFlix v1.1")
                     .font(CinemeltTheme.fontBody(18))
                     .foregroundColor(.gray)
                     .padding(.horizontal, 20)
@@ -61,125 +61,62 @@ struct SettingsView: View {
             )
             
             // RIGHT PANE: Content Scroll
-            ScrollView {
-                VStack(alignment: .leading, spacing: 50) {
-                    
-                    // --- SECTION 1: PLAYBACK ---
-                    VStack(alignment: .leading, spacing: 25) {
-                        Text("Playback Preferences")
-                            .font(CinemeltTheme.fontTitle(32))
-                            .foregroundColor(CinemeltTheme.accent)
-                            .cinemeltGlow()
+            // Wrapped in NavigationView to support drill-down for Language/Categories
+            NavigationView {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 50) {
                         
-                        // Language Selector Card
-                        // Note: Using NavigationLink directly inside Button label or a wrapper for tvOS navigation
-                        NavigationLink(destination: LanguageSelectionView(viewModel: viewModel)) {
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text("Default Language")
-                                        .font(CinemeltTheme.fontBody(24))
-                                        .foregroundColor(CinemeltTheme.cream)
-                                    Text(viewModel.preferredLanguage)
-                                        .font(CinemeltTheme.fontBody(20))
-                                        .foregroundColor(CinemeltTheme.accent)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .foregroundColor(.gray)
-                            }
-                            .padding(20)
-                            .background(Color.white.opacity(0.05))
-                            .cornerRadius(16)
-                        }
-                        .buttonStyle(CinemeltCardButtonStyle())
-                        
-                        // Resolution Chips
-                        VStack(alignment: .leading, spacing: 15) {
-                            Text("Preferred Quality")
-                                .font(CinemeltTheme.fontBody(22))
-                                .foregroundColor(CinemeltTheme.cream.opacity(0.8))
-                            
-                            HStack(spacing: 20) {
-                                ForEach(viewModel.availableResolutions, id: \.self) { res in
-                                    Button(action: { viewModel.preferredResolution = res }) {
-                                        Text(res)
-                                            .font(CinemeltTheme.fontBody(20))
-                                            .fontWeight(viewModel.preferredResolution == res ? .bold : .regular)
-                                            .padding(.horizontal, 24)
-                                            .padding(.vertical, 12)
-                                            .background(
-                                                viewModel.preferredResolution == res ?
-                                                CinemeltTheme.accent : Color.white.opacity(0.05)
-                                            )
-                                            .cornerRadius(12)
-                                    }
-                                    .buttonStyle(CinemeltCardButtonStyle())
-                                    .foregroundColor(viewModel.preferredResolution == res ? .black : CinemeltTheme.cream)
-                                }
-                            }
-                        }
-                    }
-                    .padding(40)
-                    .cinemeltGlass()
-                    
-                    // --- SECTION 2: DATA & SYNC ---
-                    VStack(alignment: .leading, spacing: 25) {
-                        Text("Data & Sync")
-                            .font(CinemeltTheme.fontTitle(32))
-                            .foregroundColor(CinemeltTheme.accent)
-                            .cinemeltGlow()
-                        
-                        HStack(spacing: 30) {
-                            ActionCard(
-                                icon: "arrow.triangle.2.circlepath",
-                                title: "Force Sync",
-                                subtitle: "Refresh Library",
-                                action: { Task { await repository.syncAll() } }
-                            )
-                            
-                            ActionCard(
-                                icon: "trash",
-                                title: "Clear Cache",
-                                subtitle: "Free up space",
-                                action: { viewModel.clearCache() }
-                            )
-                        }
-                    }
-                    .padding(40)
-                    .cinemeltGlass()
-                    
-                    // --- SECTION 3: PROFILES ---
-                    if !viewModel.playlists.isEmpty {
+                        // --- SECTION 1: CONTENT & FILTERING (NEW) ---
                         VStack(alignment: .leading, spacing: 25) {
-                            Text("Active Profiles")
+                            Text("Content Preferences")
                                 .font(CinemeltTheme.fontTitle(32))
                                 .foregroundColor(CinemeltTheme.accent)
                                 .cinemeltGlow()
                             
-                            ForEach(viewModel.playlists, id: \.self) { playlist in
-                                Button(action: {}) {
+                            HStack(spacing: 30) {
+                                // Language Selector
+                                NavigationLink(destination: LanguageSelectionView(viewModel: viewModel)) {
                                     HStack {
-                                        Image(systemName: "person.circle.fill")
-                                            .font(.title)
-                                            .foregroundColor(CinemeltTheme.cream.opacity(0.5))
+                                        Image(systemName: "globe")
+                                            .font(.title2)
+                                            .foregroundColor(CinemeltTheme.accent)
                                         
                                         VStack(alignment: .leading) {
-                                            Text(playlist.title)
-                                                .font(CinemeltTheme.fontBody(24))
+                                            Text("Language")
+                                                .font(CinemeltTheme.fontBody(22))
                                                 .fontWeight(.bold)
                                                 .foregroundColor(CinemeltTheme.cream)
-                                            Text(playlist.url)
-                                                .font(CinemeltTheme.fontBody(18))
+                                            Text(viewModel.preferredLanguage)
+                                                .font(CinemeltTheme.fontBody(16))
                                                 .foregroundColor(.gray)
-                                                .lineLimit(1)
                                         }
                                         Spacer()
-                                        Button(action: { viewModel.deletePlaylist(playlist) }) {
-                                            Image(systemName: "trash")
-                                                .foregroundColor(.red.opacity(0.8))
-                                                .font(.title2)
+                                        Image(systemName: "chevron.right")
+                                    }
+                                    .padding(20)
+                                    .background(Color.white.opacity(0.05))
+                                    .cornerRadius(16)
+                                }
+                                .buttonStyle(CinemeltCardButtonStyle())
+                                
+                                // Category Manager
+                                NavigationLink(destination: ManageCategoriesView(viewModel: viewModel)) {
+                                    HStack {
+                                        Image(systemName: "list.bullet.rectangle.portrait")
+                                            .font(.title2)
+                                            .foregroundColor(CinemeltTheme.accent)
+                                        
+                                        VStack(alignment: .leading) {
+                                            Text("Categories")
+                                                .font(CinemeltTheme.fontBody(22))
+                                                .fontWeight(.bold)
+                                                .foregroundColor(CinemeltTheme.cream)
+                                            Text("Hide unwanted groups")
+                                                .font(CinemeltTheme.fontBody(16))
+                                                .foregroundColor(.gray)
                                         }
-                                        .buttonStyle(.plain)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
                                     }
                                     .padding(20)
                                     .background(Color.white.opacity(0.05))
@@ -190,11 +127,119 @@ struct SettingsView: View {
                         }
                         .padding(40)
                         .cinemeltGlass()
+                        
+                        // --- SECTION 2: PLAYBACK ---
+                        VStack(alignment: .leading, spacing: 25) {
+                            Text("Playback")
+                                .font(CinemeltTheme.fontTitle(32))
+                                .foregroundColor(CinemeltTheme.accent)
+                                .cinemeltGlow()
+                            
+                            // Resolution Chips
+                            VStack(alignment: .leading, spacing: 15) {
+                                Text("Preferred Quality")
+                                    .font(CinemeltTheme.fontBody(22))
+                                    .foregroundColor(CinemeltTheme.cream.opacity(0.8))
+                                
+                                HStack(spacing: 20) {
+                                    ForEach(viewModel.availableResolutions, id: \.self) { res in
+                                        Button(action: { viewModel.preferredResolution = res }) {
+                                            Text(res)
+                                                .font(CinemeltTheme.fontBody(20))
+                                                .fontWeight(viewModel.preferredResolution == res ? .bold : .regular)
+                                                .padding(.horizontal, 24)
+                                                .padding(.vertical, 12)
+                                                .background(
+                                                    viewModel.preferredResolution == res ?
+                                                    CinemeltTheme.accent : Color.white.opacity(0.05)
+                                                )
+                                                .cornerRadius(12)
+                                        }
+                                        .buttonStyle(CinemeltCardButtonStyle())
+                                        .foregroundColor(viewModel.preferredResolution == res ? .black : CinemeltTheme.cream)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(40)
+                        .cinemeltGlass()
+                        
+                        // --- SECTION 3: DATA & SYNC ---
+                        VStack(alignment: .leading, spacing: 25) {
+                            Text("Data & Sync")
+                                .font(CinemeltTheme.fontTitle(32))
+                                .foregroundColor(CinemeltTheme.accent)
+                                .cinemeltGlow()
+                            
+                            HStack(spacing: 30) {
+                                ActionCard(
+                                    icon: "arrow.triangle.2.circlepath",
+                                    title: "Force Sync",
+                                    subtitle: "Fix category names",
+                                    action: { Task { await repository.syncAll() } }
+                                )
+                                
+                                ActionCard(
+                                    icon: "trash",
+                                    title: "Clear Cache",
+                                    subtitle: "Free up space",
+                                    action: { viewModel.clearCache() }
+                                )
+                            }
+                        }
+                        .padding(40)
+                        .cinemeltGlass()
+                        
+                        // --- SECTION 4: PROFILES ---
+                        if !viewModel.playlists.isEmpty {
+                            VStack(alignment: .leading, spacing: 25) {
+                                Text("Active Profiles")
+                                    .font(CinemeltTheme.fontTitle(32))
+                                    .foregroundColor(CinemeltTheme.accent)
+                                    .cinemeltGlow()
+                                
+                                ForEach(viewModel.playlists, id: \.self) { playlist in
+                                    Button(action: {}) {
+                                        HStack {
+                                            Image(systemName: "person.circle.fill")
+                                                .font(.title)
+                                                .foregroundColor(CinemeltTheme.cream.opacity(0.5))
+                                            
+                                            VStack(alignment: .leading) {
+                                                Text(playlist.title)
+                                                    .font(CinemeltTheme.fontBody(24))
+                                                    .fontWeight(.bold)
+                                                    .foregroundColor(CinemeltTheme.cream)
+                                                Text(playlist.url)
+                                                    .font(CinemeltTheme.fontBody(18))
+                                                    .foregroundColor(.gray)
+                                                    .lineLimit(1)
+                                            }
+                                            Spacer()
+                                            Button(action: { viewModel.deletePlaylist(playlist) }) {
+                                                Image(systemName: "trash")
+                                                    .foregroundColor(.red.opacity(0.8))
+                                                    .font(.title2)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                        .padding(20)
+                                        .background(Color.white.opacity(0.05))
+                                        .cornerRadius(16)
+                                    }
+                                    .buttonStyle(CinemeltCardButtonStyle())
+                                }
+                            }
+                            .padding(40)
+                            .cinemeltGlass()
+                        }
                     }
+                    .padding(50)
+                    .padding(.bottom, 100)
                 }
-                .padding(50)
-                .padding(.bottom, 100)
+                .background(Color.clear) // Keep generic background visible
             }
+            .navigationViewStyle(.stack) // Crucial for embedding in split view
             // FIX: Enable Smart Navigation for the content pane to prevent focus trapping
             .focusSection()
         }
@@ -250,7 +295,7 @@ struct LanguageSelectionView: View {
     
     var body: some View {
         ZStack {
-            CinemeltTheme.mainBackground
+            CinemeltTheme.mainBackground.ignoresSafeArea()
             
             ScrollView {
                 VStack(spacing: 30) {

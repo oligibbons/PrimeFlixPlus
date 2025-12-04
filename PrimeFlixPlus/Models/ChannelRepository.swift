@@ -8,6 +8,67 @@ class ChannelRepository {
         self.context = context
     }
     
+    // MARK: - Recommended Logic (NEW)
+    
+    func getRecommended(type: String) -> [Channel] {
+        // 1. Get User's Taste Profile (Based on History & Favorites)
+        var preferredGroups = Set<String>()
+        
+        context.performAndWait {
+            // From History
+            let historyReq = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
+            historyReq.fetchLimit = 50
+            if let history = try? context.fetch(historyReq) {
+                for item in history {
+                    if let ch = self.getChannel(byUrl: item.channelUrl), ch.type == type {
+                        preferredGroups.insert(ch.group)
+                    }
+                }
+            }
+            
+            // From Favorites
+            let favReq = NSFetchRequest<Channel>(entityName: "Channel")
+            favReq.predicate = NSPredicate(format: "isFavorite == YES AND type == %@", type)
+            if let favs = try? context.fetch(favReq) {
+                for fav in favs {
+                    preferredGroups.insert(fav.group)
+                }
+            }
+        }
+        
+        if preferredGroups.isEmpty { return [] }
+        
+        // 2. Fetch Unwatched Items from these Groups
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
+        
+        // Predicate: Matches Type AND Group is in Preferred List
+        request.predicate = NSPredicate(format: "type == %@ AND group IN %@", type, preferredGroups)
+        
+        // Sort: Random-ish (using AddedAt for now as proxy for freshness)
+        request.sortDescriptors = [NSSortDescriptor(key: "addedAt", ascending: false)]
+        request.fetchLimit = 100 // Fetch pool
+        
+        var results: [Channel] = []
+        
+        context.performAndWait {
+            if let candidates = try? context.fetch(request) {
+                // Filter out duplicates (versions) and already watched stuff
+                // (Simplified: Just taking top 20 distinct titles)
+                var seenTitles = Set<String>()
+                for ch in candidates {
+                    if results.count >= 20 { break }
+                    let title = ch.title
+                    if !seenTitles.contains(title) {
+                        results.append(ch)
+                        seenTitles.insert(title)
+                    }
+                }
+            }
+        }
+        
+        return results
+    }
+    
     // MARK: - Search Logic
     
     struct SearchResults {

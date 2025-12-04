@@ -26,7 +26,7 @@ class FavoritesViewModel: ObservableObject {
                 Task {
                     // Small delay to allow Core Data commit to propagate
                     try? await Task.sleep(nanoseconds: 200_000_000)
-                    await self?.refreshData()
+                    self?.refreshData()
                 }
             }
             .store(in: &cancellables)
@@ -35,18 +35,17 @@ class FavoritesViewModel: ObservableObject {
     func refreshData() {
         guard let repo = repository else { return }
         
-        Task.detached(priority: .userInitiated) {
+        // FIX: Use standard Task to inherit MainActor context
+        Task {
             let favMovies = repo.getFavorites(type: "movie")
             let favSeries = repo.getFavorites(type: "series")
             let favLive = repo.getFavorites(type: "live")
             
-            await MainActor.run {
-                withAnimation(.easeInOut) {
-                    self.movies = favMovies
-                    self.series = favSeries
-                    self.liveChannels = favLive
-                    self.isLoading = false
-                }
+            withAnimation(.easeInOut) {
+                self.movies = favMovies
+                self.series = favSeries
+                self.liveChannels = favLive
+                self.isLoading = false
             }
         }
     }

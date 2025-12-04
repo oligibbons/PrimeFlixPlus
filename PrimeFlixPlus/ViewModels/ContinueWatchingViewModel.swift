@@ -27,7 +27,7 @@ class ContinueWatchingViewModel: ObservableObject {
                 // Debounce slightly to avoid rapid re-fetches during scrubbing
                 Task {
                     try? await Task.sleep(nanoseconds: 500_000_000)
-                    await self?.refreshData()
+                    self?.refreshData()
                 }
             }
             .store(in: &cancellables)
@@ -36,7 +36,8 @@ class ContinueWatchingViewModel: ObservableObject {
     func refreshData() {
         guard let repo = repository else { return }
         
-        Task.detached(priority: .userInitiated) {
+        // FIX: Use standard Task to inherit MainActor context, as repo methods are MainActor isolated
+        Task {
             // Use existing repository logic which handles sophisticated percentage/next-episode checks
             let rawMovies = repo.getSmartContinueWatching(type: "movie")
             let rawSeries = repo.getSmartContinueWatching(type: "series")
@@ -47,13 +48,11 @@ class ContinueWatchingViewModel: ObservableObject {
             let limitedSeries = Array(rawSeries.prefix(20))
             let limitedLive = Array(rawLive.prefix(10)) // Requirement: Last 10 for Live TV
             
-            await MainActor.run {
-                withAnimation(.easeInOut) {
-                    self.movies = limitedMovies
-                    self.series = limitedSeries
-                    self.liveChannels = limitedLive
-                    self.isLoading = false
-                }
+            withAnimation(.easeInOut) {
+                self.movies = limitedMovies
+                self.series = limitedSeries
+                self.liveChannels = limitedLive
+                self.isLoading = false
             }
         }
     }

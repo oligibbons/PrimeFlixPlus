@@ -59,6 +59,7 @@
 		D2AC8B0B2EE1FB0000D440C3 /* ContinueWatchingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B0A2EE1FB0000D440C3 /* ContinueWatchingView.swift */; };
 		D2AC8B0D2EE1FB2F00D440C3 /* FavoritesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B0C2EE1FB2F00D440C3 /* FavoritesViewModel.swift */; };
 		D2AC8B0F2EE1FB4700D440C3 /* FavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B0E2EE1FB4700D440C3 /* FavoritesView.swift */; };
+		D2AC8B112EE22EAF00D440C3 /* ManageCategoriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B102EE22EAF00D440C3 /* ManageCategoriesView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -136,6 +137,7 @@
 		D2AC8B0A2EE1FB0000D440C3 /* ContinueWatchingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinueWatchingView.swift; sourceTree = "<group>"; };
 		D2AC8B0C2EE1FB2F00D440C3 /* FavoritesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesViewModel.swift; sourceTree = "<group>"; };
 		D2AC8B0E2EE1FB4700D440C3 /* FavoritesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesView.swift; sourceTree = "<group>"; };
+		D2AC8B102EE22EAF00D440C3 /* ManageCategoriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageCategoriesView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -317,6 +319,7 @@
 				D2AC8B062EE1B8F400D440C3 /* SplashView.swift */,
 				D2AC8B0A2EE1FB0000D440C3 /* ContinueWatchingView.swift */,
 				D2AC8B0E2EE1FB4700D440C3 /* FavoritesView.swift */,
+				D2AC8B102EE22EAF00D440C3 /* ManageCategoriesView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -465,6 +468,7 @@
 				D292D6722EDF4B7B00E8845A /* HomeViewModel.swift in Sources */,
 				D2AC8AF62EE0ADE900D440C3 /* SearchViewModel.swift in Sources */,
 				D2AC8AFE2EE1475700D440C3 /* GlassTextField.swift in Sources */,
+				D2AC8B112EE22EAF00D440C3 /* ManageCategoriesView.swift in Sources */,
 				D292D6802EDF56AF00E8845A /* SettingsView.swift in Sources */,
 				D228AD132EDF66A3007C6114 /* AddPlaylistView.swift in Sources */,
 				D292D6772EDF4C3300E8845A /* HomeComponents.swift in Sources */,
