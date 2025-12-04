@@ -195,6 +195,8 @@ struct SettingsView: View {
                 .padding(50)
                 .padding(.bottom, 100)
             }
+            // FIX: Enable Smart Navigation for the content pane to prevent focus trapping
+            .focusSection()
         }
         .background(CinemeltTheme.mainBackground)
         .onAppear {

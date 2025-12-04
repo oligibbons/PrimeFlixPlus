@@ -16,22 +16,19 @@ struct SearchView: View {
             
             VStack(spacing: 0) {
                 
-                // 2. The Floating Search Header
-                VStack(spacing: 20) {
-                    GlassTextField(
-                        title: "Search Library",
-                        placeholder: "Find movies, series, channels...",
-                        text: $viewModel.searchText,
-                        nextFocus: { /* Dismiss keyboard or move focus down */ }
-                    )
-                    .focused($isSearchFieldFocused)
-                    .frame(maxWidth: 800)
-                    .padding(.top, 40)
-                    .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
-                }
-                .padding(.bottom, 30)
+                // 2. The Floating Search Header (Compact)
+                GlassTextField(
+                    title: "Search Library",
+                    placeholder: "Find movies, series, channels...",
+                    text: $viewModel.searchText,
+                    nextFocus: { /* Dismiss keyboard or move focus down */ }
+                )
+                .focused($isSearchFieldFocused)
+                .frame(maxWidth: 600)
+                .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
+                // FIX: drastically reduced padding.
+                .padding(.vertical, 20)
                 .background(
-                    // Gradient Fade for scrolling content behind header
                     LinearGradient(
                         colors: [CinemeltTheme.charcoal, CinemeltTheme.charcoal, CinemeltTheme.charcoal.opacity(0)],
                         startPoint: .top,
@@ -43,7 +40,7 @@ struct SearchView: View {
                 
                 // 3. Results Area
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 50) {
+                    VStack(alignment: .leading, spacing: 40) {
                         
                         if viewModel.isSearching {
                             HStack {
@@ -86,12 +83,13 @@ struct SearchView: View {
                     }
                     .padding(.bottom, 100)
                     .padding(.top, 20)
+                    // CRITICAL FIX: This enables diagonal navigation across rows of different lengths
+                    .focusSection()
                 }
             }
         }
         .onAppear {
             viewModel.configure(repository: repository)
-            // Auto-focus search on appear for quick entry
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 isSearchFieldFocused = true
             }
@@ -127,7 +125,7 @@ struct ResultSection: View {
     let onPlay: (Channel) -> Void
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 15) {
             Text(title)
                 .font(CinemeltTheme.fontTitle(36))
                 .foregroundColor(CinemeltTheme.cream)
@@ -135,7 +133,7 @@ struct ResultSection: View {
                 .padding(.leading, 60)
             
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 40) {
+                LazyHStack(spacing: 60) {
                     ForEach(items) { channel in
                         MovieCard(channel: channel) {
                             onPlay(channel)
@@ -143,7 +141,7 @@ struct ResultSection: View {
                     }
                 }
                 .padding(.horizontal, 60)
-                .padding(.vertical, 40) // Space for glow expansion
+                .padding(.vertical, 60)
             }
         }
     }
@@ -170,13 +168,12 @@ struct LiveResultSection: View {
                     }
                 }
                 .padding(.horizontal, 60)
-                .padding(.vertical, 40)
+                .padding(.vertical, 60)
             }
         }
     }
 }
 
-// Re-designed Live Card to match the new aesthetic
 struct LiveSearchCard: View {
     let item: SearchViewModel.LiveSearchResult
     let onClick: () -> Void
@@ -186,7 +183,6 @@ struct LiveSearchCard: View {
     var body: some View {
         Button(action: onClick) {
             VStack(spacing: 0) {
-                // Icon Area
                 ZStack {
                     AsyncImage(url: URL(string: item.channel.cover ?? "")) { img in
                         img.resizable().aspectRatio(contentMode: .fit)
@@ -198,7 +194,6 @@ struct LiveSearchCard: View {
                 .frame(width: 280, height: 160)
                 .background(Color.white.opacity(0.05))
                 
-                // Info Area
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text(item.channel.title)
@@ -222,8 +217,6 @@ struct LiveSearchCard: View {
                                 .foregroundColor(isFocused ? .black.opacity(0.6) : .gray)
                             
                             Spacer()
-                            
-                            // Progress Bar
                             if prog.isLiveNow {
                                 Capsule()
                                     .fill(CinemeltTheme.accent)
@@ -241,15 +234,18 @@ struct LiveSearchCard: View {
                 .frame(width: 280, alignment: .leading)
                 .background(isFocused ? CinemeltTheme.accent : CinemeltTheme.backgroundEnd.opacity(0.8))
             }
+            // Ensure frame is enforced inside the button content for live cards too
+            .frame(width: 280)
         }
         .buttonStyle(CinemeltCardButtonStyle())
         .focused($isFocused)
-        .frame(width: 280)
         .cornerRadius(16)
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(isFocused ? Color.white.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
         )
+        .scaleEffect(isFocused ? 1.1 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isFocused)
     }
     
     private func formatTime(_ date: Date) -> String {

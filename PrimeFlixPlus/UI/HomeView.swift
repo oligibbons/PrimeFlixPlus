@@ -203,6 +203,8 @@ struct HomeLanesView: View {
             }
         }
         .padding(.bottom, 100)
+        // FIX: Add focusSection to allow better navigation between rows of different lengths
+        .focusSection()
     }
 }
 
@@ -215,7 +217,7 @@ struct HomeSectionRow: View {
     @FocusState private var isHeaderFocused: Bool
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 10) {
             Button(action: onOpen) {
                 HStack(spacing: 15) {
                     Text(section.title)
@@ -228,7 +230,6 @@ struct HomeSectionRow: View {
                         .opacity(isHeaderFocused ? 1 : 0)
                         .offset(x: isHeaderFocused ? 5 : 0)
                 }
-                // FIXED PADDING: This forces the focus ring to expand
                 .padding(.vertical, 10)
                 .padding(.horizontal, 20)
                 .background(Color.clear)
@@ -240,19 +241,22 @@ struct HomeSectionRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 60) {
                     ForEach(section.items) { channel in
-                        if case .continueWatching = section.type {
-                            ContinueWatchingCard(channel: channel) { onPlay(channel) }
-                        } else {
-                            MovieCard(
-                                channel: channel,
-                                onClick: { onPlay(channel) },
-                                onFocus: { onFocus(channel) }
-                            )
+                        // Enforce frame stability
+                        ZStack {
+                            if case .continueWatching = section.type {
+                                ContinueWatchingCard(channel: channel) { onPlay(channel) }
+                            } else {
+                                MovieCard(
+                                    channel: channel,
+                                    onClick: { onPlay(channel) },
+                                    onFocus: { onFocus(channel) }
+                                )
+                            }
                         }
                     }
                 }
                 .padding(.horizontal, 80)
-                .padding(.vertical, 50)
+                .padding(.vertical, 60)
             }
         }
     }

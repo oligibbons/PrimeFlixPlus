@@ -4,7 +4,8 @@ import Combine
 import SwiftUI
 
 struct HomeSection: Identifiable {
-    let id = UUID()
+    // FIX: Use title as stable ID to preserve scroll position during data refreshes
+    var id: String { title }
     let title: String
     let type: SectionType
     let items: [Channel]
@@ -58,15 +59,28 @@ class HomeViewModel: ObservableObject {
         
         updateGreeting()
         
-        // Initial load
+        // Initial load of cached data
         refreshContent(forceLoadingState: sections.isEmpty)
         
-        // Listen for repository changes (Background Sync completion)
-        repository.objectWillChange
-            .sink { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                    self?.refreshContent(forceLoadingState: false)
+        // FIX: Listen specifically for Sync Status changes, not generic object changes.
+        // This prevents the UI from refreshing violently during a sync.
+        repository.$isSyncing
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] isSyncing in
+                guard let self = self else { return }
+                
+                if !isSyncing {
+                    // Sync just finished. Now it is safe to refresh the UI once.
+                    print("🔄 Sync finished. Refreshing Home UI.")
+                    // Add a small delay to ensure Core Data context is fully merged
+                    Task {
+                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
+                        self.refreshContent(forceLoadingState: false)
+                    }
+                } else {
+                    // Sync started. Do nothing. Let the user browse cached data undisturbed.
+                    print("⏳ Sync started. Pausing UI updates.")
                 }
             }
             .store(in: &cancellables)
@@ -133,7 +147,6 @@ class HomeViewModel: ObservableObject {
             }
             
             // 1.5 Fetch Trending IDs (Background - Performance Optimization)
-            // Heavy string matching happens here off the main thread
             var trendingIDs: [NSManagedObjectID] = []
             if !trendingTitles.isEmpty {
                 trendingIDs = await repo.getTrendingMatchesAsync(type: typeStr, tmdbResults: trendingTitles)

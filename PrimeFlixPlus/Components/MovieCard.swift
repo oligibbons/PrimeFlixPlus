@@ -3,7 +3,7 @@ import SwiftUI
 struct MovieCard: View {
     let channel: Channel
     let onClick: () -> Void
-    var onFocus: (() -> Void)? = nil // Optional callback for Void Killer
+    var onFocus: (() -> Void)? = nil
     
     @FocusState private var isFocused: Bool
     
@@ -13,6 +13,7 @@ struct MovieCard: View {
     
     var body: some View {
         Button(action: onClick) {
+            // FIX: The ZStack (Label) must effectively fill the frame for the Card style to work correctly.
             ZStack(alignment: .bottom) {
                 
                 // 1. The Poster Image
@@ -25,28 +26,9 @@ struct MovieCard: View {
                             .frame(width: width, height: height)
                             .clipped()
                     case .failure, .empty:
-                        // "Cinematic" Fallback
-                        ZStack {
-                            CinemeltTheme.charcoal
-                            
-                            // Abstract "Melt" Shape
-                            Circle()
-                                .fill(CinemeltTheme.accent.opacity(0.2))
-                                .blur(radius: 20)
-                                .offset(x: -20, y: -40)
-                            
-                            VStack(spacing: 5) {
-                                Image(systemName: "film.stack")
-                                    .font(.system(size: 40))
-                                    .foregroundColor(CinemeltTheme.accent.opacity(0.5))
-                                
-                                Text(String(channel.title.prefix(1)))
-                                    .font(CinemeltTheme.fontTitle(60))
-                                    .foregroundColor(CinemeltTheme.cream.opacity(0.1))
-                            }
-                        }
+                        fallbackView
                     @unknown default:
-                        CinemeltTheme.charcoal
+                        fallbackView
                     }
                 }
                 
@@ -78,41 +60,45 @@ struct MovieCard: View {
                     .transition(.opacity)
                 }
             }
+            // CRITICAL FIX: Frame MUST be applied to the content inside the Button
+            // for the tvOS Card style to size itself correctly before the image loads.
+            .frame(width: width, height: height)
         }
         .buttonStyle(.card)
         .focused($isFocused)
-        .frame(width: width, height: height)
-        .background(CinemeltTheme.coffee)
-        .cornerRadius(16)
-        // MARK: - THE AMBILIGHT GLOW
         .shadow(
             color: isFocused ? CinemeltTheme.accent.opacity(0.5) : .black.opacity(0.5),
             radius: isFocused ? 30 : 5,
             x: 0,
             y: isFocused ? 15 : 2
         )
-        // Additional "Hard" glow
-        .shadow(
-            color: isFocused ? CinemeltTheme.accent.opacity(0.3) : .clear,
-            radius: 5,
-            x: 0,
-            y: 0
-        )
         .scaleEffect(isFocused ? 1.1 : 1.0)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(
-                    LinearGradient(
-                        colors: [.white.opacity(0.6), .clear],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: isFocused ? 2 : 0
-                )
-        )
         .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isFocused)
         .onChange(of: isFocused) { focused in
             if focused { onFocus?() }
         }
+    }
+    
+    // Extracted fallback view for cleaner code and guaranteed sizing
+    private var fallbackView: some View {
+        ZStack {
+            CinemeltTheme.charcoal
+            
+            Circle()
+                .fill(CinemeltTheme.accent.opacity(0.2))
+                .blur(radius: 20)
+                .offset(x: -20, y: -40)
+            
+            VStack(spacing: 5) {
+                Image(systemName: "film.stack")
+                    .font(.system(size: 40))
+                    .foregroundColor(CinemeltTheme.accent.opacity(0.5))
+                
+                Text(String(channel.title.prefix(1)))
+                    .font(CinemeltTheme.fontTitle(60))
+                    .foregroundColor(CinemeltTheme.cream.opacity(0.1))
+            }
+        }
+        .frame(width: width, height: height)
     }
 }

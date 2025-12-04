@@ -160,6 +160,9 @@ struct DetailsView: View {
                 
                 Spacer(minLength: 150)
             }
+            // FIX: Proactively adding focusSection here ensures smooth vertical navigation
+            // between Buttons, Cast, Seasons, and Episodes even if counts differ.
+            .focusSection()
         }
         .transition(.opacity)
     }
