@@ -8,6 +8,8 @@ struct SidebarView: View {
     // Define the menu items
     let menuItems: [(destination: NavigationDestination, icon: String, label: String)] = [
         (.home, "house.fill", "Home"),
+        (.continueWatching, "play.tv.fill", "Watching"),
+        (.favorites, "heart.fill", "Favorites"),
         (.search, "magnifyingglass", "Search"),
         (.settings, "gearshape.fill", "Settings"),
         (.addPlaylist, "person.badge.plus", "Profiles")

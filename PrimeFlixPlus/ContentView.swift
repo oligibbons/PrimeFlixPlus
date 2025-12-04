@@ -4,6 +4,8 @@ import SwiftUI
 enum NavigationDestination: Hashable {
     case home
     case search
+    case continueWatching
+    case favorites
     case details(Channel)
     case player(Channel)
     case settings
@@ -13,6 +15,8 @@ enum NavigationDestination: Hashable {
         switch (lhs, rhs) {
         case (.home, .home): return true
         case (.search, .search): return true
+        case (.continueWatching, .continueWatching): return true
+        case (.favorites, .favorites): return true
         case (.settings, .settings): return true
         case (.addPlaylist, .addPlaylist): return true
         case (.player(let c1), .player(let c2)): return c1.url == c2.url
@@ -33,6 +37,8 @@ enum NavigationDestination: Hashable {
             hasher.combine(c.url)
         case .settings: hasher.combine(4)
         case .addPlaylist: hasher.combine(5)
+        case .continueWatching: hasher.combine(6)
+        case .favorites: hasher.combine(7)
         }
     }
 }
@@ -74,6 +80,18 @@ struct ContentView: View {
                         SearchView(
                             onPlay: { channel in navigateToContent(channel) }
                         )
+                    
+                    case .continueWatching:
+                        ContinueWatchingView(
+                            onPlay: { channel in navigateToContent(channel) },
+                            onBack: { currentDestination = .home }
+                        )
+                        
+                    case .favorites:
+                        FavoritesView(
+                            onPlay: { channel in navigateToContent(channel) },
+                            onBack: { currentDestination = .home }
+                        )
                         
                     case .details(let channel):
                         DetailsView(
@@ -107,8 +125,7 @@ struct ContentView: View {
                 .animation(.easeInOut(duration: 0.35), value: currentDestination)
                 // MARK: - CRITICAL FIX
                 // Marking the content area as a focus section ensures that when the user
-                // returns to it from the Sidebar, focus is restored to the last used item
-                // (e.g. returning to "Continue Watching" row instead of resetting to top).
+                // returns to it from the Sidebar, focus is restored to the last used item.
                 .focusSection()
             }
         }

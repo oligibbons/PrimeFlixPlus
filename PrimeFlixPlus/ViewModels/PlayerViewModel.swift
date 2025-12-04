@@ -20,6 +20,10 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
     @Published var currentTime: Double = 0.0
     @Published var showControls: Bool = false
     
+    // Added for Favorites Support
+    @Published var isFavorite: Bool = false
+    private var currentChannel: Channel?
+    
     // Dependencies
     private var repository: PrimeFlixRepository?
     private var timeObserver: Any?
@@ -30,7 +34,9 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
     
     func configure(repository: PrimeFlixRepository, channel: Channel) {
         self.repository = repository
+        self.currentChannel = channel
         self.videoTitle = channel.title
+        self.isFavorite = channel.isFavorite
         
         // 1. Activate Audio Session
         do {
@@ -50,6 +56,15 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
         print("▶️ Attempting playback: \(sanitizedUrl)")
         
         setupPlayer(url: sanitizedUrl)
+    }
+    
+    // MARK: - Actions
+    
+    func toggleFavorite() {
+        guard let channel = currentChannel, let repo = repository else { return }
+        repo.toggleFavorite(channel)
+        self.isFavorite.toggle()
+        self.triggerControls()
     }
     
     private func sanitize(url: String) -> String? {
@@ -221,10 +236,14 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
     
     private func startProgressTracking() {
         progressTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            guard let self = self, let repo = self.repository else { return }
+            guard let self = self, let repo = self.repository, let channel = self.currentChannel else { return }
+            
             let pos = Int64(self.currentTime * 1000)
             let dur = Int64(self.duration * 1000)
-            if pos > 10000 && dur > 0 {
+            
+            // CRITICAL FIX: Live TV might have 0 duration, but we still want it in history.
+            // Check if position > 10s OR if it is Live TV
+            if (pos > 10000 && dur > 0) || channel.type == "live" {
                 Task { @MainActor in
                     repo.saveProgress(url: self.currentUrl, pos: pos, dur: dur)
                 }

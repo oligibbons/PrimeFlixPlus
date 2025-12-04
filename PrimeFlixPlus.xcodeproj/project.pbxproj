@@ -55,6 +55,10 @@
 		D2AC8B042EE14DDD00D440C3 /* Zain-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D2AC8B022EE14D7A00D440C3 /* Zain-Bold.ttf */; };
 		D2AC8B052EE14DE100D440C3 /* Zain-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D2AC8B032EE14D7A00D440C3 /* Zain-Regular.ttf */; };
 		D2AC8B072EE1B8F400D440C3 /* SplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B062EE1B8F400D440C3 /* SplashView.swift */; };
+		D2AC8B092EE1FAE000D440C3 /* ContinueWatchingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B082EE1FAE000D440C3 /* ContinueWatchingViewModel.swift */; };
+		D2AC8B0B2EE1FB0000D440C3 /* ContinueWatchingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B0A2EE1FB0000D440C3 /* ContinueWatchingView.swift */; };
+		D2AC8B0D2EE1FB2F00D440C3 /* FavoritesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B0C2EE1FB2F00D440C3 /* FavoritesViewModel.swift */; };
+		D2AC8B0F2EE1FB4700D440C3 /* FavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B0E2EE1FB4700D440C3 /* FavoritesView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -128,6 +132,10 @@
 		D2AC8B022EE14D7A00D440C3 /* Zain-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "Zain-Bold.ttf"; path = "../../../../Downloads/Exo_2,Inter,Nunito,Zain/Zain/Zain-Bold.ttf"; sourceTree = "<group>"; };
 		D2AC8B032EE14D7A00D440C3 /* Zain-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "Zain-Regular.ttf"; path = "../../../../Downloads/Exo_2,Inter,Nunito,Zain/Zain/Zain-Regular.ttf"; sourceTree = "<group>"; };
 		D2AC8B062EE1B8F400D440C3 /* SplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashView.swift; sourceTree = "<group>"; };
+		D2AC8B082EE1FAE000D440C3 /* ContinueWatchingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinueWatchingViewModel.swift; sourceTree = "<group>"; };
+		D2AC8B0A2EE1FB0000D440C3 /* ContinueWatchingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinueWatchingView.swift; sourceTree = "<group>"; };
+		D2AC8B0C2EE1FB2F00D440C3 /* FavoritesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesViewModel.swift; sourceTree = "<group>"; };
+		D2AC8B0E2EE1FB4700D440C3 /* FavoritesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -276,6 +284,8 @@
 				D228AD102EDF6682007C6114 /* AddPlaylistViewModel.swift */,
 				D228AD1C2EDFA8E3007C6114 /* DetailsViewModel.swift */,
 				D2AC8AF52EE0ADE900D440C3 /* SearchViewModel.swift */,
+				D2AC8B082EE1FAE000D440C3 /* ContinueWatchingViewModel.swift */,
+				D2AC8B0C2EE1FB2F00D440C3 /* FavoritesViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -305,6 +315,8 @@
 				D2AC8AFB2EE141AE00D440C3 /* SidebarView.swift */,
 				D2AC8AFD2EE1475700D440C3 /* GlassTextField.swift */,
 				D2AC8B062EE1B8F400D440C3 /* SplashView.swift */,
+				D2AC8B0A2EE1FB0000D440C3 /* ContinueWatchingView.swift */,
+				D2AC8B0E2EE1FB4700D440C3 /* FavoritesView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -472,16 +484,20 @@
 				D292D6792EDF4C5800E8845A /* XtreamClient.swift in Sources */,
 				D292D6752EDF4C1800E8845A /* MovieCard.swift in Sources */,
 				D292D65A2EDF46EA00E8845A /* WatchProgress.swift in Sources */,
+				D2AC8B092EE1FAE000D440C3 /* ContinueWatchingViewModel.swift in Sources */,
 				D292D6542EDF45FE00E8845A /* XtreamModels.swift in Sources */,
 				D2AC8AFC2EE141AE00D440C3 /* SidebarView.swift in Sources */,
 				D228AD172EDF7311007C6114 /* SyncStatusOverlay.swift in Sources */,
 				D228AD1B2EDF7952007C6114 /* UnsafeSession.swift in Sources */,
 				D228AD152EDF67FB007C6114 /* NeonTextField.swift in Sources */,
+				D2AC8B0B2EE1FB0000D440C3 /* ContinueWatchingView.swift in Sources */,
 				D292D6622EDF494900E8845A /* ChannelRepository.swift in Sources */,
 				D228AD0F2EDF6061007C6114 /* IntermediateModels.swift in Sources */,
 				D292D6692EDF4A4600E8845A /* M3UData.swift in Sources */,
 				D292D67C2EDF4D9E00E8845A /* HomeView.swift in Sources */,
 				D292D6272EDF458100E8845A /* PrimeFlixPlusApp.swift in Sources */,
+				D2AC8B0D2EE1FB2F00D440C3 /* FavoritesViewModel.swift in Sources */,
+				D2AC8B0F2EE1FB4700D440C3 /* FavoritesView.swift in Sources */,
 				D2AC8B002EE148C100D440C3 /* EpisodeCard.swift in Sources */,
 				D2AC8AF82EE0AE0E00D440C3 /* SearchView.swift in Sources */,
 				D292D6582EDF46CF00E8845A /* Playlist.swift in Sources */,

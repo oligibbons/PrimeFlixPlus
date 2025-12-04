@@ -105,7 +105,7 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     func saveProgress(url: String, pos: Int64, dur: Int64) {
-        container.performBackgroundTask { context in
+        container.performBackgroundTask { [weak self] context in
             let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
             request.predicate = NSPredicate(format: "channelUrl == %@", url)
             
@@ -119,7 +119,13 @@ class PrimeFlixRepository: ObservableObject {
             progress.position = pos
             progress.duration = dur
             progress.lastPlayed = Date()
+            
             try? context.save()
+            
+            // CRITICAL FIX: Notify Main Thread that data changed so "Continue Watching" updates instantly
+            Task { @MainActor in
+                self?.objectWillChange.send()
+            }
         }
     }
     
@@ -270,7 +276,7 @@ class PrimeFlixRepository: ObservableObject {
         }
     }
     
-    // MARK: - Sync Helpers (Updated for Upsert)
+    // MARK: - Sync Helpers
     
     private func syncXtreamBulk(input: XtreamInput, playlistUrl: String, existingMap: [String: NSManagedObjectID]) async throws -> Set<String> {
         var verified = Set<String>()
@@ -352,18 +358,14 @@ class PrimeFlixRepository: ObservableObject {
             context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
             
             for item in items {
-                // UPSERT LOGIC
                 if let existingID = existingMap[item.url], let existingChannel = try? context.existingObject(with: existingID) as? Channel {
-                    // Update existing
                     existingChannel.title = item.title
                     existingChannel.group = item.group
                     existingChannel.cover = item.cover
-                    // Important: Update the canonical title if it was missing
                     if existingChannel.canonicalTitle == nil {
                         existingChannel.canonicalTitle = item.canonicalTitle
                     }
                 } else {
-                    // Insert new
                     _ = item.toManagedObject(context: context)
                 }
             }
@@ -375,7 +377,6 @@ class PrimeFlixRepository: ObservableObject {
     
     private func deleteOrphans(urls: [String], playlistUrl: String) async {
         guard !urls.isEmpty else { return }
-        
         let chunkSize = 500
         let chunks = stride(from: 0, to: urls.count, by: chunkSize).map {
             Array(urls[$0..<min($0 + chunkSize, urls.count)])

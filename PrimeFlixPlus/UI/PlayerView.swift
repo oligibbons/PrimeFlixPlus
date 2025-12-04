@@ -87,6 +87,17 @@ struct PlayerView: View {
                             }
                         }
                         Spacer()
+                        
+                        // NEW: Favorite Toggle in Player
+                        Button(action: { viewModel.toggleFavorite() }) {
+                            Image(systemName: viewModel.isFavorite ? "heart.fill" : "heart")
+                                .font(.title)
+                                .foregroundColor(viewModel.isFavorite ? CinemeltTheme.accent : .white)
+                                .padding(12)
+                                .background(Color.white.opacity(0.2))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
                     }
                     .padding(60)
                     
