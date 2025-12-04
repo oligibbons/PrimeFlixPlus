@@ -21,116 +21,127 @@ struct DetailsView: View {
     
     var body: some View {
         ZStack {
-            // 1. Hero Background with Cinematic Fade
+            // 0. Base
+            CinemeltTheme.charcoal.ignoresSafeArea()
+            
+            // 1. Hero Background Image with Advanced Blending
             GeometryReader { geo in
                 if let bgUrl = viewModel.backgroundUrl {
                     AsyncImage(url: bgUrl) { image in
                         image.resizable()
                             .aspectRatio(contentMode: .fill)
                             .frame(width: geo.size.width, height: geo.size.height + 100)
-                            .clipped()
+                            .mask(
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: .black, location: 0),
+                                        .init(color: .black, location: 0.3),
+                                        .init(color: .clear, location: 0.85)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .opacity(viewModel.backdropOpacity)
                     } placeholder: {
-                        CinemeltTheme.backgroundEnd
+                        CinemeltTheme.mainBackground
                     }
-                } else {
-                    CinemeltTheme.backgroundEnd
                 }
             }
             .ignoresSafeArea()
             
-            // 2. Gradients for readability
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: CinemeltTheme.backgroundStart.opacity(0.6), location: 0.4),
-                    .init(color: CinemeltTheme.backgroundStart, location: 0.9)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-            
+            // 2. Horizontal Gradient (Left to Right) for Text Readability
             HStack {
-                LinearGradient(colors: [CinemeltTheme.backgroundStart.opacity(0.95), .clear], startPoint: .leading, endPoint: .trailing)
-                    .frame(width: 900)
+                LinearGradient(
+                    colors: [CinemeltTheme.charcoal, CinemeltTheme.charcoal.opacity(0.8), .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 1100)
                 Spacer()
             }
             .ignoresSafeArea()
             
-            // 3. Content
+            // 3. Content Scroll
             ScrollView {
                 VStack(alignment: .leading, spacing: 30) {
                     
-                    Spacer().frame(height: 380) // Push content down
+                    Spacer().frame(height: 350) // Push content down
                     
                     // --- Title & Metadata ---
-                    VStack(alignment: .leading, spacing: 15) {
+                    VStack(alignment: .leading, spacing: 10) {
                         Text(viewModel.tmdbDetails?.displayTitle ?? viewModel.channel.title)
-                            .font(CinemeltTheme.fontTitle(70))
+                            .font(CinemeltTheme.fontTitle(90)) // Massive Hero Title
                             .foregroundColor(CinemeltTheme.cream)
-                            .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 5)
                             .lineLimit(2)
+                            .cinemeltGlow()
+                            .shadow(color: .black, radius: 10, x: 0, y: 5)
                         
                         HStack(spacing: 20) {
                             // Quality Badge
                             if let v = viewModel.selectedVersion {
                                 let info = TitleNormalizer.parse(rawTitle: v.title)
                                 Text(info.quality)
-                                    .font(CinemeltTheme.fontTitle(18))
+                                    .font(CinemeltTheme.fontTitle(20))
                                     .foregroundColor(.black)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
                                     .background(CinemeltTheme.accent)
-                                    .cornerRadius(6)
+                                    .cornerRadius(8)
                             }
                             
-                            // Rating
+                            // Rating Star
                             if let score = viewModel.tmdbDetails?.voteAverage {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "star.fill").foregroundColor(CinemeltTheme.accent)
+                                HStack(spacing: 6) {
+                                    Image(systemName: "star.fill")
+                                        .foregroundColor(CinemeltTheme.accent)
                                     Text(String(format: "%.1f", score))
-                                        .font(CinemeltTheme.fontBody(20))
+                                        .font(CinemeltTheme.fontBody(24))
                                         .foregroundColor(CinemeltTheme.cream)
                                 }
                             }
                             
-                            // Year
+                            // Year & Runtime
                             if let year = viewModel.tmdbDetails?.displayDate?.prefix(4) {
                                 Text(String(year))
-                                    .font(CinemeltTheme.fontBody(20))
+                                    .font(CinemeltTheme.fontBody(24))
                                     .foregroundColor(.gray)
                             }
                             
-                            // Runtime
                             if let runtime = viewModel.tmdbDetails?.runtime, runtime > 0 {
                                 Text(formatRuntime(runtime))
-                                    .font(CinemeltTheme.fontBody(20))
+                                    .font(CinemeltTheme.fontBody(24))
                                     .foregroundColor(.gray)
                             }
                         }
                         
                         Text(viewModel.tmdbDetails?.overview ?? "No synopsis available.")
-                            .font(CinemeltTheme.fontBody(24))
-                            .lineSpacing(6)
-                            .foregroundColor(CinemeltTheme.cream.opacity(0.8))
-                            .frame(maxWidth: 800, alignment: .leading)
+                            .font(CinemeltTheme.fontBody(28))
+                            .lineSpacing(8) // More breathable text
+                            .foregroundColor(CinemeltTheme.cream.opacity(0.9))
+                            .frame(maxWidth: 900, alignment: .leading)
                             .lineLimit(4)
+                            .padding(.top, 10)
                     }
-                    .padding(.horizontal, 60)
+                    .padding(.horizontal, 80)
                     
-                    // --- Actions ---
-                    HStack(spacing: 20) {
+                    // --- Action Buttons ---
+                    HStack(spacing: 30) {
                         Button(action: {
                             if let playable = viewModel.getSmartPlayTarget() { onPlay(playable) }
                         }) {
-                            HStack {
+                            HStack(spacing: 12) {
                                 Image(systemName: viewModel.hasWatchHistory ? "play.circle.fill" : "play.fill")
-                                Text(viewModel.hasWatchHistory ? "Resume" : "Play")
+                                Text(viewModel.hasWatchHistory ? "Resume" : "Play Now")
                             }
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 12)
+                            .font(CinemeltTheme.fontTitle(28))
+                            .foregroundColor(.black) // Black text on Amber
+                            .padding(.horizontal, 32)
+                            .padding(.vertical, 16)
+                            .background(CinemeltTheme.accent)
+                            .cornerRadius(12)
                         }
-                        .buttonStyle(.card)
+                        .buttonStyle(CinemeltCardButtonStyle())
                         .focused($focusedField, equals: .play)
                         
                         // Trailer
@@ -140,103 +151,107 @@ struct DetailsView: View {
                                     Image(systemName: "video.fill")
                                     Text("Trailer")
                                 }
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 12)
+                                .font(CinemeltTheme.fontTitle(28))
+                                .foregroundColor(CinemeltTheme.cream)
+                                .padding(.horizontal, 32)
+                                .padding(.vertical, 16)
+                                .background(Color.white.opacity(0.1)) // Glass button
+                                .cornerRadius(12)
                             }
-                            .buttonStyle(.card)
+                            .buttonStyle(CinemeltCardButtonStyle())
                             .focused($focusedField, equals: .trailer)
                         }
                         
                         // Favorite
                         Button(action: { viewModel.toggleFavorite() }) {
                             Image(systemName: viewModel.isFavorite ? "heart.fill" : "heart")
-                                .padding(12)
+                                .font(.title)
+                                .foregroundColor(viewModel.isFavorite ? CinemeltTheme.accent : .white)
+                                .padding(20)
+                                .background(Color.white.opacity(0.1))
+                                .clipShape(Circle())
                         }
-                        .buttonStyle(.card)
+                        .buttonStyle(CinemeltCardButtonStyle())
                         .focused($focusedField, equals: .favorite)
-                        .foregroundColor(viewModel.isFavorite ? CinemeltTheme.accent : .white)
                     }
-                    .padding(.horizontal, 60)
+                    .padding(.horizontal, 80)
                     
                     // --- Cast Rail ---
                     if !viewModel.cast.isEmpty {
-                        VStack(alignment: .leading, spacing: 15) {
+                        VStack(alignment: .leading, spacing: 20) {
                             Text("Cast")
-                                .font(CinemeltTheme.fontTitle(28))
+                                .font(CinemeltTheme.fontTitle(32))
                                 .foregroundColor(CinemeltTheme.cream)
-                                .padding(.leading, 60)
+                                .padding(.leading, 80)
                             
                             ScrollView(.horizontal, showsIndicators: false) {
-                                LazyHStack(spacing: 30) {
+                                LazyHStack(spacing: 40) {
                                     ForEach(viewModel.cast) { actor in
-                                        VStack {
+                                        VStack(spacing: 15) {
                                             AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w200\(actor.profilePath ?? "")")) { img in
                                                 img.resizable().aspectRatio(contentMode: .fill)
                                             } placeholder: {
                                                 Circle().fill(Color.white.opacity(0.1))
                                             }
-                                            .frame(width: 100, height: 100)
+                                            .frame(width: 120, height: 120)
                                             .clipShape(Circle())
-                                            .overlay(Circle().stroke(Color.white.opacity(0.1), lineWidth: 1))
+                                            .overlay(Circle().stroke(Color.white.opacity(0.1), lineWidth: 2))
+                                            .shadow(radius: 5)
                                             
                                             Text(actor.name)
-                                                .font(CinemeltTheme.fontBody(18))
+                                                .font(CinemeltTheme.fontBody(20))
                                                 .foregroundColor(CinemeltTheme.cream.opacity(0.8))
                                                 .lineLimit(1)
-                                                .frame(width: 120)
+                                                .frame(width: 140)
                                         }
                                     }
                                 }
-                                .padding(.horizontal, 60)
+                                .padding(.horizontal, 80)
                                 .padding(.bottom, 20)
                             }
                         }
                     }
                     
-                    // --- Episodes (Series Only) ---
+                    // --- Seasons & Episodes ---
                     if viewModel.channel.type == "series" {
-                        VStack(alignment: .leading, spacing: 20) {
-                            Text("Seasons")
-                                .font(CinemeltTheme.fontTitle(28))
-                                .foregroundColor(CinemeltTheme.cream)
-                                .padding(.leading, 60)
+                        VStack(alignment: .leading, spacing: 25) {
                             
+                            // Season Chips
                             ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 15) {
+                                HStack(spacing: 20) {
                                     ForEach(viewModel.seasons, id: \.self) { season in
                                         Button(action: { Task { await viewModel.selectSeason(season) } }) {
                                             Text("Season \(season)")
-                                                .font(CinemeltTheme.fontBody(22))
-                                                .padding(.horizontal, 16)
-                                                .padding(.vertical, 8)
+                                                .font(CinemeltTheme.fontTitle(22))
+                                                .foregroundColor(viewModel.selectedSeason == season ? .black : CinemeltTheme.cream)
+                                                .padding(.horizontal, 24)
+                                                .padding(.vertical, 10)
+                                                .background(
+                                                    viewModel.selectedSeason == season ?
+                                                    CinemeltTheme.accent : Color.white.opacity(0.05)
+                                                )
+                                                .cornerRadius(30)
                                         }
-                                        .buttonStyle(.card)
+                                        .buttonStyle(CinemeltCardButtonStyle())
                                         .focused($focusedField, equals: .season(season))
-                                        .overlay(
-                                            VStack {
-                                                Spacer()
-                                                if viewModel.selectedSeason == season {
-                                                    Rectangle().fill(CinemeltTheme.accent).frame(height: 3)
-                                                }
-                                            }
-                                        )
                                     }
                                 }
-                                .padding(.horizontal, 60)
-                                .padding(.vertical, 20) // Focus expansion space
+                                .padding(.horizontal, 80)
+                                .padding(.vertical, 20)
                             }
                             
+                            // Episodes Rail
                             ScrollView(.horizontal, showsIndicators: false) {
-                                LazyHStack(spacing: 40) {
+                                LazyHStack(spacing: 50) {
                                     ForEach(viewModel.displayedEpisodes) { ep in
                                         Button(action: { onPlay(viewModel.createPlayableChannel(for: ep)) }) {
                                             EpisodeCard(episode: ep)
                                         }
-                                        .buttonStyle(.card)
+                                        .buttonStyle(CinemeltCardButtonStyle())
                                         .focused($focusedField, equals: .episode(ep.id))
                                     }
                                 }
-                                .padding(.horizontal, 60)
+                                .padding(.horizontal, 80)
                                 .padding(.vertical, 40)
                             }
                         }

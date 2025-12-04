@@ -16,84 +16,31 @@ struct PlayerView: View {
             if let player = viewModel.player {
                 VideoPlayer(player: player)
                     .ignoresSafeArea()
-                    .onAppear {
-                        UIApplication.shared.isIdleTimerDisabled = true
-                    }
-                    .onDisappear {
-                        UIApplication.shared.isIdleTimerDisabled = false
-                    }
             }
             
-            // 2. Buffering / Loading
+            // 2. Buffering State
             if viewModel.player == nil || viewModel.isBuffering {
                 ZStack {
-                    Color.black.opacity(0.4)
-                    VStack(spacing: 20) {
+                    Color.black.opacity(0.6)
+                    VStack(spacing: 25) {
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .cyan))
-                            .scaleEffect(2.0)
+                            .tint(CinemeltTheme.accent)
+                            .scaleEffect(2.5)
                         
                         Text(viewModel.isBuffering ? "Buffering..." : "Connecting...")
-                            .font(.headline)
-                            .foregroundColor(.white.opacity(0.8))
+                            .font(CinemeltTheme.fontBody(28))
+                            .foregroundColor(CinemeltTheme.cream.opacity(0.8))
+                            .cinemeltGlow()
                     }
                 }
             }
             
-            // 3. Error Overlay (Debug Info Included)
+            // 3. Error State
             if viewModel.isError {
-                VStack(spacing: 20) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 60))
-                        .foregroundColor(.red)
-                    
-                    Text("Playback Error")
-                        .font(.title)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                    
-                    // Error Message
-                    Text(viewModel.errorMessage ?? "Unknown Error")
-                        .font(.body)
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                    
-                    Divider().background(Color.gray)
-                    
-                    // DEBUG: Show the URL
-                    VStack(spacing: 8) {
-                        Text("DEBUG INFO:")
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .foregroundColor(.gray)
-                        
-                        Text(viewModel.currentUrl)
-                            .font(.system(.caption2, design: .monospaced))
-                            .foregroundColor(.yellow)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(3)
-                            .padding(10)
-                            .background(Color.black.opacity(0.5))
-                            .cornerRadius(8)
-                    }
-                    .padding(.horizontal, 40)
-                    
-                    Button("Close") {
-                        viewModel.cleanup()
-                        onBack()
-                    }
-                    .buttonStyle(.card)
-                    .padding(.top, 20)
-                }
-                .padding(40)
-                .background(Color(white: 0.15))
-                .cornerRadius(20)
-                .shadow(radius: 20)
-                .frame(maxWidth: 800)
+                errorOverlay
             }
             
-            // 4. Controls
+            // 4. Custom HUD / Controls
             controlsOverlay
         }
         .onMoveCommand { _ in viewModel.triggerControls() }
@@ -110,86 +57,133 @@ struct PlayerView: View {
         }
     }
     
-    // MARK: - Overlay UI
+    // MARK: - Overlays
+    
     private var controlsOverlay: some View {
         ZStack {
             if viewModel.showControls || !viewModel.isPlaying {
-                LinearGradient(colors: [.black.opacity(0.8), .clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom)
-                    .ignoresSafeArea()
+                // Gradient Scrim
+                LinearGradient(
+                    colors: [.black.opacity(0.9), .clear, .black.opacity(0.9)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
                 
                 VStack {
-                    // Header
+                    // Top Bar
                     HStack {
-                        Button(action: {
-                            viewModel.cleanup()
-                            onBack()
-                        }) {
-                            HStack {
-                                Image(systemName: "arrow.left")
-                                Text("Back")
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(viewModel.videoTitle)
+                                .font(CinemeltTheme.fontTitle(42))
+                                .foregroundColor(CinemeltTheme.cream)
+                                .cinemeltGlow()
+                            
+                            if let q = channel.quality {
+                                Text(q)
+                                    .font(CinemeltTheme.fontBody(20))
+                                    .foregroundColor(CinemeltTheme.accent)
+                                    .fontWeight(.bold)
                             }
-                            .foregroundColor(.white)
                         }
-                        .buttonStyle(.plain)
                         Spacer()
                     }
                     .padding(60)
                     
                     Spacer()
                     
-                    // Center Play
-                    if !viewModel.isPlaying && !viewModel.isBuffering && !viewModel.isError {
-                        Button(action: { viewModel.togglePlayPause() }) {
-                            Image(systemName: "play.circle.fill")
-                                .font(.system(size: 100))
-                                .foregroundColor(.white.opacity(0.8))
-                                .shadow(radius: 10)
-                        }
-                        .buttonStyle(.plain)
+                    // Center Play Button (Only when paused)
+                    if !viewModel.isPlaying && !viewModel.isBuffering {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 150))
+                            .foregroundColor(CinemeltTheme.accent.opacity(0.8))
+                            .shadow(color: CinemeltTheme.accent.opacity(0.5), radius: 30)
+                            .scaleEffect(1.0)
+                            .transition(.scale)
                     }
                     
                     Spacer()
                     
-                    // Footer
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(viewModel.videoTitle)
-                            .font(.title)
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
-                        
-                        HStack(spacing: 20) {
+                    // Bottom Controls (Timeline)
+                    VStack(spacing: 20) {
+                        HStack(spacing: 30) {
+                            // Current Time
                             Text(formatTime(viewModel.currentTime))
-                                .font(.caption)
-                                .foregroundColor(.cyan)
+                                .font(CinemeltTheme.fontBody(24))
+                                .foregroundColor(CinemeltTheme.accent)
                                 .monospacedDigit()
                             
                             // Progress Bar
                             GeometryReader { geo in
                                 ZStack(alignment: .leading) {
-                                    Rectangle()
+                                    // Track
+                                    Capsule()
                                         .fill(Color.white.opacity(0.2))
-                                        .frame(height: 8)
-                                        .cornerRadius(4)
+                                        .frame(height: 12)
                                     
+                                    // Fill
                                     if viewModel.duration > 0 {
-                                        Rectangle()
-                                            .fill(Color.cyan)
-                                            .frame(width: geo.size.width * (viewModel.currentTime / viewModel.duration), height: 8)
-                                            .cornerRadius(4)
+                                        Capsule()
+                                            .fill(CinemeltTheme.accent)
+                                            .frame(width: geo.size.width * (viewModel.currentTime / viewModel.duration), height: 12)
+                                            .shadow(color: CinemeltTheme.accent, radius: 8)
                                     }
                                 }
                             }
-                            .frame(height: 8)
+                            .frame(height: 12)
                             
+                            // Duration
                             Text(formatTime(viewModel.duration))
-                                .font(.caption)
-                                .foregroundColor(.gray)
+                                .font(CinemeltTheme.fontBody(24))
+                                .foregroundColor(CinemeltTheme.cream)
                                 .monospacedDigit()
                         }
+                        
+                        Text("Press Menu to Exit")
+                            .font(CinemeltTheme.fontBody(18))
+                            .foregroundColor(.gray)
                     }
                     .padding(60)
                 }
             }
+        }
+        .animation(.easeInOut(duration: 0.3), value: viewModel.showControls)
+    }
+    
+    private var errorOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.9)
+            
+            VStack(spacing: 30) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 80))
+                    .foregroundColor(.red)
+                    .shadow(color: .red.opacity(0.5), radius: 20)
+                
+                Text("Playback Failed")
+                    .font(CinemeltTheme.fontTitle(40))
+                    .foregroundColor(CinemeltTheme.cream)
+                
+                Text(viewModel.errorMessage ?? "Unknown Error")
+                    .font(CinemeltTheme.fontBody(24))
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 60)
+                
+                Button("Close") {
+                    viewModel.cleanup()
+                    onBack()
+                }
+                .buttonStyle(CinemeltCardButtonStyle())
+                .padding(.top, 20)
+            }
+            .padding(60)
+            .background(CinemeltTheme.charcoal)
+            .cornerRadius(30)
+            .overlay(
+                RoundedRectangle(cornerRadius: 30)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            )
         }
     }
     

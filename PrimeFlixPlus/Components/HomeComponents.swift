@@ -9,29 +9,30 @@ struct ContinueWatchingLane: View {
     
     var body: some View {
         if !items.isEmpty {
-            VStack(alignment: .leading, spacing: 15) {
+            VStack(alignment: .leading, spacing: 20) {
                 Text(title)
                     .font(CinemeltTheme.fontTitle(32))
                     .foregroundColor(CinemeltTheme.cream)
-                    .padding(.leading, 50) // Align with grid start
+                    .padding(.leading, 60)
+                    .cinemeltGlow()
                 
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: 40) {
+                    LazyHStack(spacing: 50) {
                         ForEach(items) { channel in
                             ContinueWatchingCard(channel: channel) {
                                 onItemClick(channel)
                             }
                         }
                     }
-                    .padding(.horizontal, 50)
-                    .padding(.vertical, 30) // Space for focus expansion
+                    .padding(.horizontal, 60)
+                    .padding(.vertical, 40)
                 }
             }
         }
     }
 }
 
-// MARK: - Continue Watching Card (Smart)
+// MARK: - Continue Watching Card (Redesigned)
 struct ContinueWatchingCard: View {
     let channel: Channel
     let onClick: () -> Void
@@ -45,7 +46,7 @@ struct ContinueWatchingCard: View {
         self.channel = channel
         self.onClick = onClick
         
-        // Dynamic fetch request based on channel URL
+        // Dynamic fetch request
         _progressHistory = FetchRequest<WatchProgress>(
             entity: WatchProgress.entity(),
             sortDescriptors: [],
@@ -60,84 +61,61 @@ struct ContinueWatchingCard: View {
     
     var body: some View {
         Button(action: onClick) {
-            VStack(spacing: 0) {
-                // Image Area
-                ZStack(alignment: .bottomLeading) {
-                    AsyncImage(url: URL(string: channel.cover ?? "")) { image in
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        ZStack {
-                            CinemeltTheme.backgroundStart
-                            Text(String(channel.title.prefix(1)))
-                                .font(CinemeltTheme.fontTitle(40))
-                                .foregroundColor(CinemeltTheme.cream.opacity(0.2))
-                        }
+            ZStack(alignment: .bottom) {
+                // 1. Thumbnail
+                AsyncImage(url: URL(string: channel.cover ?? "")) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ZStack {
+                        CinemeltTheme.charcoal
+                        Text(String(channel.title.prefix(1)))
+                            .font(CinemeltTheme.fontTitle(50))
+                            .foregroundColor(CinemeltTheme.cream.opacity(0.1))
                     }
-                    .frame(width: 320, height: 180) // 16:9 Aspect Ratio
-                    .clipped()
-                    
-                    // Gradient scrim for text/bar readability
-                    LinearGradient(
-                        colors: [.black.opacity(0.8), .clear],
-                        startPoint: .bottom,
-                        endPoint: .center
-                    )
-                    
-                    // Progress Bar Area
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Rectangle()
-                                .fill(Color.white.opacity(0.3))
-                                .frame(height: 4)
-                            
-                            Rectangle()
-                                .fill(CinemeltTheme.accent) // Warm Amber
-                                .frame(width: geo.size.width * progressPercentage, height: 4)
-                        }
-                    }
-                    .frame(height: 4)
-                    .padding(.bottom, 0)
                 }
+                .frame(width: 340, height: 190)
+                .clipped()
                 
-                // Text Area (Visible on Focus)
+                // 2. Info Overlay (Visible on Focus)
                 if isFocused {
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.9)],
+                        startPoint: .center,
+                        endPoint: .bottom
+                    )
+                    .transition(.opacity)
+                    
                     HStack {
                         Text(channel.title)
-                            .font(CinemeltTheme.fontBody(20))
-                            .fontWeight(.semibold)
+                            .font(CinemeltTheme.fontBody(22))
+                            .fontWeight(.bold)
                             .foregroundColor(CinemeltTheme.cream)
                             .lineLimit(1)
-                        
+                            .padding(12)
                         Spacer()
-                        
-                        // "Up Next" Badge if progress is 0 (Next Episode)
-                        if progressPercentage == 0 && channel.type == "series" {
-                            Text("UP NEXT")
-                                .font(CinemeltTheme.fontTitle(14))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(CinemeltTheme.accent)
-                                .cornerRadius(4)
-                                .foregroundColor(.black)
-                        }
                     }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(CinemeltTheme.backgroundEnd)
                 }
+                
+                // 3. Progress Bar (Always visible)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.black.opacity(0.5))
+                            .frame(height: 6)
+                        
+                        Rectangle()
+                            .fill(CinemeltTheme.accent)
+                            .frame(width: geo.size.width * progressPercentage, height: 6)
+                            .shadow(color: CinemeltTheme.accent, radius: 4) // Glowing bar
+                    }
+                }
+                .frame(height: 6)
             }
         }
-        .buttonStyle(.card)
+        .buttonStyle(CinemeltCardButtonStyle())
         .focused($isFocused)
-        .frame(width: 320)
-        .cornerRadius(12)
-        // Cinemelt Shadow
-        .shadow(
-            color: isFocused ? CinemeltTheme.accent.opacity(0.5) : .black.opacity(0.3),
-            radius: isFocused ? 20 : 5,
-            y: 5
-        )
-        .scaleEffect(isFocused ? 1.05 : 1.0)
-        .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isFocused)
+        .frame(width: 340, height: 190)
+        .cornerRadius(16)
+        // Ambilight Glow is handled by the ButtonStyle
     }
 }

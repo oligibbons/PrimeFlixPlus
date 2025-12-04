@@ -1,61 +1,65 @@
 import SwiftUI
 
-/// A reusable Glassmorphic text field for tvOS.
-/// Replaces the old "NeonTextField".
 struct GlassTextField: View {
     let title: String
     let placeholder: String
     @Binding var text: String
     var isSecure: Bool = false
-    var contentType: UITextContentType? = nil
-    var onSubmit: (() -> Void)? = nil
+    var nextFocus: () -> Void
     
-    // Internal focus state for self-managed instances
-    @FocusState private var internalFocus: Bool
+    // Internal focus state (visuals only)
+    @FocusState private var isFocused: Bool
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(CinemeltTheme.fontBody(18))
+                .font(CinemeltTheme.fontBody(20))
                 .fontWeight(.bold)
-                .foregroundColor(internalFocus ? CinemeltTheme.accent : .gray)
+                .foregroundColor(isFocused ? CinemeltTheme.accent : .gray)
                 .padding(.leading, 4)
-                .animation(.easeInOut, value: internalFocus)
+                .animation(.easeInOut(duration: 0.2), value: isFocused)
             
             ZStack {
-                // Background
+                // Background Plate
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(white: 0.15))
-                    .blur(radius: internalFocus ? 0 : 0) // Crisp when focused
+                    .fill(Color.white.opacity(0.08))
                 
-                // The Actual Input
+                // Input
                 if isSecure {
                     SecureField(placeholder, text: $text)
-                        .font(CinemeltTheme.fontBody(24))
-                        .focused($internalFocus)
-                        .textContentType(contentType)
-                        .submitLabel(.done)
-                        .onSubmit { onSubmit?() }
-                        .padding(20)
+                        .font(CinemeltTheme.fontBody(26))
+                        .focused($isFocused)
+                        .submitLabel(.next)
+                        .onSubmit { nextFocus() }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .foregroundColor(.white)
                 } else {
                     TextField(placeholder, text: $text)
-                        .font(CinemeltTheme.fontBody(24))
-                        .focused($internalFocus)
-                        .textContentType(contentType)
-                        .submitLabel(.done)
-                        .onSubmit { onSubmit?() }
-                        .padding(20)
+                        .font(CinemeltTheme.fontBody(26))
+                        .focused($isFocused)
+                        .submitLabel(.next)
+                        .onSubmit { nextFocus() }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .foregroundColor(.white)
                 }
-                
-                // Active Border (Warm Amber instead of Neon Cyan)
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(internalFocus ? CinemeltTheme.accent : Color.white.opacity(0.1), lineWidth: 3)
             }
-            .frame(height: 70)
-            // Parallax Scale Effect
-            .scaleEffect(internalFocus ? 1.02 : 1.0)
-            .shadow(color: internalFocus ? CinemeltTheme.accent.opacity(0.4) : .clear, radius: 15, x: 0, y: 5)
-            .animation(.spring(response: 0.3, dampingFraction: 0.5), value: internalFocus)
+            // The "Neon Border" Effect
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(
+                        isFocused ? CinemeltTheme.accent : Color.white.opacity(0.1),
+                        lineWidth: isFocused ? 2 : 1
+                    )
+            )
+            // The "Bloom" Effect
+            .shadow(
+                color: isFocused ? CinemeltTheme.accent.opacity(0.4) : .clear,
+                radius: 15, x: 0, y: 0
+            )
+            .scaleEffect(isFocused ? 1.02 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isFocused)
         }
     }
 }
