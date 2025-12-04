@@ -95,6 +95,11 @@ class PrimeFlixRepository: ObservableObject {
         return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type, group: group)
     }
     
+    // Fixed: Added missing synchronous method to satisfy compiler calls from legacy code
+    func getTrendingMatches(type: String, tmdbResults: [String]) -> [Channel] {
+        return channelRepo.getTrendingMatches(type: type, tmdbResults: tmdbResults)
+    }
+    
     func toggleFavorite(_ channel: Channel) {
         channelRepo.toggleFavorite(channel: channel)
         self.objectWillChange.send()
@@ -119,20 +124,24 @@ class PrimeFlixRepository: ObservableObject {
         }
     }
     
-    // MARK: - Thread-Safe / Background Accessors (New)
+    // MARK: - Thread-Safe / Background Accessors (Optimized)
     
     /// Fetches trending matches on a background context to avoid blocking the Main Thread
     nonisolated func getTrendingMatchesAsync(type: String, tmdbResults: [String]) async -> [NSManagedObjectID] {
-        await container.performBackgroundTask { context in
+        let bgContext = container.newBackgroundContext()
+        
+        // Correctly return value from the async perform block
+        return await bgContext.perform {
             var matches: [NSManagedObjectID] = []
             var seenTitles = Set<String>()
             
             for title in tmdbResults {
                 let req = NSFetchRequest<Channel>(entityName: "Channel")
+                // Note: CONTAINS is expensive, which is why we run this on background
                 req.predicate = NSPredicate(format: "type == %@ AND title CONTAINS[cd] %@", type, title)
                 req.fetchLimit = 1
                 
-                if let match = try? context.fetch(req).first {
+                if let match = try? bgContext.fetch(req).first {
                     let norm = TitleNormalizer.parse(rawTitle: match.title).normalizedTitle
                     if !seenTitles.contains(norm) {
                         matches.append(match.objectID)
@@ -210,7 +219,7 @@ class PrimeFlixRepository: ObservableObject {
                 let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
                 
                 do {
-                    // Try Bulk Sync (optimized with exclusion set)
+                    // Try Bulk Sync
                     let newUrls = try await syncXtreamBulk(input: input, playlistUrl: playlistUrl, existing: existingUrls)
                     processedUrls.formUnion(newUrls)
                 } catch {
@@ -225,16 +234,11 @@ class PrimeFlixRepository: ObservableObject {
                 }
                 
             } else if source == .m3u {
-                let newUrls = try await syncM3U(playlistUrl: playlistUrl) // M3U usually overwrites or simpler logic
+                let newUrls = try await syncM3U(playlistUrl: playlistUrl)
                 processedUrls.formUnion(newUrls)
             }
             
-            // 2. Orphan Deletion (Only remove items that are TRULY gone)
-            // Note: If we skipped them because they existed, they are in `existing` but not returned as "new" by helpers
-            // So we need to track *verified* URLs.
-            // For Smart Sync: We must assume that if we fetched it, it's verified.
-            // In the helpers below, I return `processedUrls` which should include BOTH new AND existing items found in the feed.
-            
+            // 2. Orphan Deletion
             let orphans = existingUrls.subtracting(processedUrls)
             if !orphans.isEmpty {
                 await deleteOrphans(urls: Array(orphans), playlistUrl: playlistUrl)
@@ -267,22 +271,18 @@ class PrimeFlixRepository: ObservableObject {
         }
     }
     
-    // MARK: - Sync Helpers (Smart)
+    // MARK: - Sync Helpers
     
     private func syncXtreamBulk(input: XtreamInput, playlistUrl: String, existing: Set<String>) async throws -> Set<String> {
         var verified = Set<String>()
         
-        // Live
         await MainActor.run { self.syncStatusMessage = "Checking Live..." }
         let live = try await xtreamClient.getLiveStreams(input: input)
-        // Add all found to verified list
         let liveStructs = live.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
         verified.formUnion(liveStructs.map { $0.url })
-        // Only save what we don't have
         let newLive = liveStructs.filter { !existing.contains($0.url) }
         await saveBatch(items: newLive)
         
-        // Movies
         await MainActor.run { self.syncStatusMessage = "Checking Movies..." }
         let vod = try await xtreamClient.getVodStreams(input: input)
         let vodStructs = vod.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input) }
@@ -290,7 +290,6 @@ class PrimeFlixRepository: ObservableObject {
         let newVod = vodStructs.filter { !existing.contains($0.url) }
         await saveBatch(items: newVod)
         
-        // Series
         await MainActor.run { self.syncStatusMessage = "Checking Series..." }
         let series = try await xtreamClient.getSeries(input: input)
         let seriesStructs = series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) }
@@ -304,7 +303,6 @@ class PrimeFlixRepository: ObservableObject {
     private func syncXtreamByCategories(input: XtreamInput, playlistUrl: String, existing: Set<String>) async throws -> Set<String> {
         var verified = Set<String>()
         
-        // Live
         let liveCats = try await xtreamClient.getLiveCategories(input: input)
         for (index, cat) in liveCats.enumerated() {
             await MainActor.run { self.syncStatusMessage = "Live: \(cat.categoryName) (\(index + 1)/\(liveCats.count))" }
@@ -317,7 +315,6 @@ class PrimeFlixRepository: ObservableObject {
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
         
-        // VOD
         let vodCats = try await xtreamClient.getVodCategories(input: input)
         for (index, cat) in vodCats.enumerated() {
             await MainActor.run { self.syncStatusMessage = "Mov: \(cat.categoryName) (\(index + 1)/\(vodCats.count))" }
@@ -330,7 +327,6 @@ class PrimeFlixRepository: ObservableObject {
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
         
-        // Series (Bulk fallback for series usually safe)
         if let series = try? await xtreamClient.getSeries(input: input) {
             let structs = series.map { ChannelStruct.from($0, playlistUrl: playlistUrl) }
             verified.formUnion(structs.map { $0.url })
@@ -350,7 +346,7 @@ class PrimeFlixRepository: ObservableObject {
         if let content = String(data: data, encoding: .utf8) {
             await MainActor.run { self.syncStatusMessage = "Parsing..." }
             let channels = await M3UParser.parse(content: content, playlistUrl: playlistUrl)
-            await saveBatch(items: channels) // M3U doesn't support smart partial updates easily
+            await saveBatch(items: channels)
             return Set(channels.map { $0.url })
         }
         return []
@@ -367,7 +363,6 @@ class PrimeFlixRepository: ObservableObject {
             try? context.save()
         }
         
-        // Notify UI less aggressively (only after batch)
         await MainActor.run { self.objectWillChange.send() }
     }
     

@@ -116,6 +116,7 @@ class HomeViewModel: ObservableObject {
         let currentTab = selectedTab
         let currentPlaylist = selectedPlaylist
         let client = self.tmdbClient
+        let typeStr = currentTab.rawValue
         
         // Run network logic in background task
         Task {
@@ -124,17 +125,23 @@ class HomeViewModel: ObservableObject {
             if currentTab != .live {
                 do {
                     // TMDB network call - slow, so keep it off main thread
-                    let results = try await client.getTrending(type: currentTab.rawValue)
+                    let results = try await client.getTrending(type: typeStr)
                     trendingTitles = results.map { $0.displayTitle }
                 } catch {
                     print("Trending fetch error: \(error)")
                 }
             }
             
+            // 1.5 Fetch Trending IDs (Background - Performance Optimization)
+            // Heavy string matching happens here off the main thread
+            var trendingIDs: [NSManagedObjectID] = []
+            if !trendingTitles.isEmpty {
+                trendingIDs = await repo.getTrendingMatchesAsync(type: typeStr, tmdbResults: trendingTitles)
+            }
+            
             // 2. Build Sections (Main Actor)
             await MainActor.run {
                 var newSections: [HomeSection] = []
-                let typeStr = currentTab.rawValue
                 
                 // --- LIVE TV ---
                 if currentTab == .live {
@@ -167,9 +174,12 @@ class HomeViewModel: ObservableObject {
                         newSections.append(HomeSection(title: "Continue Watching", type: .continueWatching, items: resumeItems))
                     }
                     
-                    // 2. Trending (Restored Logic)
-                    if !trendingTitles.isEmpty {
-                        let trendingMatches = repo.getTrendingMatches(type: typeStr, tmdbResults: trendingTitles)
+                    // 2. Trending (Optimized)
+                    if !trendingIDs.isEmpty {
+                        // Rapidly resolve objects on Main Context using IDs found in background
+                        let context = repo.container.viewContext
+                        let trendingMatches = trendingIDs.compactMap { try? context.existingObject(with: $0) as? Channel }
+                        
                         if !trendingMatches.isEmpty {
                             newSections.append(HomeSection(title: "Trending Now", type: .trending, items: trendingMatches))
                         }

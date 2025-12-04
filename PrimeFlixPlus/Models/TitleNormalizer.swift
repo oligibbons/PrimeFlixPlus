@@ -3,65 +3,82 @@ import Foundation
 struct ContentInfo {
     let rawTitle: String
     let normalizedTitle: String
-    let quality: String      // "4K", "1080p", "SD"
-    let language: String?    // "Arabic", "English", "French" etc.
+    let quality: String      // "4K UHD", "1080p", "SD", etc.
+    let language: String?    // "English", "French", etc.
     let year: String?
     
     // Helper to score quality for sorting (Higher is better)
-    // Used by DetailsViewModel to auto-pick the best version
     var qualityScore: Int {
         var score = 0
+        let q = quality.lowercased()
         
-        // Base resolution score
-        if quality.contains("4K") || quality.contains("UHD") { score += 4000 }
-        else if quality.contains("1080") { score += 1080 }
-        else if quality.contains("720") { score += 720 }
-        else { score += 480 }
+        // Resolution weight
+        if q.contains("8k") { score += 8000 }
+        else if q.contains("4k") || q.contains("uhd") { score += 4000 }
+        else if q.contains("1080") { score += 1080 }
+        else if q.contains("720") { score += 720 }
+        else if q.contains("480") || q.contains("sd") { score += 480 }
         
-        // Bonus for specific keywords if needed (e.g. HDR)
-        // This can be expanded later
+        // Bonus for HDR/Bitrate features (if detected in future)
         
         return score
     }
 }
 
 /// Utility to parse raw IPTV titles into clean metadata.
-/// Extracts Year, Quality (4K/1080p), and Language tags.
+/// Optimized with static Regex caching for high performance.
 enum TitleNormalizer {
     
-    // --- Regex Patterns ---
+    // MARK: - Compiled Regex Patterns
+    // Compiling these once prevents massive CPU spikes during list scrolling.
     
-    // Captures (1999) or [2020] or .2020.
-    private static let yearPattern = "([.\\[(]?(19|20)\\d{2}[.\\])]?)"
+    // 1. Year: Matches (1999), [2020], .2021., etc.
+    private static let yearRegex = try! NSRegularExpression(
+        pattern: "[\\[\\(\\. ](19|20)\\d{2}[\\]\\)\\. ]",
+        options: []
+    )
     
-    // Captures common resolutions
-    private static let resolutionPattern = "\\b(4k|uhd|2160p|1080p|1080i|720p|720i|480p|576p|sd|hd|fhd|hevc)\\b"
+    // 2. Resolution: Catches 8K, 4K, UHD, 1080p/i, 720p/i, SD, etc.
+    private static let resolutionRegex = try! NSRegularExpression(
+        pattern: "\\b(8k|4k|uhd|2160p|1440p|1080p|1080i|720p|720i|576p|576i|480p|480i|sd|hd|fhd|qhd|hevc)\\b",
+        options: [.caseInsensitive]
+    )
     
-    // Captures video codecs (to strip them out)
-    private static let codecPattern = "\\b(h264|h265|x264|x265|av1|vp9|mpeg)\\b"
+    // 3. Video Codecs: Catches h264, h265, av1, etc.
+    private static let codecRegex = try! NSRegularExpression(
+        pattern: "\\b(h\\.?264|h\\.?265|x264|x265|av1|vp9|mpeg-?2|mpeg-?4|avc|hevc|xvid|divx)\\b",
+        options: [.caseInsensitive]
+    )
     
-    // Captures audio tags (to strip them out)
-    private static let audioPattern = "\\b(aac|ac3|dts|dd5\\.1|5\\.1|mp3|flac)\\b"
+    // 4. Audio: Catches AAC, AC3, Atmos, TrueHD, DTS, etc.
+    private static let audioRegex = try! NSRegularExpression(
+        pattern: "\\b(aac|ac3|eac3|dts|dts-?hd|truehd|atmos|dd5\\.1|dd\\+|5\\.1|mp3|flac|opus|pcm|lpcm)\\b",
+        options: [.caseInsensitive]
+    )
     
-    // Captures special suffixes (subbed, multi-audio, etc)
-    private static let suffixPattern = "\\b(subs|sub|msub|multisub|vost|vostfr|qb|latino|multi)\\b"
+    // 5. Source & Quality Tags: Catches Bluray, Remux, Web-DL, HDR, etc.
+    private static let sourceRegex = try! NSRegularExpression(
+        pattern: "\\b(bluray|remux|bdrip|brrip|web-?dl|web-?rip|hdtv|pdtv|dvdrip|cam|ts|tc|scr|screener|r5|dv|hdr|hdr10|10bit|imax)\\b",
+        options: [.caseInsensitive]
+    )
     
-    // CRITICAL: Captures Season/Episode info to strip from the Title
-    // Matches: S01, Season 1, Book 1, Vol. 2, Complete, Series
-    private static let seasonPattern = "\\b(s\\d{1,2}(?![0-9])|season\\s*\\d{1,2}|book\\s*\\d+|vol\\.?\\s*\\d+|complete|series)\\b"
+    // 6. Editions/Junk: Catches "Director's Cut", "Extended", "Unrated"
+    private static let junkRegex = try! NSRegularExpression(
+        pattern: "\\b(extended|uncut|unrated|remastered|director'?s? ?cut|theatrical|limited|complete|collection|anthology|trilogy|boxset|saga)\\b",
+        options: [.caseInsensitive]
+    )
     
-    // Captures collection keywords
-    private static let collectionPattern = "\\b(collection|trilogy|saga|anthology|boxset)\\b"
+    // 7. Season/Episode: Catches S01E01, 1x01, Season 1, etc.
+    private static let seasonRegex = try! NSRegularExpression(
+        pattern: "\\b(s\\d{1,2}e\\d{1,2}|\\d{1,2}x\\d{1,2}|s\\d{1,2}|season ?\\d{1,2}|ep ?\\d{1,2}|episode ?\\d{1,2})\\b",
+        options: [.caseInsensitive]
+    )
     
-    // Captures Region Codes (US, UK, CA, AT, SP, TR, DE, etc.)
-    // Matches: (US), (UK), or standalone US/UK at end of string, or country codes
-    private static let regionPattern = "\\b(\\(?(US|UK|CA|AU|NZ|DE|IT|FR|ES|SP|AT|TR|PL|NL|BE|RU)\\)?)\\b"
+    // 8. General Cleanup: Brackets, parentheses, dots, underscores
+    private static let cleanupRegex = try! NSRegularExpression(pattern: "[._\\-\\[\\]\\(\\)]", options: [])
+    private static let multiSpaceRegex = try! NSRegularExpression(pattern: "\\s+", options: [])
     
-    // Captures common spacer characters
-    private static let spacerPattern = "[._-]"
-    
-    // --- Language Mapping ---
-    // Maps common IPTV codes to readable English names
+    // MARK: - Language Data
     private static let languageMap: [String: String] = [
         "AR": "Arabic", "ARA": "Arabic", "KSA": "Arabic", "EGY": "Arabic",
         "EN": "English", "ENG": "English", "UK": "English", "US": "English", "USA": "English",
@@ -78,137 +95,104 @@ enum TitleNormalizer {
         "MULTI": "Multi-Audio", "MULTISUB": "Multi-Audio", "MSUB": "Multi-Audio", "SUB": "Subbed"
     ]
     
-    // --- Main Parsing Function ---
+    // Compiled regex for languages
+    private static let langRegex: NSRegularExpression = {
+        let keys = languageMap.keys.joined(separator: "|")
+        return try! NSRegularExpression(pattern: "\\b(" + keys + ")\\b", options: [.caseInsensitive])
+    }()
+    
+    // MARK: - Main Parsing
     
     static func parse(rawTitle: String) -> ContentInfo {
-        // 1. Pre-Clean: Replace sticky separators with spaces to help Regex
-        // This fixes "#blackaf_en" -> "#blackaf en"
-        var cleanTitle = rawTitle.replacingOccurrences(of: "_", with: " ")
-                                 .replacingOccurrences(of: ".", with: " ")
-                                 .replacingOccurrences(of: "-", with: " ")
+        // Work with a mutable copy
+        // Pre-cleaning: replace strict separators with spaces to help regex boundaries
+        var processingTitle = rawTitle.replacingOccurrences(of: "_", with: " ")
+                                      .replacingOccurrences(of: ".", with: " ")
         
-        let lowerRaw = rawTitle.lowercased()
-        
-        // 2. Extract Year
+        // 1. Extract Year
         var year: String? = nil
-        if let yearMatch = cleanTitle.range(of: yearPattern, options: .regularExpression) {
-            let yearRaw = String(cleanTitle[yearMatch])
-            // Extract strictly the digits 19xx or 20xx
-            let digits = yearRaw.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
-            
-            // Validate year range broadly (e.g. 1900-2099)
-            if digits.count == 4, let yInt = Int(digits), yInt > 1900 && yInt < 2100 {
-                year = digits
-                // Remove the year from the title string to clean it up
-                cleanTitle = cleanTitle.replacingOccurrences(of: yearRaw, with: " ")
-            }
-        }
+        let range = NSRange(processingTitle.startIndex..<processingTitle.endIndex, in: processingTitle)
         
-        // 3. Identify Resolution
-        // We prioritize checking for 4K/UHD first as it overrides others
-        let quality: String
-        if lowerRaw.contains("4k") || lowerRaw.contains("uhd") || lowerRaw.contains("2160") {
-            quality = "4K UHD"
-        } else if lowerRaw.contains("1080") {
-            quality = "1080p"
-        } else if lowerRaw.contains("720") {
-            quality = "720p"
-        } else {
-            quality = "SD"
-        }
-        
-        // 4. Identify Language
-        var detectedLang: String? = nil
-        
-        // We tokenize the string to find language codes.
-        // We iterate backwards because language tags are usually suffixes (e.g. "Movie Name [EN]")
-        let tokens = cleanTitle.components(separatedBy: CharacterSet(charactersIn: " -[]()"))
-        
-        for token in tokens.reversed() {
-            let up = token.uppercased()
-            // Skip short numeric tokens (like season numbers) to avoid false positives if any
-            if up.count < 2 { continue }
-            
-            if let langName = languageMap[up] {
-                detectedLang = langName
-                break // Stop at the first valid language tag found from the right
-            }
-        }
-        
-        // 5. Aggressive Cleanup
-        let options: NSString.CompareOptions = [.regularExpression, .caseInsensitive]
-        
-        // Remove Resolution tags
-        cleanTitle = cleanTitle.replacingOccurrences(of: resolutionPattern, with: " ", options: options)
-        
-        // Remove Codec tags
-        cleanTitle = cleanTitle.replacingOccurrences(of: codecPattern, with: " ", options: options)
-        
-        // Remove Audio tags
-        cleanTitle = cleanTitle.replacingOccurrences(of: audioPattern, with: " ", options: options)
-        
-        // Remove Suffixes (_sub, _vost, etc)
-        cleanTitle = cleanTitle.replacingOccurrences(of: suffixPattern, with: " ", options: options)
-        
-        // Remove Season/Series Info (CRITICAL for Series Deduplication)
-        cleanTitle = cleanTitle.replacingOccurrences(of: seasonPattern, with: " ", options: options)
-        
-        // Remove Collection Info
-        cleanTitle = cleanTitle.replacingOccurrences(of: collectionPattern, with: " ", options: options)
-        
-        // Remove Region Codes (AT, SP, ES, US)
-        cleanTitle = cleanTitle.replacingOccurrences(of: regionPattern, with: " ", options: options)
-        
-        // Remove Language Codes (Aggressive removal of any known code)
-        let langKeys = languageMap.keys.joined(separator: "|")
-        let langPattern = "\\b(" + langKeys + ")\\b"
-        cleanTitle = cleanTitle.replacingOccurrences(of: langPattern, with: " ", options: options)
-        
-        // Remove common brackets content if it looks like meta info (e.g. [X])
-        // This is a heuristic; we accept some risk to get cleaner titles
-        // cleanTitle = cleanTitle.replacingOccurrences(of: "\\[.*?\\]", with: " ", options: .regularExpression)
-        
-        // Remove prefixes (e.g. "US: ", "UK: ")
-        if cleanTitle.contains(":") {
-            let parts = cleanTitle.split(separator: ":")
-            if let first = parts.first {
-                // If the part before colon is short (<= 3 chars), treat it as a country code prefix
-                if first.trimmingCharacters(in: .whitespaces).count <= 3 {
-                    cleanTitle = parts.dropFirst().joined(separator: ":")
+        if let match = yearRegex.firstMatch(in: processingTitle, options: [], range: range) {
+            let yearRange = match.range(at: 1) // The digits capture group
+            if let r = Range(yearRange, in: processingTitle) {
+                let yStr = String(processingTitle[r])
+                if let yInt = Int(yStr), yInt >= 1900 && yInt <= 2099 {
+                    year = yStr
+                    // Remove the year match from the title to clean it
+                    if let fullRange = Range(match.range, in: processingTitle) {
+                        processingTitle.replaceSubrange(fullRange, with: " ")
+                    }
                 }
             }
         }
         
-        // 6. Final Whitespace Cleanup
-        // Replace dots, underscores, dashes with spaces
-        cleanTitle = cleanTitle.replacingOccurrences(of: spacerPattern, with: " ", options: .regularExpression)
+        // 2. Detect Quality (Priority based)
+        let lower = processingTitle.lowercased()
+        let quality: String
+        if lower.contains("8k") { quality = "8K" }
+        else if lower.contains("4k") || lower.contains("uhd") || lower.contains("2160") { quality = "4K UHD" }
+        else if lower.contains("1080") { quality = "1080p" }
+        else if lower.contains("720") { quality = "720p" }
+        else if lower.contains("480") || lower.contains("sd") { quality = "SD" }
+        else { quality = "SD" }
         
-        // Remove special chars left over
-        cleanTitle = cleanTitle.replacingOccurrences(of: "[^a-zA-Z0-9\\s]", with: "", options: .regularExpression)
+        // 3. Detect Language (Token-based)
+        var detectedLang: String? = nil
+        let tokens = processingTitle.components(separatedBy: CharacterSet(charactersIn: " -[]()"))
         
-        // Collapse multiple spaces into one
-        cleanTitle = cleanTitle.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-        cleanTitle = cleanTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Iterate backwards (languages are usually at the end)
+        for token in tokens.reversed() {
+            let up = token.uppercased()
+            if up.count < 2 { continue }
+            if let lang = languageMap[up] {
+                detectedLang = lang
+                break
+            }
+        }
         
-        // Capitalize nicely
-        cleanTitle = cleanTitle.capitalized
+        // 4. Aggressive Scrubbing
+        // Remove all technical metadata to leave just the title
+        processingTitle = strip(processingTitle, regex: resolutionRegex)
+        processingTitle = strip(processingTitle, regex: codecRegex)
+        processingTitle = strip(processingTitle, regex: audioRegex)
+        processingTitle = strip(processingTitle, regex: sourceRegex)
+        processingTitle = strip(processingTitle, regex: junkRegex)
+        processingTitle = strip(processingTitle, regex: seasonRegex) // Important for Series dedup
+        processingTitle = strip(processingTitle, regex: langRegex)
+        
+        // 5. Final Cleanup
+        // Remove brackets, dots, leftover symbols
+        processingTitle = strip(processingTitle, regex: cleanupRegex, replacement: " ")
+        
+        // Remove prefixes like "US | Movie Name"
+        if processingTitle.contains("|") {
+            let parts = processingTitle.split(separator: "|")
+            if let last = parts.last { processingTitle = String(last) }
+        }
+        
+        // Collapse multiple spaces
+        processingTitle = strip(processingTitle, regex: multiSpaceRegex, replacement: " ")
+        
+        let finalTitle = processingTitle.trimmingCharacters(in: .whitespacesAndNewlines).capitalized
         
         return ContentInfo(
             rawTitle: rawTitle,
-            normalizedTitle: cleanTitle,
+            normalizedTitle: finalTitle.isEmpty ? rawTitle : finalTitle, // Fallback if we stripped everything
             quality: quality,
             language: detectedLang,
             year: year
         )
     }
     
-    /// Generates a consistent key for grouping duplicates.
-    /// This strips all non-alphanumeric chars and lowercases the string.
-    /// Example: "The Matrix (1999)" -> "thematrix"
+    /// Helper: Replaces regex matches with a replacement string
+    private static func strip(_ text: String, regex: NSRegularExpression, replacement: String = " ") -> String {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: replacement)
+    }
+    
+    /// Generates a strict key for grouping duplicates
     static func generateGroupKey(_ normalizedTitle: String) -> String {
-        return normalizedTitle
-            .lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .joined()
+        return normalizedTitle.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
     }
 }

@@ -20,6 +20,9 @@ class SearchViewModel: ObservableObject {
     private var repository: PrimeFlixRepository?
     private var cancellables = Set<AnyCancellable>()
     
+    // Keep track of the running task so we can cancel it
+    private var searchTask: Task<Void, Never>?
+    
     struct LiveSearchResult: Identifiable {
         let id = UUID()
         let channel: Channel
@@ -28,7 +31,7 @@ class SearchViewModel: ObservableObject {
     
     init() {
         $searchText
-            .debounce(for: .milliseconds(400), scheduler: DispatchQueue.main) // Typing comfort
+            .debounce(for: .milliseconds(400), scheduler: DispatchQueue.main) // Debounce typing
             .removeDuplicates()
             .sink { [weak self] query in
                 self?.performSearch(query)
@@ -43,7 +46,12 @@ class SearchViewModel: ObservableObject {
     private func performSearch(_ query: String) {
         guard let repo = repository else { return }
         
-        if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        // 1. Cancel any existing search to save resources
+        searchTask?.cancel()
+        
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if trimmedQuery.isEmpty {
             self.movieResults = []
             self.seriesResults = []
             self.liveResults = []
@@ -55,13 +63,13 @@ class SearchViewModel: ObservableObject {
         self.isSearching = true
         self.isEmpty = false
         
-        // CRITICAL: Run search in a DETACHED task to keep keyboard responsive.
-        // We use a background context to perform the fetch, then pass ObjectIDs back to Main.
-        Task.detached(priority: .userInitiated) {
+        // 2. Start new search task
+        searchTask = Task.detached(priority: .userInitiated) { [weak self] in
+            
+            // Create a background context for thread safety
             let context = repo.container.newBackgroundContext()
             
-            // 1. Perform Fetch on Background Context
-            // We use a helper struct to transport IDs safely across threads
+            // Perform Fetch on Background Context
             struct BackgroundResults {
                 let movieIDs: [NSManagedObjectID]
                 let seriesIDs: [NSManagedObjectID]
@@ -71,9 +79,14 @@ class SearchViewModel: ObservableObject {
             
             var safeResults: BackgroundResults?
             
-            context.performAndWait {
+            await context.perform {
+                // Check cancellation before doing work
+                if Task.isCancelled { return }
+                
                 let searchRepo = ChannelRepository(context: context)
-                let rawResults = searchRepo.search(query: query)
+                let rawResults = searchRepo.search(query: trimmedQuery)
+                
+                if Task.isCancelled { return }
                 
                 safeResults = BackgroundResults(
                     movieIDs: rawResults.movies.map { $0.objectID },
@@ -83,12 +96,11 @@ class SearchViewModel: ObservableObject {
                 )
             }
             
-            guard let results = safeResults else { return }
+            guard let results = safeResults, !Task.isCancelled else { return }
             
-            // 2. Resolve on Main Actor
+            // 3. Update UI on Main Actor
             await MainActor.run {
-                // Ensure we are still searching for the same thing (basic cancellation check)
-                // In a production app, we might use a cancellation token, but this is sufficient for now.
+                guard let self = self else { return }
                 
                 let viewContext = repo.container.viewContext
                 
@@ -98,7 +110,7 @@ class SearchViewModel: ObservableObject {
                 let finalLive = results.liveIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
                 let finalProgs = results.programIDs.compactMap { try? viewContext.existingObject(with: $0) as? Programme }
                 
-                // Process Live Results (Map Programs to Channels)
+                // Process Live Results
                 var processedLive: [LiveSearchResult] = []
                 
                 // Add direct Channel matches
@@ -106,18 +118,16 @@ class SearchViewModel: ObservableObject {
                     processedLive.append(LiveSearchResult(channel: ch, currentProgram: nil))
                 }
                 
-                // Add Program matches
-                // We need to look up the channel for the program.
-                // Since we are on Main Actor, we can use the repository helper logic or direct fetch.
+                // Add Program matches (Live TV EPG)
                 for prog in finalProgs {
-                    // Optimized: Find channel in existing list or fetch if needed
+                    // Optimization: Reuse existing fetch logic or simple lookup
+                    // We assume URL contains ID for mapping
                     let req = NSFetchRequest<Channel>(entityName: "Channel")
-                    // Heuristic: URL contains the channel ID embedded in the program
                     req.predicate = NSPredicate(format: "url CONTAINS[cd] '/' + %@ + '.'", prog.channelId)
                     req.fetchLimit = 1
                     
                     if let ch = (try? viewContext.fetch(req))?.first {
-                        // Dedup: Don't add if the channel itself was already matched by title
+                        // Dedup: Don't add if the channel is already in the list
                         if !processedLive.contains(where: { $0.channel.url == ch.url }) {
                             processedLive.append(LiveSearchResult(channel: ch, currentProgram: prog))
                         }
