@@ -1,25 +1,26 @@
 import Foundation
-import AVKit
-import AVFoundation
 import Combine
 import SwiftUI
+import TVVLCKit // Ensure this import works now
 
 @MainActor
-class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate {
+class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
+    
+    // VLC Engine
+    let vlcPlayer = VLCMediaPlayer()
     
     // UI State
-    @Published var player: AVPlayer?
     @Published var isPlaying: Bool = false
-    @Published var isBuffering: Bool = false
+    @Published var isBuffering: Bool = true
     @Published var isError: Bool = false
     @Published var errorMessage: String? = nil
+    @Published var showControls: Bool = false
     
     // Metadata
     @Published var videoTitle: String = ""
-    @Published var currentUrl: String = ""
     @Published var duration: Double = 0.0
     @Published var currentTime: Double = 0.0
-    @Published var showControls: Bool = false
+    @Published var currentUrl: String = ""
     
     // Favorites
     @Published var isFavorite: Bool = false
@@ -27,8 +28,6 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
     
     // Dependencies
     private var repository: PrimeFlixRepository?
-    private var timeObserver: Any?
-    private var itemObservers: Set<AnyCancellable> = []
     private var progressTimer: Timer?
     
     // MARK: - Configuration
@@ -38,217 +37,92 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
         self.currentChannel = channel
         self.videoTitle = channel.title
         self.isFavorite = channel.isFavorite
+        self.currentUrl = channel.url
         
-        // 1. Activate Audio Session
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("⚠️ Audio Session Error: \(error)")
-        }
-        
-        // 2. NUCLEAR URL SANITIZATION
-        // We pass the channel type to apply specific rules (Live -> m3u8, VOD -> mp4)
-        guard let sanitizedUrl = nuclearSanitize(url: channel.url, type: channel.type) else {
-            reportError("Invalid URL", reason: "Could not parse: \(channel.url)")
+        setupVLC(url: channel.url)
+    }
+    
+    // MARK: - VLC Setup
+    
+    private func setupVLC(url: String) {
+        // 1. Basic percent encoding for spaces, but keep structure intact
+        guard let mediaUrl = URL(string: url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url) else {
+            reportError("Invalid URL", reason: url)
             return
         }
         
-        self.currentUrl = sanitizedUrl
-        print("▶️ Attempting playback (Nuclear Fix): \(sanitizedUrl)")
+        // 2. Create Media Object
+        let media = VLCMedia(url: mediaUrl)
         
-        setupPlayer(url: sanitizedUrl)
-    }
-    
-    // MARK: - Actions
-    
-    func toggleFavorite() {
-        guard let channel = currentChannel, let repo = repository else { return }
-        repo.toggleFavorite(channel)
-        self.isFavorite.toggle()
-        self.triggerControls()
-    }
-    
-    // MARK: - The "Nuclear" Sanitizer
-    
-    private func nuclearSanitize(url: String, type: String) -> String? {
-        var cleanUrl = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 3. Network Optimizations
+        // Increase caching to 3000ms (3s) to handle slow IPTV responses without stuttering
+        media.addOptions([
+            "network-caching": 3000,
+            "clock-jitter": 0,
+            "clock-synchro": 0
+        ])
         
-        // 1. Fix Protocol Mess
-        if cleanUrl.hasPrefix("http:/") && !cleanUrl.hasPrefix("http://") {
-            cleanUrl = cleanUrl.replacingOccurrences(of: "http:/", with: "http://")
-        }
+        vlcPlayer.media = media
+        vlcPlayer.delegate = self
         
-        // 2. Deconstruct URL to handle Credentials securely
-        // Many IPTV providers have issues if special chars in user/pass aren't encoded,
-        // OR if they ARE encoded double. We try to reset them.
-        
-        guard var components = URLComponents(string: cleanUrl.replacingOccurrences(of: " ", with: "%20")) else {
-            return cleanUrl // Fallback
-        }
-        
-        // Ensure Scheme
-        if components.scheme == nil { components.scheme = "http" }
-        
-        // 3. FORCE FORMAT COMPATIBILITY (The Critical Fix)
-        // tvOS hates .ts for live streams (instability) and .mkv for VOD (unsupported).
-        
-        if type == "live" {
-            // Live TV: FORCE HLS (.m3u8)
-            // Most Xtream codes servers support changing the extension to transcode on the fly.
-            if components.path.hasSuffix(".ts") {
-                let newPath = String(components.path.dropLast(3)) + ".m3u8"
-                components.path = newPath
-            } else if !components.path.hasSuffix(".m3u8") {
-                // If no extension, append it
-                components.path += ".m3u8"
-            }
-        } else {
-            // VOD (Movies/Series): FORCE MP4
-            // We swap .mkv or .avi to .mp4 to request a compatible stream
-            if components.path.hasSuffix(".mkv") {
-                let newPath = String(components.path.dropLast(4)) + ".mp4"
-                components.path = newPath
-            } else if components.path.hasSuffix(".avi") {
-                let newPath = String(components.path.dropLast(4)) + ".mp4"
-                components.path = newPath
-            }
-        }
-        
-        return components.string
-    }
-    
-    // MARK: - Player Setup
-    
-    private func setupPlayer(url: String) {
-        guard let streamUrl = URL(string: url) else {
-            reportError("Malformed URL", reason: url)
-            return
-        }
-        
-        // 3. ASSET CREATION with SPOOFED HEADERS
-        // We mimic IPTV Smarters Pro, which is widely whitelisted by providers.
-        let headers: [String: Any] = [
-            "User-Agent": "IPTVSmartersPro/1.1.1 (iPad; iOS 15.4; Scale/2.00)"
-        ]
-        
-        let asset = AVURLAsset(url: streamUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-        
-        // 4. SSL BYPASS (Delegate)
-        asset.resourceLoader.setDelegate(self, queue: DispatchQueue.main)
-        
-        let item = AVPlayerItem(asset: asset)
-        
-        // Preferences for stability
-        item.preferredForwardBufferDuration = 10.0 // Buffer ahead 10s
-        item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
-        
-        // 5. OBSERVERS
-        item.publisher(for: \.status)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] status in
-                self?.handleStatusChange(status, item: item)
-            }
-            .store(in: &itemObservers)
-        
-        item.publisher(for: \.isPlaybackLikelyToKeepUp)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] keepUp in
-                self?.isBuffering = !keepUp
-            }
-            .store(in: &itemObservers)
-        
-        item.publisher(for: \.isPlaybackBufferEmpty)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] empty in
-                if empty { self?.isBuffering = true }
-            }
-            .store(in: &itemObservers)
-        
-        // 6. INITIALIZE PLAYER
-        let player = AVPlayer(playerItem: item)
-        player.actionAtItemEnd = .pause
-        
-        // Disable "ActionAtItemEnd" logic for live streams to prevent freezing
-        if currentChannel?.type == "live" {
-            player.automaticallyWaitsToMinimizeStalling = true
-        }
-        
-        self.player = player
-        
-        // Time Observer
-        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
-        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            self?.currentTime = time.seconds
-        }
-        
-        player.play()
+        // 4. Start Playback
+        vlcPlayer.play()
         self.isPlaying = true
+        self.isBuffering = true
+        
         startProgressTracking()
     }
     
-    // MARK: - SSL Bypass (AVAssetResourceLoaderDelegate)
+    // MARK: - VLC Delegate Methods
     
-    nonisolated func resourceLoader(_ resourceLoader: AVAssetResourceLoader, shouldWaitForResponseTo authenticationChallenge: URLAuthenticationChallenge) -> Bool {
-        // Always trust the server. Essential for many IPTV providers with self-signed certs.
-        if let trust = authenticationChallenge.protectionSpace.serverTrust {
-            let credential = URLCredential(trust: trust)
-            authenticationChallenge.sender?.use(credential, for: authenticationChallenge)
-            return true
-        }
-        return false
-    }
-    
-    // MARK: - Cleanup & Logic
-    
-    private func handleStatusChange(_ status: AVPlayerItem.Status, item: AVPlayerItem) {
-        switch status {
-        case .readyToPlay:
-            print("✅ Player Ready. Duration: \(item.duration.seconds)")
-            self.isError = false
-            self.isBuffering = false
-            if !item.duration.seconds.isNaN {
-                self.duration = item.duration.seconds
-            }
+    nonisolated func mediaPlayerStateChanged(_ aNotification: Notification!) {
+        Task { @MainActor in
+            guard let player = aNotification.object as? VLCMediaPlayer else { return }
             
-        case .failed:
-            if let error = item.error as NSError? {
-                let desc = error.localizedDescription
-                let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError
-                let underlyingReason = underlying?.localizedDescription ?? ""
-                print("❌ Player Failed: \(desc) | \(underlyingReason)")
+            switch player.state {
+            case .buffering:
+                self.isBuffering = true
+            case .playing:
+                self.isBuffering = false
+                self.isPlaying = true
+                self.isError = false
                 
-                // Retry Logic?
-                // For now, just report.
-                reportError("Playback Failed", reason: "\(desc). \(underlyingReason)")
-            } else {
-                reportError("Playback Failed", reason: "Unknown Error")
+                // Update Duration
+                if let len = player.media.length, !len.isUnknown {
+                    self.duration = Double(len.intValue) / 1000.0
+                }
+            case .error:
+                self.reportError("Playback Error", reason: "Stream failed to load.")
+            case .ended, .stopped:
+                self.isPlaying = false
+            default:
+                break
             }
-            
-        case .unknown:
-            break
-        @unknown default:
-            break
         }
     }
     
-    func cleanup() {
-        print("🛑 Cleaning up Player")
-        progressTimer?.invalidate()
-        if let observer = timeObserver { player?.removeTimeObserver(observer) }
-        itemObservers.removeAll()
-        player?.pause()
-        player?.replaceCurrentItem(with: nil)
-        player = nil
+    nonisolated func mediaPlayerTimeChanged(_ aNotification: Notification!) {
+        Task { @MainActor in
+            guard let player = aNotification.object as? VLCMediaPlayer else { return }
+            if let time = player.time {
+                self.currentTime = Double(time.intValue) / 1000.0
+            }
+        }
+    }
+    
+    // MARK: - Controls
+    
+    func assignView(_ view: UIView) {
+        // Bind the UIView to VLC's drawable
+        vlcPlayer.drawable = view
     }
     
     func togglePlayPause() {
-        guard let player = player else { return }
-        if player.rate != 0 {
-            player.pause()
+        if vlcPlayer.isPlaying {
+            vlcPlayer.pause()
             isPlaying = false
         } else {
-            player.play()
+            vlcPlayer.play()
             isPlaying = true
         }
         triggerControls()
@@ -256,13 +130,27 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
     
     func triggerControls() {
         withAnimation { showControls = true }
-        // Auto-hide after 4 seconds if playing
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-            if self.isPlaying {
-                withAnimation { self.showControls = false }
-            }
+            if self.isPlaying { withAnimation { self.showControls = false } }
         }
     }
+    
+    func toggleFavorite() {
+        guard let channel = currentChannel, let repo = repository else { return }
+        repo.toggleFavorite(channel)
+        self.isFavorite.toggle()
+        triggerControls()
+    }
+    
+    func cleanup() {
+        print("🛑 Cleaning up VLC")
+        progressTimer?.invalidate()
+        if vlcPlayer.isPlaying { vlcPlayer.stop() }
+        vlcPlayer.delegate = nil
+        vlcPlayer.drawable = nil
+    }
+    
+    // MARK: - Helpers
     
     private func startProgressTracking() {
         progressTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
@@ -271,7 +159,6 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
             let pos = Int64(self.currentTime * 1000)
             let dur = Int64(self.duration * 1000)
             
-            // Save progress if valid
             if (pos > 10000 && dur > 0) || channel.type == "live" {
                 Task { @MainActor in
                     repo.saveProgress(url: self.currentUrl, pos: pos, dur: dur)
@@ -281,10 +168,8 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
     }
     
     private func reportError(_ title: String, reason: String) {
-        DispatchQueue.main.async {
-            self.isError = true
-            self.errorMessage = "\(title): \(reason)"
-            self.isBuffering = false
-        }
+        self.isError = true
+        self.errorMessage = "\(title): \(reason)"
+        self.isBuffering = false
     }
 }

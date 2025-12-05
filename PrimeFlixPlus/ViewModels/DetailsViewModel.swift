@@ -35,7 +35,7 @@ class DetailsViewModel: ObservableObject {
     @Published var selectedSeason: Int = 1
     @Published var displayedEpisodes: [MergedEpisode] = []
     
-    // Source map for playback
+    // Source map for playback (Maps Episode Key -> Playlist URL)
     private var episodeSourceMap: [String: String] = [:]
     
     private let tmdbClient = TmdbClient()
@@ -112,7 +112,7 @@ class DetailsViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Smart Playback Logic (NUCLEAR FIX APPLIED)
+    // MARK: - Smart Playback Logic (HLS FALLBACK FIX)
     
     func getSmartPlayTarget() -> Channel? {
         if channel.type == "movie" {
@@ -120,7 +120,7 @@ class DetailsViewModel: ObservableObject {
         }
         
         if channel.type == "series" {
-            // Find first episode
+            // Find first episode (usually S1E1)
             let sorted = xtreamEpisodes.sorted {
                 if $0.season != $1.season { return $0.season < $1.season }
                 return $0.episodeNum < $1.episodeNum
@@ -132,36 +132,37 @@ class DetailsViewModel: ObservableObject {
         return nil
     }
     
+    /// Constructs a temporary channel object for playback, applying the Hybrid HLS routing fix.
     private func constructChannelForEpisode(_ ep: XtreamChannelInfo.Episode) -> Channel? {
-        // 1. Get Source Playlist Info
+        // 1. Identify Source
         let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
         guard let sourceUrl = episodeSourceMap[key] else { return nil }
         
         let input = XtreamInput.decodeFromPlaylistUrl(sourceUrl)
         
-        // 2. Strict Credential Encoding
-        let safeUser = input.username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? input.username
-        let safePass = input.password.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? input.password
+        // 2. Determine Safe Routing (The Fix)
+        let ext = ep.containerExtension.lowercased()
+        let streamUrl: String
         
-        // 3. Container Swapping (MKV -> MP4)
-        var extensionToUse = ep.containerExtension
-        if extensionToUse.lowercased() == "mkv" || extensionToUse.lowercased() == "avi" {
-            extensionToUse = "mp4"
+        // If the file is natively supported by AVPlayer, stream it directly.
+        if ext == "mp4" || ext == "m4v" || ext == "mov" {
+            streamUrl = "\(input.basicUrl)/movie/\(input.username)/\(input.password)/\(ep.id).\(ep.containerExtension)"
+        } else {
+            // If the file is NOT supported (mkv, avi, flv, etc.), force the server to output HLS.
+            // Using the /live/ endpoint with .m3u8 extension usually triggers on-the-fly transcoding on Xtream servers.
+            streamUrl = "\(input.basicUrl)/live/\(input.username)/\(input.password)/\(ep.id).m3u8"
         }
         
-        // FIX APPLIED HERE: Changed /series/ to /movie/
-        // Most providers serve raw episode files via the /movie/ endpoint structure.
-        let streamUrl = "\(input.basicUrl)/movie/\(safeUser)/\(safePass)/\(ep.id).\(extensionToUse)"
-        
-        // 4. Construct Temporary Channel Object
-        let ch = Channel(context: channel.managedObjectContext!)
+        // 3. Create Temporary Channel (Context-aware)
+        guard let context = channel.managedObjectContext else { return nil }
+        let ch = Channel(context: context)
         ch.url = streamUrl
         ch.title = "\(channel.title) - S\(ep.season)E\(ep.episodeNum)"
         ch.type = "series_episode"
         ch.playlistUrl = sourceUrl
         ch.cover = channel.cover
         
-        print("📺 Series URL Constructed: \(streamUrl)")
+        print("▶️ Constructed Series URL: \(streamUrl) (Original ext: \(ext))")
         
         return ch
     }
@@ -238,7 +239,7 @@ class DetailsViewModel: ObservableObject {
             }
             
             if found {
-                // CRITICAL FIX: Shadow mutable variables with immutable constants
+                // Shadow for thread safety
                 let finalPos = pos
                 let finalDur = dur
                 

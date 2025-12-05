@@ -79,6 +79,19 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		D2AC8B172EE26F2400D440C3 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		D228AD0A2EDF5A22007C6114 /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
 		D228AD0C2EDF5C99007C6114 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -343,6 +356,7 @@
 				D292D61F2EDF458100E8845A /* Sources */,
 				D292D6202EDF458100E8845A /* Frameworks */,
 				D292D6212EDF458100E8845A /* Resources */,
+				D2AC8B172EE26F2400D440C3 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -421,6 +435,9 @@
 				Base,
 			);
 			mainGroup = D292D61A2EDF458100E8845A;
+			packageReferences = (
+				D2AC8B182EE2775800D440C3 /* XCRemoteSwiftPackageReference "vlckit-spm" */,
+			);
 			productRefGroup = D292D6242EDF458100E8845A /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -825,6 +842,17 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D2AC8B182EE2775800D440C3 /* XCRemoteSwiftPackageReference "vlckit-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/tylerjonesio/vlckit-spm";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
 	};
 	rootObject = D292D61B2EDF458100E8845A /* Project object */;
 }
