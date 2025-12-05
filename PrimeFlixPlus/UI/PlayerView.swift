@@ -1,5 +1,3 @@
-// oligibbons/primeflixplus/PrimeFlixPlus-7315d01e01d1e889e041552206b1fb283d2eeb2d/PrimeFlixPlus/UI/PlayerView.swift
-
 import SwiftUI
 import TVVLCKit
 
@@ -38,16 +36,16 @@ struct PlayerView: View {
                         
                         // --- GESTURES ---
                         
-                        // Continuous Scrubbing (Swipe gesture on Siri Remote)
-                        // Maps horizontal drag translation to time seeking
-                        .gesture(
-                            DragGesture(minimumDistance: 20, coordinateSpace: .global)
-                                .onChanged { value in
-                                    viewModel.startScrubbing(translation: value.translation.width, screenWidth: geo.size.width)
-                                }
-                                .onEnded { _ in
+                        // FIX: Replaced DragGesture with native UIKit Pan Gesture for tvOS
+                        .background(
+                            SiriRemoteSwipeHandler(
+                                onPan: { translation in
+                                    viewModel.startScrubbing(translation: translation, screenWidth: geo.size.width)
+                                },
+                                onEnd: {
                                     viewModel.endScrubbing()
                                 }
+                            )
                         )
                     
                         // Discrete Moves (Clicking D-Pad edges)
@@ -179,7 +177,6 @@ struct PlayerView: View {
 }
 
 // MARK: - Extracted Controls View
-// Separated to keep the body clean and manage the "Upper Controls" focus logic cleanly.
 struct ControlsOverlayView: View {
     @ObservedObject var viewModel: PlayerViewModel
     let channel: Channel
@@ -333,7 +330,8 @@ struct ControlsOverlayView: View {
     }
 }
 
-// Helper for hints
+// MARK: - Helper Views & Bridges
+
 struct HintItem: View {
     let icon: String
     let text: String
@@ -359,5 +357,48 @@ struct VLCVideoSurface: UIViewRepresentable {
     
     func updateUIView(_ uiView: UIView, context: Context) {
         // View updates handled by VM
+    }
+}
+
+// MARK: - Siri Remote Swipe Handler
+struct SiriRemoteSwipeHandler: UIViewRepresentable {
+    var onPan: (CGFloat) -> Void
+    var onEnd: () -> Void
+    
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        
+        // Add Pan Gesture Recognizer
+        let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        view.addGestureRecognizer(panGesture)
+        
+        return view
+    }
+    
+    func updateUIView(_ uiView: UIView, context: Context) {}
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPan: onPan, onEnd: onEnd)
+    }
+    
+    class Coordinator: NSObject {
+        var onPan: (CGFloat) -> Void
+        var onEnd: () -> Void
+        
+        init(onPan: @escaping (CGFloat) -> Void, onEnd: @escaping () -> Void) {
+            self.onPan = onPan
+            self.onEnd = onEnd
+        }
+        
+        @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+            if gesture.state == .changed {
+                // Get translation
+                let translation = gesture.translation(in: gesture.view).x
+                onPan(translation)
+            } else if gesture.state == .ended || gesture.state == .cancelled {
+                onEnd()
+            }
+        }
     }
 }

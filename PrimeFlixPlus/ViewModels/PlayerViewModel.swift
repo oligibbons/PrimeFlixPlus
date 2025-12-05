@@ -1,11 +1,9 @@
-// oligibbons/primeflixplus/PrimeFlixPlus-7315d01e01d1e889e041552206b1fb283d2eeb2d/PrimeFlixPlus/ViewModels/PlayerViewModel.swift
-
 import Foundation
 import Combine
 import SwiftUI
 import TVVLCKit
 
-@MainActor // Ensure the whole class runs on Main Actor
+@MainActor
 class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     // VLC Engine
@@ -18,8 +16,14 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     @Published var errorMessage: String? = nil
     @Published var showControls: Bool = false
     
-    // Scrubbing State (New)
+    // Scrubbing State
     @Published var isScrubbing: Bool = false
+    private var scrubbingOriginTime: Double?
+    
+    // Seek Stabilization
+    // We ignore player updates until the player "catches up" to this time.
+    private var targetSeekTime: Double?
+    private var seekCommitTime: Date?
     
     // Metadata
     @Published var videoTitle: String = ""
@@ -76,7 +80,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     // MARK: - VLC Delegate Methods
     
-    nonisolated func mediaPlayerStateChanged(_ aNotification: Notification) {
+    @objc nonisolated func mediaPlayerStateChanged(_ aNotification: Notification) {
         Task { @MainActor in
             guard let player = aNotification.object as? VLCMediaPlayer else { return }
             
@@ -108,15 +112,39 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
     }
     
-    nonisolated func mediaPlayerTimeChanged(_ aNotification: Notification) {
+    @objc nonisolated func mediaPlayerTimeChanged(_ aNotification: Notification) {
         Task { @MainActor in
-            // Don't update time if user is actively scrubbing
-            guard !self.isScrubbing else { return }
-            
-            guard let player = aNotification.object as? VLCMediaPlayer else { return }
-            let time = player.time
-            self.currentTime = Double(time.intValue) / 1000.0
+            // Use common logic for time updates
+            self.updateTimeFromPlayer()
         }
+    }
+    
+    private func updateTimeFromPlayer() {
+        // 1. Don't update if scrubbing
+        if isScrubbing { return }
+        
+        let playerTime = Double(vlcPlayer.time.intValue) / 1000.0
+        
+        // 2. Seek Stabilization Logic
+        // If we recently sought to a time, ignore "old" time reports from the player
+        // until it reports a time close to (or after) our target.
+        if let target = targetSeekTime, let commit = seekCommitTime {
+            // Safety timeout: After 3 seconds, accept whatever the player says to prevent getting stuck
+            if Date().timeIntervalSince(commit) > 3.0 {
+                self.targetSeekTime = nil
+                self.seekCommitTime = nil
+            } else {
+                // If player is still behind the target (by > 2 seconds), ignore it
+                if playerTime < (target - 2.0) {
+                    return
+                }
+                // Player has caught up
+                self.targetSeekTime = nil
+                self.seekCommitTime = nil
+            }
+        }
+        
+        self.currentTime = playerTime
     }
     
     // MARK: - Controls
@@ -128,8 +156,10 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func togglePlayPause() {
         if vlcPlayer.isPlaying {
             vlcPlayer.pause()
+            self.isPlaying = false
         } else {
             vlcPlayer.play()
+            self.isPlaying = true
         }
         triggerControls(forceShow: true)
     }
@@ -154,7 +184,8 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         let safeTimeMs = max(0, min(newTimeMs, maxTimeMs))
         
         self.currentTime = Double(safeTimeMs) / 1000.0
-        vlcPlayer.time = VLCTime(int: safeTimeMs)
+        
+        commitSeek(to: safeTimeMs)
         triggerControls(forceShow: true)
     }
     
@@ -164,12 +195,20 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         isScrubbing = true
         triggerControls(forceShow: true)
         
-        // Calculate scrubbing sensitivity (e.g., full swipe width = 2 minutes)
-        let sensitivity: Double = 120.0 // seconds
-        let percentage = Double(translation / screenWidth)
-        let timeDelta = sensitivity * percentage
+        if scrubbingOriginTime == nil {
+            scrubbingOriginTime = currentTime
+        }
         
-        var newTime = currentTime + timeDelta
+        guard let origin = scrubbingOriginTime else { return }
+        
+        // Tuning: Full swipe width = 90 seconds (Fine scrubbing)
+        // or dynamic based on content length? Let's use a dynamic window.
+        // For a 2 hour movie, we want a swipe to move maybe 10 minutes.
+        let baseSeekWindow = max(120.0, duration * 0.10)
+        let percentage = Double(translation / screenWidth)
+        let timeDelta = baseSeekWindow * percentage
+        
+        var newTime = origin + timeDelta
         newTime = max(0, min(newTime, duration))
         
         self.currentTime = newTime
@@ -177,8 +216,18 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     func endScrubbing() {
         isScrubbing = false
+        scrubbingOriginTime = nil
+        
         let ms = Int32(currentTime * 1000)
+        commitSeek(to: ms)
+    }
+    
+    private func commitSeek(to ms: Int32) {
         vlcPlayer.time = VLCTime(int: ms)
+        
+        // Set lock
+        targetSeekTime = Double(ms) / 1000.0
+        seekCommitTime = Date()
     }
     
     // MARK: - UI Management
@@ -219,10 +268,25 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         progressTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             
+            // Poll for time (Backup for delegate)
+            self.updateTimeFromPlayer()
+            
+            // Update Duration if needed
+            if self.duration == 0, let len = self.vlcPlayer.media?.length, len.intValue > 0 {
+                self.duration = Double(len.intValue) / 1000.0
+            }
+            
+            // Sync Play/Pause state
+            if self.vlcPlayer.isPlaying && !self.isPlaying {
+                self.isPlaying = true
+                self.isBuffering = false
+            }
+            
             if self.currentTime > 0 && self.isBuffering {
                 Task { @MainActor in self.isBuffering = false }
             }
             
+            // Save Progress
             if Int(self.currentTime) % 5 == 0 {
                 guard let repo = self.repository, let channel = self.currentChannel else { return }
                 let pos = Int64(self.currentTime * 1000)
