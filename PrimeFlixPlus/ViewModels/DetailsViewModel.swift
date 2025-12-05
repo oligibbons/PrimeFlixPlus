@@ -149,7 +149,9 @@ class DetailsViewModel: ObservableObject {
             extensionToUse = "mp4"
         }
         
-        let streamUrl = "\(input.basicUrl)/series/\(safeUser)/\(safePass)/\(ep.id).\(extensionToUse)"
+        // FIX APPLIED HERE: Changed /series/ to /movie/
+        // Most providers serve raw episode files via the /movie/ endpoint structure.
+        let streamUrl = "\(input.basicUrl)/movie/\(safeUser)/\(safePass)/\(ep.id).\(extensionToUse)"
         
         // 4. Construct Temporary Channel Object
         let ch = Channel(context: channel.managedObjectContext!)

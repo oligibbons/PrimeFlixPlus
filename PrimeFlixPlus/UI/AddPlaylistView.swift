@@ -105,28 +105,35 @@ struct AddPlaylistView: View, Equatable {
                                 .foregroundColor(focusedField == .url ? CinemeltTheme.accent : .gray)
                                 .padding(.leading, 4)
                             
-                            TextField("http://provider.dns", text: $viewModel.serverUrl)
-                                .font(CinemeltTheme.fontBody(26))
-                                .focused($focusedField, equals: .url)
-                                .submitLabel(.next)
-                                .onSubmit { focusedField = .username }
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 16)
-                                .background(Color.white.opacity(0.08))
-                                .cornerRadius(16)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(
-                                            focusedField == .url ? CinemeltTheme.accent : Color.white.opacity(0.1),
-                                            lineWidth: focusedField == .url ? 2 : 1
-                                        )
-                                )
-                                .shadow(
-                                    color: focusedField == .url ? CinemeltTheme.accent.opacity(0.4) : .clear,
-                                    radius: 15, x: 0, y: 0
-                                )
-                                .scaleEffect(focusedField == .url ? 1.02 : 1.0)
-                                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focusedField)
+                            // FIX: Wrapped in ZStack to decouple scaling from the TextField
+                            ZStack {
+                                // 1. The Visual Background (Scales)
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color.white.opacity(0.08))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(
+                                                focusedField == .url ? CinemeltTheme.accent : Color.white.opacity(0.1),
+                                                lineWidth: focusedField == .url ? 2 : 1
+                                            )
+                                    )
+                                    .shadow(
+                                        color: focusedField == .url ? CinemeltTheme.accent.opacity(0.4) : .clear,
+                                        radius: 15, x: 0, y: 0
+                                    )
+                                    .scaleEffect(focusedField == .url ? 1.02 : 1.0)
+                                    .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focusedField)
+                                
+                                // 2. The Input (Static Frame)
+                                TextField("http://provider.dns", text: $viewModel.serverUrl)
+                                    .textFieldStyle(.plain) // FIX: Disable system focus animations
+                                    .font(CinemeltTheme.fontBody(26))
+                                    .focused($focusedField, equals: .url)
+                                    .submitLabel(.next)
+                                    .onSubmit { focusedField = .username }
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 16)
+                            }
                         }
                         
                         // --- INPUT: Username ---
@@ -137,28 +144,32 @@ struct AddPlaylistView: View, Equatable {
                                 .foregroundColor(focusedField == .username ? CinemeltTheme.accent : .gray)
                                 .padding(.leading, 4)
                             
-                            TextField("User123", text: $viewModel.username)
-                                .font(CinemeltTheme.fontBody(26))
-                                .focused($focusedField, equals: .username)
-                                .submitLabel(.next)
-                                .onSubmit { focusedField = .password }
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 16)
-                                .background(Color.white.opacity(0.08))
-                                .cornerRadius(16)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(
-                                            focusedField == .username ? CinemeltTheme.accent : Color.white.opacity(0.1),
-                                            lineWidth: focusedField == .username ? 2 : 1
-                                        )
-                                )
-                                .shadow(
-                                    color: focusedField == .username ? CinemeltTheme.accent.opacity(0.4) : .clear,
-                                    radius: 15, x: 0, y: 0
-                                )
-                                .scaleEffect(focusedField == .username ? 1.02 : 1.0)
-                                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focusedField)
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color.white.opacity(0.08))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(
+                                                focusedField == .username ? CinemeltTheme.accent : Color.white.opacity(0.1),
+                                                lineWidth: focusedField == .username ? 2 : 1
+                                            )
+                                    )
+                                    .shadow(
+                                        color: focusedField == .username ? CinemeltTheme.accent.opacity(0.4) : .clear,
+                                        radius: 15, x: 0, y: 0
+                                    )
+                                    .scaleEffect(focusedField == .username ? 1.02 : 1.0)
+                                    .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focusedField)
+                                
+                                TextField("User123", text: $viewModel.username)
+                                    .textFieldStyle(.plain)
+                                    .font(CinemeltTheme.fontBody(26))
+                                    .focused($focusedField, equals: .username)
+                                    .submitLabel(.next)
+                                    .onSubmit { focusedField = .password }
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 16)
+                            }
                         }
                         
                         // --- INPUT: Password ---
@@ -169,28 +180,32 @@ struct AddPlaylistView: View, Equatable {
                                 .foregroundColor(focusedField == .password ? CinemeltTheme.accent : .gray)
                                 .padding(.leading, 4)
                             
-                            SecureField("••••••", text: $viewModel.password)
-                                .font(CinemeltTheme.fontBody(26))
-                                .focused($focusedField, equals: .password)
-                                .submitLabel(.done)
-                                .onSubmit { focusedField = .connectButton }
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 16)
-                                .background(Color.white.opacity(0.08))
-                                .cornerRadius(16)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(
-                                            focusedField == .password ? CinemeltTheme.accent : Color.white.opacity(0.1),
-                                            lineWidth: focusedField == .password ? 2 : 1
-                                        )
-                                )
-                                .shadow(
-                                    color: focusedField == .password ? CinemeltTheme.accent.opacity(0.4) : .clear,
-                                    radius: 15, x: 0, y: 0
-                                )
-                                .scaleEffect(focusedField == .password ? 1.02 : 1.0)
-                                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focusedField)
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color.white.opacity(0.08))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(
+                                                focusedField == .password ? CinemeltTheme.accent : Color.white.opacity(0.1),
+                                                lineWidth: focusedField == .password ? 2 : 1
+                                            )
+                                    )
+                                    .shadow(
+                                        color: focusedField == .password ? CinemeltTheme.accent.opacity(0.4) : .clear,
+                                        radius: 15, x: 0, y: 0
+                                    )
+                                    .scaleEffect(focusedField == .password ? 1.02 : 1.0)
+                                    .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focusedField)
+                                
+                                SecureField("••••••", text: $viewModel.password)
+                                    .textFieldStyle(.plain)
+                                    .font(CinemeltTheme.fontBody(26))
+                                    .focused($focusedField, equals: .password)
+                                    .submitLabel(.done)
+                                    .onSubmit { focusedField = .connectButton }
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 16)
+                            }
                         }
                         
                         // Error State
@@ -245,6 +260,8 @@ struct AddPlaylistView: View, Equatable {
         }
         .onAppear {
             viewModel.configure(repository: repository)
+            // FIX: Increased delay to 0.5s to ensure view is settled before focusing
+            // This matches the behavior in SearchView which works correctly.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if self.focusedField == nil { self.focusedField = .url }
             }
