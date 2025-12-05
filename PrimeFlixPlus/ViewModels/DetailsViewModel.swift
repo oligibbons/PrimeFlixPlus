@@ -72,21 +72,19 @@ class DetailsViewModel: ObservableObject {
         self.checkWatchHistory()
     }
     
-    // MARK: - Async Loading (Non-Blocking)
+    // MARK: - Async Loading
     
     func loadData() async {
-        // PERFORMANCE FIX: Show basic UI immediately
         withAnimation { self.isLoading = false }
         withAnimation(.easeIn(duration: 0.5)) { self.backdropOpacity = 1.0 }
         
         guard let repo = repository else { return }
         let channelObjectID = channel.objectID
         
-        // Use Canonical Title (Raw) for Metadata fetching to ensure Year is present
         let channelRawTitle = channel.canonicalTitle ?? channel.title
         let channelType = channel.type
         
-        // 1. Fetch Versions in Background (Detached)
+        // 1. Fetch Versions
         Task.detached(priority: .userInitiated) {
             let context = repo.container.newBackgroundContext()
             var versionIDs: [NSManagedObjectID] = []
@@ -100,7 +98,6 @@ class DetailsViewModel: ObservableObject {
             }
             
             let safeIDs = versionIDs
-            
             await MainActor.run {
                 self.processVersions(versionIDs: safeIDs)
             }
@@ -108,17 +105,14 @@ class DetailsViewModel: ObservableObject {
         
         // 2. Parallel Data Fetching
         await withTaskGroup(of: Void.self) { group in
-            // Task A: TMDB Data (Network Bound) - Using RAW Title to capture Year/Tags
             group.addTask { await self.fetchTmdbData(title: channelRawTitle, type: channelType) }
-            
-            // Task B: Series Data
             if channelType == "series" {
                 group.addTask { await self.fetchAggregatedSeriesData() }
             }
         }
     }
     
-    // MARK: - Smart Playback Logic
+    // MARK: - Smart Playback Logic (NUCLEAR FIX APPLIED)
     
     func getSmartPlayTarget() -> Channel? {
         if channel.type == "movie" {
@@ -126,6 +120,7 @@ class DetailsViewModel: ObservableObject {
         }
         
         if channel.type == "series" {
+            // Find first episode
             let sorted = xtreamEpisodes.sorted {
                 if $0.season != $1.season { return $0.season < $1.season }
                 return $0.episodeNum < $1.episodeNum
@@ -138,21 +133,34 @@ class DetailsViewModel: ObservableObject {
     }
     
     private func constructChannelForEpisode(_ ep: XtreamChannelInfo.Episode) -> Channel? {
+        // 1. Get Source Playlist Info
         let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
         guard let sourceUrl = episodeSourceMap[key] else { return nil }
         
         let input = XtreamInput.decodeFromPlaylistUrl(sourceUrl)
         
+        // 2. Strict Credential Encoding
         let safeUser = input.username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? input.username
         let safePass = input.password.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? input.password
         
-        let streamUrl = "\(input.basicUrl)/series/\(safeUser)/\(safePass)/\(ep.id).\(ep.containerExtension)"
+        // 3. Container Swapping (MKV -> MP4)
+        var extensionToUse = ep.containerExtension
+        if extensionToUse.lowercased() == "mkv" || extensionToUse.lowercased() == "avi" {
+            extensionToUse = "mp4"
+        }
         
+        let streamUrl = "\(input.basicUrl)/series/\(safeUser)/\(safePass)/\(ep.id).\(extensionToUse)"
+        
+        // 4. Construct Temporary Channel Object
         let ch = Channel(context: channel.managedObjectContext!)
         ch.url = streamUrl
         ch.title = "\(channel.title) - S\(ep.season)E\(ep.episodeNum)"
         ch.type = "series_episode"
         ch.playlistUrl = sourceUrl
+        ch.cover = channel.cover
+        
+        print("📺 Series URL Constructed: \(streamUrl)")
+        
         return ch
     }
     
@@ -176,7 +184,6 @@ class DetailsViewModel: ObservableObject {
     
     private func resolveBestVersion() {
         guard !availableVersions.isEmpty else { return }
-        
         let prefLang = settings.preferredLanguage.lowercased()
         let prefRes = settings.preferredResolution
         
@@ -229,13 +236,14 @@ class DetailsViewModel: ObservableObject {
             }
             
             if found {
+                // CRITICAL FIX: Shadow mutable variables with immutable constants
                 let finalPos = pos
                 let finalDur = dur
                 
                 await MainActor.run {
                     self.resumePosition = finalPos
                     self.resumeDuration = finalDur
-                    let pct = finalPos / finalDur
+                    let pct = finalDur > 0 ? finalPos / finalDur : 0
                     self.hasWatchHistory = pct > 0.02 && pct < 0.95
                 }
             }
@@ -245,13 +253,9 @@ class DetailsViewModel: ObservableObject {
     // MARK: - Data Fetching
     
     private func fetchTmdbData(title: String, type: String) async {
-        // Here we parse the RAW title (passed in via loadData)
-        // This allows us to extract the Year correctly, which might be missing from the UI title.
         let info = TitleNormalizer.parse(rawTitle: title)
-        
         do {
             if type == "series" {
-                // Use the CLEAN title + EXTRACTED Year for the search
                 let results = try await tmdbClient.searchTv(query: info.normalizedTitle, year: info.year)
                 if let first = results.first {
                     let details = try await tmdbClient.getTvDetails(id: first.id)
@@ -276,12 +280,11 @@ class DetailsViewModel: ObservableObject {
         else if let creds = details.credits?.cast { self.cast = creds.prefix(12).map { $0 } }
     }
     
-    // MARK: - Optimized Series Aggregation
+    // MARK: - Series Data Aggregation
     
     private func fetchAggregatedSeriesData() async {
         let versionsSnapshot = availableVersions.isEmpty ? [channel] : availableVersions
         let versionData = versionsSnapshot.map { (url: $0.url, playlistUrl: $0.playlistUrl) }
-        
         let client = self.xtreamClient
         
         let result = await Task.detached(priority: .userInitiated) { () -> ([XtreamChannelInfo.Episode], [String: String], [Int]) in
@@ -311,11 +314,7 @@ class DetailsViewModel: ObservableObject {
             var uniqueEpisodes: [String: (XtreamChannelInfo.Episode, String)] = [:]
             for (ep, source) in allEpisodes {
                 let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
-                if let existing = uniqueEpisodes[key] {
-                    if ep.containerExtension == "mkv" && existing.0.containerExtension != "mkv" {
-                        uniqueEpisodes[key] = (ep, source)
-                    }
-                } else {
+                if uniqueEpisodes[key] == nil {
                     uniqueEpisodes[key] = (ep, source)
                 }
             }

@@ -43,11 +43,20 @@ enum NavigationDestination: Hashable {
     }
 }
 
-struct ContentView: View {
+struct ContentView: View, Equatable {
+    // MARK: - Equatable Conformance
+    // This stops the view from redrawing when the parent (App) redraws due to Sync updates.
+    static func == (lhs: ContentView, rhs: ContentView) -> Bool {
+        // Since 'repository' is a stable class reference, and we handle navigation internally via @State,
+        // we can safely say this view is equal to itself and should NOT be redrawn externally.
+        return true
+    }
+    
     @State private var currentDestination: NavigationDestination = .home
     @State private var navigationStack: [NavigationDestination] = []
     
-    @EnvironmentObject var repository: PrimeFlixRepository
+    // Dependency Injection (Stable reference)
+    let repository: PrimeFlixRepository
     
     // Layout Constants must match SidebarView
     private let collapsedSidebarWidth: CGFloat = 100
@@ -112,18 +121,19 @@ struct ContentView: View {
                     SettingsView(onBack: { goBack() })
                     
                 case .addPlaylist:
+                    // Double protection: AddPlaylistView is also Equatable
                     AddPlaylistView(
+                        repository: repository,
                         onPlaylistAdded: {
                             navigationStack.removeAll()
                             currentDestination = .home
                         },
                         onBack: { goBack() }
                     )
+                    .equatable()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // Fix: Padding matches the exact width of the collapsed sidebar (100)
-            // This ensures content aligns perfectly with the "rail" when the menu is closed.
             .padding(.leading, isPlayerMode ? 0 : collapsedSidebarWidth)
             .animation(.easeInOut(duration: 0.35), value: currentDestination)
             .focusSection()

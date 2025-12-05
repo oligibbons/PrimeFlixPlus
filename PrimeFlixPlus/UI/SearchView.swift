@@ -17,16 +17,41 @@ struct SearchView: View {
             VStack(spacing: 0) {
                 
                 // 2. The Floating Search Header (Compact)
-                GlassTextField(
-                    title: "Search Library",
-                    placeholder: "Find movies, series, channels...",
-                    text: $viewModel.searchText,
-                    nextFocus: { /* Dismiss keyboard or move focus down */ }
-                )
-                .focused($isSearchFieldFocused)
+                // DIRECT TEXT FIELD IMPLEMENTATION (Fixes Focus Trap)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Search Library")
+                        .font(CinemeltTheme.fontBody(20))
+                        .fontWeight(.bold)
+                        .foregroundColor(isSearchFieldFocused ? CinemeltTheme.accent : .gray)
+                        .padding(.leading, 4)
+                        .animation(.easeInOut(duration: 0.2), value: isSearchFieldFocused)
+                    
+                    TextField("Find movies, series, channels...", text: $viewModel.searchText)
+                        .font(CinemeltTheme.fontBody(26))
+                        .focused($isSearchFieldFocused)
+                        .submitLabel(.done)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(16)
+                        // Neon Border Effect
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(
+                                    isSearchFieldFocused ? CinemeltTheme.accent : Color.white.opacity(0.1),
+                                    lineWidth: isSearchFieldFocused ? 2 : 1
+                                )
+                        )
+                        // Bloom Effect
+                        .shadow(
+                            color: isSearchFieldFocused ? CinemeltTheme.accent.opacity(0.4) : .clear,
+                            radius: 15, x: 0, y: 0
+                        )
+                        .scaleEffect(isSearchFieldFocused ? 1.02 : 1.0)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isSearchFieldFocused)
+                }
                 .frame(maxWidth: 600)
                 .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
-                // FIX: drastically reduced padding.
                 .padding(.vertical, 20)
                 .background(
                     LinearGradient(
@@ -234,7 +259,6 @@ struct LiveSearchCard: View {
                 .frame(width: 280, alignment: .leading)
                 .background(isFocused ? CinemeltTheme.accent : CinemeltTheme.backgroundEnd.opacity(0.8))
             }
-            // Ensure frame is enforced inside the button content for live cards too
             .frame(width: 280)
         }
         .buttonStyle(CinemeltCardButtonStyle())

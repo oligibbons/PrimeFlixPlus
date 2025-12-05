@@ -29,7 +29,10 @@ struct PrimeFlixPlusApp: App {
                 } else {
                     ZStack {
                         // 1. Main App Content
-                        ContentView()
+                        // NUCLEAR FIX: .equatable() prevents the ContentView from redrawing
+                        // when 'repository' updates its sync status message.
+                        ContentView(repository: repository)
+                            .equatable()
                             .environmentObject(repository)
                             .environment(\.managedObjectContext, persistenceController.container.viewContext)
                         
@@ -49,16 +52,13 @@ struct PrimeFlixPlusApp: App {
     }
     
     private func handleLaunch() {
-        // 1. Determine if we have existing content to show
         let context = persistenceController.container.viewContext
         let request = NSFetchRequest<NSFetchRequestResult>(entityName: "Playlist")
         let hasPlaylists = (try? context.count(for: request)) ?? 0 > 0
         
-        // 2. If we have content, dismiss splash quickly. If fresh install, hold slightly longer for branding.
         let delay = hasPlaylists ? 1.0 : 2.5
         
         Task {
-            // Wait for branding
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             
             await MainActor.run {
@@ -67,8 +67,6 @@ struct PrimeFlixPlusApp: App {
                 }
             }
             
-            // 3. Trigger Background Sync (Fire and Forget)
-            // This runs in background priority and won't block the Main Thread or UI transitions
             if hasPlaylists {
                 Task.detached(priority: .background) {
                     await repository.syncAll()

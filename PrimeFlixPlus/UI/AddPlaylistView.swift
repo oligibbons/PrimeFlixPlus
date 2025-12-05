@@ -1,8 +1,15 @@
 import SwiftUI
 
-struct AddPlaylistView: View {
+struct AddPlaylistView: View, Equatable {
+    // MARK: - Equatable (Stops Parent Redraws from killing Keyboard)
+    static func == (lhs: AddPlaylistView, rhs: AddPlaylistView) -> Bool {
+        return true // This view is static once presented; ignore external updates
+    }
+    
     @StateObject private var viewModel = AddPlaylistViewModel()
-    @EnvironmentObject var repository: PrimeFlixRepository
+    
+    // Dependency Injection (Not Observed Object) guarantees isolation
+    let repository: PrimeFlixRepository
     
     var onPlaylistAdded: () -> Void
     var onBack: () -> Void
@@ -89,31 +96,101 @@ struct AddPlaylistView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        // Inputs
-                        GlassTextField(
-                            title: "Server URL",
-                            placeholder: "http://provider.dns",
-                            text: $viewModel.serverUrl,
-                            nextFocus: { focusedField = .username }
-                        )
-                        .focused($focusedField, equals: .url)
+                        // --- INPUT: Server URL ---
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Server URL")
+                                .font(CinemeltTheme.fontBody(20))
+                                .fontWeight(.bold)
+                                .foregroundColor(focusedField == .url ? CinemeltTheme.accent : .gray)
+                                .padding(.leading, 4)
+                            
+                            TextField("http://provider.dns", text: $viewModel.serverUrl)
+                                .font(CinemeltTheme.fontBody(26))
+                                .focused($focusedField, equals: .url)
+                                .submitLabel(.next)
+                                .onSubmit { focusedField = .username }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 16)
+                                .background(Color.white.opacity(0.08))
+                                .cornerRadius(16)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(
+                                            focusedField == .url ? CinemeltTheme.accent : Color.white.opacity(0.1),
+                                            lineWidth: focusedField == .url ? 2 : 1
+                                        )
+                                )
+                                .shadow(
+                                    color: focusedField == .url ? CinemeltTheme.accent.opacity(0.4) : .clear,
+                                    radius: 15, x: 0, y: 0
+                                )
+                                .scaleEffect(focusedField == .url ? 1.02 : 1.0)
+                                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focusedField)
+                        }
                         
-                        GlassTextField(
-                            title: "Username",
-                            placeholder: "User123",
-                            text: $viewModel.username,
-                            nextFocus: { focusedField = .password }
-                        )
-                        .focused($focusedField, equals: .username)
+                        // --- INPUT: Username ---
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Username")
+                                .font(CinemeltTheme.fontBody(20))
+                                .fontWeight(.bold)
+                                .foregroundColor(focusedField == .username ? CinemeltTheme.accent : .gray)
+                                .padding(.leading, 4)
+                            
+                            TextField("User123", text: $viewModel.username)
+                                .font(CinemeltTheme.fontBody(26))
+                                .focused($focusedField, equals: .username)
+                                .submitLabel(.next)
+                                .onSubmit { focusedField = .password }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 16)
+                                .background(Color.white.opacity(0.08))
+                                .cornerRadius(16)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(
+                                            focusedField == .username ? CinemeltTheme.accent : Color.white.opacity(0.1),
+                                            lineWidth: focusedField == .username ? 2 : 1
+                                        )
+                                )
+                                .shadow(
+                                    color: focusedField == .username ? CinemeltTheme.accent.opacity(0.4) : .clear,
+                                    radius: 15, x: 0, y: 0
+                                )
+                                .scaleEffect(focusedField == .username ? 1.02 : 1.0)
+                                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focusedField)
+                        }
                         
-                        GlassTextField(
-                            title: "Password",
-                            placeholder: "••••••",
-                            text: $viewModel.password,
-                            isSecure: true,
-                            nextFocus: { focusedField = .connectButton }
-                        )
-                        .focused($focusedField, equals: .password)
+                        // --- INPUT: Password ---
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Password")
+                                .font(CinemeltTheme.fontBody(20))
+                                .fontWeight(.bold)
+                                .foregroundColor(focusedField == .password ? CinemeltTheme.accent : .gray)
+                                .padding(.leading, 4)
+                            
+                            SecureField("••••••", text: $viewModel.password)
+                                .font(CinemeltTheme.fontBody(26))
+                                .focused($focusedField, equals: .password)
+                                .submitLabel(.done)
+                                .onSubmit { focusedField = .connectButton }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 16)
+                                .background(Color.white.opacity(0.08))
+                                .cornerRadius(16)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(
+                                            focusedField == .password ? CinemeltTheme.accent : Color.white.opacity(0.1),
+                                            lineWidth: focusedField == .password ? 2 : 1
+                                        )
+                                )
+                                .shadow(
+                                    color: focusedField == .password ? CinemeltTheme.accent.opacity(0.4) : .clear,
+                                    radius: 15, x: 0, y: 0
+                                )
+                                .scaleEffect(focusedField == .password ? 1.02 : 1.0)
+                                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focusedField)
+                        }
                         
                         // Error State
                         if let error = viewModel.errorMessage {
@@ -166,9 +243,14 @@ struct AddPlaylistView: View {
             .shadow(color: .black.opacity(0.5), radius: 50, x: 0, y: 20)
         }
         .onAppear {
+            // Manual injection of repository
             viewModel.configure(repository: repository)
+            
+            // Only auto-focus if we haven't started typing yet
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                if self.focusedField == nil { self.focusedField = .url }
+                if self.focusedField == nil && viewModel.serverUrl.isEmpty {
+                    self.focusedField = .url
+                }
             }
         }
     }

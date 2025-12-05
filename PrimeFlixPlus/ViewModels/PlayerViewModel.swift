@@ -16,12 +16,12 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
     
     // Metadata
     @Published var videoTitle: String = ""
-    @Published var currentUrl: String = "" // Displayed in Debug UI
+    @Published var currentUrl: String = ""
     @Published var duration: Double = 0.0
     @Published var currentTime: Double = 0.0
     @Published var showControls: Bool = false
     
-    // Added for Favorites Support
+    // Favorites
     @Published var isFavorite: Bool = false
     private var currentChannel: Channel?
     
@@ -47,14 +47,15 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
             print("⚠️ Audio Session Error: \(error)")
         }
         
-        // 2. ROBUST URL SANITIZATION
-        guard let sanitizedUrl = sanitize(url: channel.url) else {
+        // 2. NUCLEAR URL SANITIZATION
+        // We pass the channel type to apply specific rules (Live -> m3u8, VOD -> mp4)
+        guard let sanitizedUrl = nuclearSanitize(url: channel.url, type: channel.type) else {
             reportError("Invalid URL", reason: "Could not parse: \(channel.url)")
             return
         }
         
         self.currentUrl = sanitizedUrl
-        print("▶️ Attempting playback: \(sanitizedUrl)")
+        print("▶️ Attempting playback (Nuclear Fix): \(sanitizedUrl)")
         
         setupPlayer(url: sanitizedUrl)
     }
@@ -68,35 +69,50 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
         self.triggerControls()
     }
     
-    private func sanitize(url: String) -> String? {
-        // Handle Basic Cleanups
-        var raw = url.trimmingCharacters(in: .whitespacesAndNewlines)
+    // MARK: - The "Nuclear" Sanitizer
+    
+    private func nuclearSanitize(url: String, type: String) -> String? {
+        var cleanUrl = url.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // Fix double-slash prefix issue if present
-        if raw.hasPrefix("http:/") && !raw.hasPrefix("http://") {
-            raw = raw.replacingOccurrences(of: "http:/", with: "http://")
+        // 1. Fix Protocol Mess
+        if cleanUrl.hasPrefix("http:/") && !cleanUrl.hasPrefix("http://") {
+            cleanUrl = cleanUrl.replacingOccurrences(of: "http:/", with: "http://")
         }
         
-        // Attempt to parse components
-        // Note: URLComponents(string:) fails if there are unencoded spaces
-        // So we pre-encode spaces first
-        let encodedSpaces = raw.replacingOccurrences(of: " ", with: "%20")
+        // 2. Deconstruct URL to handle Credentials securely
+        // Many IPTV providers have issues if special chars in user/pass aren't encoded,
+        // OR if they ARE encoded double. We try to reset them.
         
-        guard var components = URLComponents(string: encodedSpaces) else {
-            // Fallback: If it's a total mess, return raw and pray
-            return raw
+        guard var components = URLComponents(string: cleanUrl.replacingOccurrences(of: " ", with: "%20")) else {
+            return cleanUrl // Fallback
         }
         
         // Ensure Scheme
         if components.scheme == nil { components.scheme = "http" }
         
-        // MKV -> MP4 Swap (Apple TV Compatibility)
-        // Only applies if the URL is explicitly .mkv
-        // We DO NOT touch .m3u8
-        if components.path.hasSuffix(".mkv") {
-            print("🔧 Detected MKV. Swapping to MP4...")
-            let newPath = String(components.path.dropLast(4)) + ".mp4"
-            components.path = newPath
+        // 3. FORCE FORMAT COMPATIBILITY (The Critical Fix)
+        // tvOS hates .ts for live streams (instability) and .mkv for VOD (unsupported).
+        
+        if type == "live" {
+            // Live TV: FORCE HLS (.m3u8)
+            // Most Xtream codes servers support changing the extension to transcode on the fly.
+            if components.path.hasSuffix(".ts") {
+                let newPath = String(components.path.dropLast(3)) + ".m3u8"
+                components.path = newPath
+            } else if !components.path.hasSuffix(".m3u8") {
+                // If no extension, append it
+                components.path += ".m3u8"
+            }
+        } else {
+            // VOD (Movies/Series): FORCE MP4
+            // We swap .mkv or .avi to .mp4 to request a compatible stream
+            if components.path.hasSuffix(".mkv") {
+                let newPath = String(components.path.dropLast(4)) + ".mp4"
+                components.path = newPath
+            } else if components.path.hasSuffix(".avi") {
+                let newPath = String(components.path.dropLast(4)) + ".mp4"
+                components.path = newPath
+            }
         }
         
         return components.string
@@ -110,18 +126,22 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
             return
         }
         
-        // 3. ASSET CREATION
-        // Headers to mimic VLC (helps with some strict firewalls)
+        // 3. ASSET CREATION with SPOOFED HEADERS
+        // We mimic IPTV Smarters Pro, which is widely whitelisted by providers.
         let headers: [String: Any] = [
-            "User-Agent": "VLC/3.0.16 LibVLC/3.0.16"
+            "User-Agent": "IPTVSmartersPro/1.1.1 (iPad; iOS 15.4; Scale/2.00)"
         ]
         
         let asset = AVURLAsset(url: streamUrl, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
         
-        // 4. SSL BYPASS
+        // 4. SSL BYPASS (Delegate)
         asset.resourceLoader.setDelegate(self, queue: DispatchQueue.main)
         
         let item = AVPlayerItem(asset: asset)
+        
+        // Preferences for stability
+        item.preferredForwardBufferDuration = 10.0 // Buffer ahead 10s
+        item.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         
         // 5. OBSERVERS
         item.publisher(for: \.status)
@@ -145,9 +165,15 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
             }
             .store(in: &itemObservers)
         
-        // 6. INITIALIZE
+        // 6. INITIALIZE PLAYER
         let player = AVPlayer(playerItem: item)
         player.actionAtItemEnd = .pause
+        
+        // Disable "ActionAtItemEnd" logic for live streams to prevent freezing
+        if currentChannel?.type == "live" {
+            player.automaticallyWaitsToMinimizeStalling = true
+        }
+        
         self.player = player
         
         // Time Observer
@@ -164,6 +190,7 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
     // MARK: - SSL Bypass (AVAssetResourceLoaderDelegate)
     
     nonisolated func resourceLoader(_ resourceLoader: AVAssetResourceLoader, shouldWaitForResponseTo authenticationChallenge: URLAuthenticationChallenge) -> Bool {
+        // Always trust the server. Essential for many IPTV providers with self-signed certs.
         if let trust = authenticationChallenge.protectionSpace.serverTrust {
             let credential = URLCredential(trust: trust)
             authenticationChallenge.sender?.use(credential, for: authenticationChallenge)
@@ -187,11 +214,12 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
         case .failed:
             if let error = item.error as NSError? {
                 let desc = error.localizedDescription
-                let reason = error.localizedFailureReason ?? ""
                 let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError
                 let underlyingReason = underlying?.localizedDescription ?? ""
+                print("❌ Player Failed: \(desc) | \(underlyingReason)")
                 
-                print("❌ Player Failed: \(desc) | \(reason) | \(underlyingReason)")
+                // Retry Logic?
+                // For now, just report.
                 reportError("Playback Failed", reason: "\(desc). \(underlyingReason)")
             } else {
                 reportError("Playback Failed", reason: "Unknown Error")
@@ -228,6 +256,7 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
     
     func triggerControls() {
         withAnimation { showControls = true }
+        // Auto-hide after 4 seconds if playing
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
             if self.isPlaying {
                 withAnimation { self.showControls = false }
@@ -242,8 +271,7 @@ class PlayerViewModel: NSObject, ObservableObject, AVAssetResourceLoaderDelegate
             let pos = Int64(self.currentTime * 1000)
             let dur = Int64(self.duration * 1000)
             
-            // CRITICAL FIX: Live TV might have 0 duration, but we still want it in history.
-            // Check if position > 10s OR if it is Live TV
+            // Save progress if valid
             if (pos > 10000 && dur > 0) || channel.type == "live" {
                 Task { @MainActor in
                     repo.saveProgress(url: self.currentUrl, pos: pos, dur: dur)
