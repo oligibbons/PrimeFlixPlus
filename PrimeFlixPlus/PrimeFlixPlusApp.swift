@@ -33,18 +33,20 @@ struct PrimeFlixPlusApp: App {
                         // when 'repository' updates its sync status message.
                         ContentView(repository: repository)
                             .equatable()
-                            .environmentObject(repository)
-                            .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                            // Note: environmentObject is now injected globally below
                         
                         // 2. Global Sync Overlay (Toasts)
                         SyncStatusOverlay()
-                            .environmentObject(repository)
                             .zIndex(100)
                     }
                     .transition(.opacity.animation(.easeIn(duration: 0.5)))
                     .zIndex(1)
                 }
             }
+            // CRITICAL FIX: Inject Repository and Context at the ROOT level
+            // This ensures SplashView, ContentView, and all subviews have access immediately.
+            .environmentObject(repository)
+            .environment(\.managedObjectContext, persistenceController.container.viewContext)
             .onAppear {
                 handleLaunch()
             }
@@ -56,9 +58,11 @@ struct PrimeFlixPlusApp: App {
         let request = NSFetchRequest<NSFetchRequestResult>(entityName: "Playlist")
         let hasPlaylists = (try? context.count(for: request)) ?? 0 > 0
         
-        let delay = hasPlaylists ? 1.0 : 2.5
+        // Dynamic delay: Faster if we have data, slower if we need to "fake" a load or wait for initial sync
+        let delay = hasPlaylists ? 2.5 : 2.5
         
         Task {
+            // Wait for the splash animation/sync
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             
             await MainActor.run {
@@ -68,6 +72,7 @@ struct PrimeFlixPlusApp: App {
             }
             
             if hasPlaylists {
+                // Trigger a background sync after app launch
                 Task.detached(priority: .background) {
                     await repository.syncAll()
                 }

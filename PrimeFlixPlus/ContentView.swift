@@ -80,12 +80,15 @@ struct ContentView: View, Equatable {
                         onPlayChannel: { channel in navigateToContent(channel) },
                         onAddPlaylist: { currentDestination = .addPlaylist },
                         onSettings: { currentDestination = .settings },
-                        onSearch: { currentDestination = .search }
+                        // FIX: Explicitly ignore StreamType arg to satisfy closure signature
+                        onSearch: { _ in currentDestination = .search }
                     )
                     
                 case .search:
+                    // FIX: Added missing onBack closure
                     SearchView(
-                        onPlay: { channel in navigateToContent(channel) }
+                        onPlay: { channel in navigateToContent(channel) },
+                        onBack: { goBack() }
                     )
                 
                 case .continueWatching:

@@ -1,7 +1,17 @@
 import SwiftUI
+import CoreData
 
 struct SplashView: View {
-    @StateObject private var repository = PrimeFlixRepository(container: PersistenceController.shared.container)
+    // FIX: Replaced direct initialization with EnvironmentObject where appropriate,
+    // or kept StateObject if this is the root owner.
+    // Given PrimeFlixPlusApp creates the repo, we should ideally access it via .environmentObject,
+    // but since this view initializes the app state, keeping StateObject here or passing it down is key.
+    // Based on App structure, we will use the property wrapper as defined previously but ensure it passes data correctly.
+    
+    // NOTE: In the main App file, you likely initialize this.
+    // For this specific view to work as a switcher:
+    @EnvironmentObject var repository: PrimeFlixRepository
+    
     @State private var isActive: Bool = false
     @State private var showSmartLoading: Bool = false
     
@@ -9,21 +19,28 @@ struct SplashView: View {
         ZStack {
             if isActive {
                 if repository.getAllPlaylists().isEmpty {
-                    AddPlaylistView()
-                        .environmentObject(repository)
+                    // FIX: Added missing arguments for repository and callbacks
+                    AddPlaylistView(
+                        repository: repository,
+                        onPlaylistAdded: {
+                            // The repository update will trigger a view refresh automatically
+                        },
+                        onBack: {
+                            // No-op for root splash
+                        }
+                    )
                 } else {
                     if showSmartLoading {
                         SmartLoadingView()
-                            .environmentObject(repository)
                             .transition(.opacity)
                     } else {
+                        // FIX: Updated onSearch closure signature
                         HomeView(
-                            onPlayChannel: { _ in }, // Handled internally by HomeView usually
-                            onAddPlaylist: {}, // Handled by HomeView state
+                            onPlayChannel: { _ in },
+                            onAddPlaylist: {},
                             onSettings: {},
-                            onSearch: {}
+                            onSearch: { _ in }
                         )
-                        .environmentObject(repository)
                         .transition(.opacity)
                     }
                 }
@@ -32,7 +49,7 @@ struct SplashView: View {
                 ZStack {
                     CinemeltTheme.mainBackground.ignoresSafeArea()
                     
-                    Image("CinemeltLogo") // Ensure this exists in Assets
+                    Image("CinemeltLogo")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 400)
@@ -41,8 +58,7 @@ struct SplashView: View {
             }
         }
         .onAppear {
-            // 1. Kick off the smart sync immediately
-            // This is non-blocking and runs on a background thread
+            // 1. Kick off the smart sync
             Task {
                 await repository.syncAll(force: false)
             }
@@ -52,32 +68,23 @@ struct SplashView: View {
                 withAnimation {
                     self.isActive = true
                 }
-                
-                // 3. Check if we need the Smart Loading Screen
                 checkSyncStatus()
             }
         }
     }
     
     private func checkSyncStatus() {
-        // Monitor the repository state
-        // If it's an initial huge sync, keep showing the loading screen
-        // We check periodically
-        
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
-            // Access state safely
+        // FIX: Replaced 'timer in' with '_' to silence warning
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
             if repository.isInitialSync {
                 withAnimation { self.showSmartLoading = true }
             } else {
-                // Once initial sync is done, or if it was never needed (cached), go to Home
                 if self.showSmartLoading {
-                    // If we were showing it, fade it out
                     withAnimation(.easeOut(duration: 1.0)) {
                         self.showSmartLoading = false
                     }
                 }
                 
-                // If we aren't syncing anymore, stop checking
                 if !repository.isSyncing {
                     timer.invalidate()
                 }

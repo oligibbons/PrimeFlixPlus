@@ -25,7 +25,7 @@ class PrimeFlixRepository: ObservableObject {
     
     // --- State ---
     @Published var isSyncing: Bool = false
-    @Published var isInitialSync: Bool = false // True if this is a massive first-time load
+    @Published var isInitialSync: Bool = false
     @Published var syncStatusMessage: String? = nil
     @Published var lastSyncDate: Date? = nil
     @Published var isErrorState: Bool = false
@@ -63,7 +63,6 @@ class PrimeFlixRepository: ObservableObject {
             try? context.save()
             
             Task.detached(priority: .userInitiated) {
-                // New playlist: Force immediate sync and mark as Initial
                 await self.syncPlaylist(playlistTitle: title, playlistUrl: url, source: source, force: true, isFirstTime: true)
             }
         }
@@ -101,7 +100,6 @@ class PrimeFlixRepository: ObservableObject {
     func getBrowsingContent(playlistUrl: String, type: String, group: String) -> [Channel] { return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type, group: group) }
     func getTrendingMatches(type: String, tmdbResults: [String]) -> [Channel] { return channelRepo.getTrendingMatches(type: type, tmdbResults: tmdbResults) }
     
-    // New Method for Live Search
     func searchLiveContent(query: String) -> (categories: [String], channels: [Channel]) {
         return channelRepo.searchLiveContent(query: query)
     }
@@ -192,7 +190,6 @@ class PrimeFlixRepository: ObservableObject {
         }.value
     }
     
-    /// The Core Sync Engine
     nonisolated func syncPlaylist(playlistTitle: String, playlistUrl: String, source: DataSourceType, force: Bool, isFirstTime: Bool) async {
         
         if !force && isCacheFresh(for: playlistUrl) {
@@ -210,7 +207,6 @@ class PrimeFlixRepository: ObservableObject {
         let context = container.newBackgroundContext()
         context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
         
-        // 2. Snapshot Existing Data
         await MainActor.run { self.syncStats.currentStage = "Analyzing local library..." }
         
         var existingSnapshots: [String: ChannelSnapshot] = [:]
@@ -244,7 +240,6 @@ class PrimeFlixRepository: ObservableObject {
             
             await MainActor.run { self.syncStats.currentStage = "Downloading playlists..." }
             
-            // 3. Network Fetch & Parse
             if source == .xtream {
                 let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
                 let catMap = try await fetchXtreamCategoriesWithTimeout(input: input, timeoutSeconds: 30)
@@ -255,7 +250,6 @@ class PrimeFlixRepository: ObservableObject {
                 
                 let (liveItems, vodItems, seriesItems) = try await (live, vod, series)
                 
-                // Process & Count
                 await MainActor.run { self.syncStats.currentStage = "Processing content..." }
                 
                 let allLive = liveItems.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input, categoryMap: catMap) }
@@ -266,7 +260,6 @@ class PrimeFlixRepository: ObservableObject {
                 incomingStructs.append(contentsOf: allVod)
                 incomingStructs.append(contentsOf: allSeries)
                 
-                // Update Stats
                 await MainActor.run {
                     self.syncStats.liveChannelsAdded = allLive.count
                     self.syncStats.moviesAdded = allVod.count
@@ -278,14 +271,17 @@ class PrimeFlixRepository: ObservableObject {
                 let (data, _) = try await UnsafeSession.shared.data(from: url)
                 if let content = String(data: data, encoding: .utf8) {
                     incomingStructs = await M3UParser.parse(content: content, playlistUrl: playlistUrl)
+                    
+                    // FIX: Capture value safely before hopping to MainActor
+                    let count = incomingStructs.count
                     await MainActor.run {
-                        self.syncStats.totalProcessed = incomingStructs.count
+                        self.syncStats.totalProcessed = count
                         self.syncStats.currentStage = "Sorting channels..."
                     }
                 }
             }
             
-            // 4. Diffing Logic
+            // Diffing Logic
             var toInsert: [ChannelStruct] = []
             var toUpdate: [ChannelStruct] = []
             
@@ -303,7 +299,6 @@ class PrimeFlixRepository: ObservableObject {
                 }
             }
             
-            // 5. Batch Execution
             if !toInsert.isEmpty {
                 let finalInserts = toInsert
                 await MainActor.run { self.syncStatusMessage = "Adding \(finalInserts.count) new items..." }
@@ -316,7 +311,6 @@ class PrimeFlixRepository: ObservableObject {
                 try await performBatchUpdate(items: finalUpdates, existingSnapshots: existingSnapshots, context: context)
             }
             
-            // 6. Orphan Deletion
             let existingUrls = Set(existingSnapshots.keys)
             let orphans = existingUrls.subtracting(processedUrls)
             
@@ -325,7 +319,6 @@ class PrimeFlixRepository: ObservableObject {
                 try await performBatchDelete(urls: Array(orphans), playlistUrl: playlistUrl, context: context)
             }
             
-            // 7. Mark as Fresh
             markCacheAsFresh(for: playlistUrl)
             
         } catch {
@@ -337,12 +330,11 @@ class PrimeFlixRepository: ObservableObject {
         }
     }
     
-    // MARK: - Nuclear Option
     func nuclearResync(playlist: Playlist) async {
         guard let source = DataSourceType(rawValue: playlist.source) else { return }
         
         self.isSyncing = true
-        self.isInitialSync = true // Treat nuclear as initial
+        self.isInitialSync = true
         self.syncStatusMessage = "Wiping Database..."
         self.syncStats = SyncStats()
         
@@ -352,7 +344,9 @@ class PrimeFlixRepository: ObservableObject {
             fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlist.url)
             let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
             deleteReq.resultType = .resultTypeObjectIDs
-            try? bgContext.execute(deleteReq)
+            
+            // FIX: Suppress unused result warning
+            _ = try? bgContext.execute(deleteReq)
             try? bgContext.save()
             bgContext.reset()
         }
@@ -389,7 +383,6 @@ class PrimeFlixRepository: ObservableObject {
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)
     }
     
-    // Batch Ops (Identical to previous, omitted for brevity unless requested, but assume included)
     private func performBatchInsert(items: [ChannelStruct], context: NSManagedObjectContext) async throws {
         let batchSize = 5000
         let chunks = stride(from: 0, to: items.count, by: batchSize).map {

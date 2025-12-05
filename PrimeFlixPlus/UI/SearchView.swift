@@ -16,7 +16,7 @@ struct SearchView: View {
     
     // MARK: - Initializer
     init(initialScope: SearchViewModel.SearchScope = .library, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
-        self._viewModel = StateObject(wrappedValue: SearchViewModel(initialScope: initialScope))
+        _viewModel = StateObject(wrappedValue: SearchViewModel(initialScope: initialScope))
         self.onPlay = onPlay
         self.onBack = onBack
     }
@@ -40,10 +40,14 @@ struct SearchView: View {
                         }
                         .buttonStyle(.card)
                         
+                        // FIX: Updated to match GlassTextField signature (removed icon, added title/nextFocus)
                         GlassTextField(
+                            title: "Search",
+                            placeholder: viewModel.selectedScope == .library ? "Movies & Series" : "Channels",
                             text: $viewModel.query,
-                            placeholder: viewModel.selectedScope == .library ? "Search movies & series..." : "Search channels & categories...",
-                            icon: "magnifyingglass"
+                            nextFocus: {
+                                // Optional: Handle explicit submit if needed
+                            }
                         )
                         .focused($isSearchFieldFocused)
                         .submitLabel(.search)
@@ -191,27 +195,29 @@ struct SearchView: View {
                 
                 LazyVGrid(columns: channelGridColumns, spacing: 50) {
                     ForEach(viewModel.liveChannels) { channel in
-                        VStack(spacing: 15) {
-                            AsyncImage(url: URL(string: channel.logo ?? "")) { image in
-                                image.resizable().aspectRatio(contentMode: .fit)
-                            } placeholder: {
-                                Image(systemName: "tv").font(.system(size: 40)).foregroundColor(.gray.opacity(0.3))
+                        // FIX: Replaced tap gesture with native tvOS Button for focus support
+                        Button(action: { onPlay(channel) }) {
+                            VStack(spacing: 15) {
+                                // FIX: Use 'cover' as 'logo' does not exist on Channel entity
+                                AsyncImage(url: URL(string: channel.cover ?? "")) { image in
+                                    image.resizable().aspectRatio(contentMode: .fit)
+                                } placeholder: {
+                                    Image(systemName: "tv").font(.system(size: 40)).foregroundColor(.gray.opacity(0.3))
+                                }
+                                .frame(width: 120, height: 120)
+                                .background(Color.white.opacity(0.05))
+                                .cornerRadius(20)
+                                .shadow(radius: 5)
+                                
+                                Text(channel.title)
+                                    .font(CinemeltTheme.fontBody(18))
+                                    .foregroundColor(CinemeltTheme.cream)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.center)
                             }
-                            .frame(width: 120, height: 120)
-                            .background(Color.white.opacity(0.05))
-                            .cornerRadius(20)
-                            .shadow(radius: 5)
-                            
-                            Text(channel.title)
-                                .font(CinemeltTheme.fontBody(18))
-                                .foregroundColor(CinemeltTheme.cream)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.center)
                         }
-                        .focusable(true)
-                        .padding(10)
                         .buttonStyle(.card)
-                        .onTapGesture { onPlay(channel) }
+                        .padding(10)
                     }
                 }
                 .padding(.bottom, 40)
@@ -231,7 +237,8 @@ struct ResultSection: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 40) {
                     ForEach(items) { item in
-                        MovieCard(channel: item, onClick: { onPlay(item) }, onFocus: { _ in })
+                        // FIX: Removed invalid closure argument `_ in`
+                        MovieCard(channel: item, onClick: { onPlay(item) })
                     }
                 }
                 .padding(.vertical, 40)
