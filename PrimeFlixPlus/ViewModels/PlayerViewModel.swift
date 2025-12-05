@@ -1,9 +1,11 @@
+// oligibbons/primeflixplus/PrimeFlixPlus-7315d01e01d1e889e041552206b1fb283d2eeb2d/PrimeFlixPlus/ViewModels/PlayerViewModel.swift
+
 import Foundation
 import Combine
 import SwiftUI
 import TVVLCKit
 
-@MainActor
+@MainActor // Ensure the whole class runs on Main Actor
 class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     // VLC Engine
@@ -29,6 +31,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     // Dependencies
     private var repository: PrimeFlixRepository?
     private var progressTimer: Timer?
+    private var controlHideTimer: Timer? // NEW: Use Timer for controls hiding
     
     // MARK: - Configuration
     
@@ -71,6 +74,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         self.isBuffering = true
         
         startProgressTracking()
+        triggerControls() // Show controls immediately on start
     }
     
     // MARK: - VLC Delegate Methods
@@ -82,6 +86,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             switch player.state {
             case .buffering:
                 self.isBuffering = true
+                self.triggerControls() // Keep controls visible during buffer
             case .playing:
                 // When we start playing, stop buffering and enable playback state
                 self.isBuffering = false
@@ -92,11 +97,17 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 if let len = player.media?.length, len.intValue > 0 {
                     self.duration = Double(len.intValue) / 1000.0
                 }
+                self.triggerControls() // Re-hide controls after playing starts
+            case .paused: // NEW: Handle paused state correctly
+                self.isPlaying = false
+                self.isBuffering = false
+                self.triggerControls(forceShow: true) // Keep controls visible when paused
             case .error:
                 self.reportError("Playback Error", reason: "Stream failed to load.")
             case .ended, .stopped:
                 self.isPlaying = false
                 self.isBuffering = false // Also clear buffering on stop/end
+                self.triggerControls(forceShow: true)
             default:
                 self.isBuffering = false // For any other non-buffering state, dismiss spinner
                 break
@@ -122,18 +133,29 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func togglePlayPause() {
         if vlcPlayer.isPlaying {
             vlcPlayer.pause()
-            isPlaying = false
+            // State will be updated via delegate call, which is safer
         } else {
             vlcPlayer.play()
-            isPlaying = true
+            // State will be updated via delegate call, which is safer
         }
-        triggerControls()
+        triggerControls(forceShow: true)
     }
     
-    func triggerControls() {
+    // UPDATED: Controls logic now uses Timer, and can be forced to stay visible
+    func triggerControls(forceShow: Bool = false) {
+        controlHideTimer?.invalidate() // Reset timer on any interaction
+        
         withAnimation { showControls = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-            if self.isPlaying { withAnimation { self.showControls = false } }
+        
+        // Only set the timer to hide if we're not explicitly forced to stay visible (e.g. paused)
+        if vlcPlayer.isPlaying && !forceShow {
+            controlHideTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
+                guard let self = self else { return }
+                withAnimation { self.showControls = false }
+            }
+        } else if !vlcPlayer.isPlaying {
+            // If paused or ended, keep controls visible indefinitely
+            withAnimation { showControls = true }
         }
     }
     
@@ -141,12 +163,13 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         guard let channel = currentChannel, let repo = repository else { return }
         repo.toggleFavorite(channel)
         self.isFavorite.toggle()
-        triggerControls()
+        triggerControls(forceShow: true)
     }
     
     func cleanup() {
         print("🛑 Cleaning up VLC")
         progressTimer?.invalidate()
+        controlHideTimer?.invalidate() // NEW: Invalidate controls timer
         if vlcPlayer.isPlaying { vlcPlayer.stop() }
         vlcPlayer.delegate = nil
         vlcPlayer.drawable = nil
@@ -161,7 +184,10 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             let pos = Int64(self.currentTime * 1000)
             let dur = Int64(self.duration * 1000)
             
-            if (pos > 10000 && dur > 0) || channel.type == "live" {
+            // Fix: VLC state can sometimes lag, check if it's playing via VLC state
+            let isVLCPlaying = self.vlcPlayer.isPlaying || self.vlcPlayer.state == .playing
+            
+            if (pos > 10000 && dur > 0 && isVLCPlaying) || channel.type == "live" {
                 Task { @MainActor in
                     repo.saveProgress(url: self.currentUrl, pos: pos, dur: dur)
                 }

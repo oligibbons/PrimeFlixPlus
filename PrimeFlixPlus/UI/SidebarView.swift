@@ -59,58 +59,62 @@ struct SidebarView: View {
                 .padding(.top, 50)
                 .padding(.bottom, 40)
                 
-                // 3. Navigation Items
-                VStack(spacing: 20) {
-                    ForEach(menuItems, id: \.destination.hashValue) { item in
-                        Button(action: {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                                currentSelection = item.destination
+                // 3. Navigation Items (FIXED: Wrapped in ScrollView and focusedSection)
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 20) {
+                        ForEach(menuItems, id: \.destination.hashValue) { item in
+                            Button(action: {
+                                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                                    currentSelection = item.destination
+                                }
+                            }) {
+                                HStack(spacing: 25) { // Increased spacing for cleaner text separation
+                                    // Icon Container (Fixed width ensures alignment)
+                                    ZStack {
+                                        Image(systemName: item.icon)
+                                            .font(.system(size: 24, weight: .semibold))
+                                            .foregroundColor(
+                                                focusedItem == item.destination ? .black :
+                                                currentSelection == item.destination ? CinemeltTheme.accent : .white.opacity(0.7)
+                                            )
+                                    }
+                                    .frame(width: 30, height: 30)
+                                    
+                                    // Label (Visible only when expanded)
+                                    if isExpanded {
+                                        Text(item.label)
+                                            .font(CinemeltTheme.fontBody(26))
+                                            .fontWeight(currentSelection == item.destination ? .bold : .medium)
+                                            .foregroundColor(
+                                                focusedItem == item.destination ? .black :
+                                                currentSelection == item.destination ? CinemeltTheme.cream : .white.opacity(0.7)
+                                            )
+                                            .lineLimit(1)
+                                            .transition(.opacity)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    // Active Indicator (Dot)
+                                    if currentSelection == item.destination && isExpanded {
+                                        Circle()
+                                            .fill(focusedItem == item.destination ? .black : CinemeltTheme.accent)
+                                            .frame(width: 8, height: 8)
+                                            .matchedGeometryEffect(id: "activeIndicator", in: animationNamespace)
+                                    }
+                                }
+                                // Inner padding of the button itself
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
                             }
-                        }) {
-                            HStack(spacing: 25) { // Increased spacing for cleaner text separation
-                                // Icon Container (Fixed width ensures alignment)
-                                ZStack {
-                                    Image(systemName: item.icon)
-                                        .font(.system(size: 24, weight: .semibold))
-                                        .foregroundColor(
-                                            focusedItem == item.destination ? .black :
-                                            currentSelection == item.destination ? CinemeltTheme.accent : .white.opacity(0.7)
-                                        )
-                                }
-                                .frame(width: 30, height: 30)
-                                
-                                // Label (Visible only when expanded)
-                                if isExpanded {
-                                    Text(item.label)
-                                        .font(CinemeltTheme.fontBody(26))
-                                        .fontWeight(currentSelection == item.destination ? .bold : .medium)
-                                        .foregroundColor(
-                                            focusedItem == item.destination ? .black :
-                                            currentSelection == item.destination ? CinemeltTheme.cream : .white.opacity(0.7)
-                                        )
-                                        .lineLimit(1)
-                                        .transition(.opacity)
-                                }
-                                
-                                Spacer()
-                                
-                                // Active Indicator (Dot)
-                                if currentSelection == item.destination && isExpanded {
-                                    Circle()
-                                        .fill(focusedItem == item.destination ? .black : CinemeltTheme.accent)
-                                        .frame(width: 8, height: 8)
-                                        .matchedGeometryEffect(id: "activeIndicator", in: animationNamespace)
-                                }
-                            }
-                            // Inner padding of the button itself
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
+                            .buttonStyle(SidebarButtonStyle(isSelected: currentSelection == item.destination))
+                            .focused($focusedItem, equals: item.destination)
                         }
-                        .buttonStyle(SidebarButtonStyle(isSelected: currentSelection == item.destination))
-                        .focused($focusedItem, equals: item.destination)
                     }
+                    .padding(.horizontal, 16) // Padding around the button stack
+                    // FIX: Explicitly set focus boundary for sidebar list
+                    .focusSection()
                 }
-                .padding(.horizontal, 16) // Padding around the button stack
                 
                 Spacer()
                 

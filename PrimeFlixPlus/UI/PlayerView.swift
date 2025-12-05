@@ -1,3 +1,5 @@
+// oligibbons/primeflixplus/PrimeFlixPlus-7315d01e01d1e889e041552206b1fb283d2eeb2d/PrimeFlixPlus/UI/PlayerView.swift
+
 import SwiftUI
 import TVVLCKit
 
@@ -17,9 +19,8 @@ struct PlayerView: View {
                 .ignoresSafeArea()
             
             // 2. Buffering State
-            // FIX: Only show the buffer overlay if buffering is true AND playback has NOT explicitly started.
-            // This prevents the buffer spinner from obscuring the video during minor, transient re-buffer events once a stream is established.
-            if viewModel.isBuffering && !viewModel.isPlaying {
+            // FIX: Only show the buffer overlay if buffering is true. isPlaying is unreliable right at start.
+            if viewModel.isBuffering {
                 ZStack {
                     Color.black.opacity(0.4)
                     VStack(spacing: 20) {
@@ -41,7 +42,8 @@ struct PlayerView: View {
             // 4. Controls
             controlsOverlay
         }
-        .onMoveCommand { _ in viewModel.triggerControls() }
+        // FIX: Use forceShow to keep controls visible on interaction
+        .onMoveCommand { _ in viewModel.triggerControls(forceShow: true) }
         .onPlayPauseCommand { viewModel.togglePlayPause() }
         .onExitCommand {
             viewModel.cleanup()
@@ -59,7 +61,8 @@ struct PlayerView: View {
     
     private var controlsOverlay: some View {
         ZStack {
-            if viewModel.showControls || !viewModel.isPlaying {
+            // FIX: showControls logic is now more robust in ViewModel
+            if viewModel.showControls {
                 LinearGradient(
                     colors: [.black.opacity(0.9), .clear, .black.opacity(0.9)],
                     startPoint: .top,
@@ -95,9 +98,9 @@ struct PlayerView: View {
                     
                     Spacer()
                     
-                    // Play Button
-                    if !viewModel.isPlaying && !viewModel.isBuffering {
-                        Image(systemName: "play.circle.fill")
+                    // Pause Indicator (Only show if not playing AND not buffering)
+                    if !viewModel.isPlaying && !viewModel.isBuffering && !viewModel.isError {
+                        Image(systemName: "pause.circle.fill") // CHANGED: Use pause icon for paused state
                             .font(.system(size: 150))
                             .foregroundColor(CinemeltTheme.accent.opacity(0.8))
                     }
