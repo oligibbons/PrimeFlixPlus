@@ -1,14 +1,14 @@
 import SwiftUI
 
 struct AddPlaylistView: View, Equatable {
-    // MARK: - Equatable (Stops Parent Redraws from killing Keyboard)
+    // MARK: - Equatable
     static func == (lhs: AddPlaylistView, rhs: AddPlaylistView) -> Bool {
-        return true // This view is static once presented; ignore external updates
+        return true
     }
     
     @StateObject private var viewModel = AddPlaylistViewModel()
     
-    // Dependency Injection (Not Observed Object) guarantees isolation
+    // Dependency Injection (Stable)
     let repository: PrimeFlixRepository
     
     var onPlaylistAdded: () -> Void
@@ -96,6 +96,7 @@ struct AddPlaylistView: View, Equatable {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
+                        
                         // --- INPUT: Server URL ---
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Server URL")
@@ -243,14 +244,9 @@ struct AddPlaylistView: View, Equatable {
             .shadow(color: .black.opacity(0.5), radius: 50, x: 0, y: 20)
         }
         .onAppear {
-            // Manual injection of repository
             viewModel.configure(repository: repository)
-            
-            // Only auto-focus if we haven't started typing yet
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                if self.focusedField == nil && viewModel.serverUrl.isEmpty {
-                    self.focusedField = .url
-                }
+                if self.focusedField == nil { self.focusedField = .url }
             }
         }
     }

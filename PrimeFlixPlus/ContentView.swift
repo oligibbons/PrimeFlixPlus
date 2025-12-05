@@ -45,20 +45,18 @@ enum NavigationDestination: Hashable {
 
 struct ContentView: View, Equatable {
     // MARK: - Equatable Conformance
-    // This stops the view from redrawing when the parent (App) redraws due to Sync updates.
+    // Stops this view from redrawing when parent (App) state changes
     static func == (lhs: ContentView, rhs: ContentView) -> Bool {
-        // Since 'repository' is a stable class reference, and we handle navigation internally via @State,
-        // we can safely say this view is equal to itself and should NOT be redrawn externally.
         return true
     }
     
     @State private var currentDestination: NavigationDestination = .home
     @State private var navigationStack: [NavigationDestination] = []
     
-    // Dependency Injection (Stable reference)
+    // Dependency Injection: Passed as 'let' to avoid observing changes
     let repository: PrimeFlixRepository
     
-    // Layout Constants must match SidebarView
+    // Layout Constants
     private let collapsedSidebarWidth: CGFloat = 100
     
     var body: some View {
@@ -121,7 +119,7 @@ struct ContentView: View, Equatable {
                     SettingsView(onBack: { goBack() })
                     
                 case .addPlaylist:
-                    // Double protection: AddPlaylistView is also Equatable
+                    // Using .equatable() + decoupled repository ensures this view remains stable
                     AddPlaylistView(
                         repository: repository,
                         onPlaylistAdded: {
