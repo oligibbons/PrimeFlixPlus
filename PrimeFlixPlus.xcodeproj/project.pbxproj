@@ -60,6 +60,12 @@
 		D2AC8B0D2EE1FB2F00D440C3 /* FavoritesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B0C2EE1FB2F00D440C3 /* FavoritesViewModel.swift */; };
 		D2AC8B0F2EE1FB4700D440C3 /* FavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B0E2EE1FB4700D440C3 /* FavoritesView.swift */; };
 		D2AC8B112EE22EAF00D440C3 /* ManageCategoriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B102EE22EAF00D440C3 /* ManageCategoriesView.swift */; };
+		D2AC8B1D2EE27D2A00D440C3 /* TVVLCKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B1B2EE27D1E00D440C3 /* TVVLCKit.xcframework */; };
+		D2AC8B1E2EE27D2A00D440C3 /* TVVLCKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B1B2EE27D1E00D440C3 /* TVVLCKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		D2AC8B232EE27D7A00D440C3 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B222EE27D7A00D440C3 /* AVFoundation.framework */; };
+		D2AC8B252EE27D8B00D440C3 /* VideoToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B242EE27D8A00D440C3 /* VideoToolbox.framework */; };
+		D2AC8B272EE27D9600D440C3 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B262EE27D9600D440C3 /* AudioToolbox.framework */; };
+		D2AC8B292EE281E800D440C3 /* .gitignore in Resources */ = {isa = PBXBuildFile; fileRef = D2AC8B282EE281E800D440C3 /* .gitignore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,6 +92,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
+				D2AC8B1E2EE27D2A00D440C3 /* TVVLCKit.xcframework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -151,6 +158,13 @@
 		D2AC8B0C2EE1FB2F00D440C3 /* FavoritesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesViewModel.swift; sourceTree = "<group>"; };
 		D2AC8B0E2EE1FB4700D440C3 /* FavoritesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesView.swift; sourceTree = "<group>"; };
 		D2AC8B102EE22EAF00D440C3 /* ManageCategoriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageCategoriesView.swift; sourceTree = "<group>"; };
+		D2AC8B1B2EE27D1E00D440C3 /* TVVLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = TVVLCKit.xcframework; sourceTree = "<group>"; };
+		D2AC8B202EE27D5800D440C3 /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
+		D2AC8B212EE27D6B00D440C3 /* libiconv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libiconv.tbd; path = usr/lib/libiconv.tbd; sourceTree = SDKROOT; };
+		D2AC8B222EE27D7A00D440C3 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		D2AC8B242EE27D8A00D440C3 /* VideoToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = VideoToolbox.framework; path = System/Library/Frameworks/VideoToolbox.framework; sourceTree = SDKROOT; };
+		D2AC8B262EE27D9600D440C3 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		D2AC8B282EE281E800D440C3 /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -158,6 +172,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D2AC8B232EE27D7A00D440C3 /* AVFoundation.framework in Frameworks */,
+				D2AC8B1D2EE27D2A00D440C3 /* TVVLCKit.xcframework in Frameworks */,
+				D2AC8B252EE27D8B00D440C3 /* VideoToolbox.framework in Frameworks */,
+				D2AC8B272EE27D9600D440C3 /* AudioToolbox.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -186,6 +204,7 @@
 				D292D6362EDF458300E8845A /* PrimeFlixPlusTests */,
 				D292D6402EDF458300E8845A /* PrimeFlixPlusUITests */,
 				D292D6242EDF458100E8845A /* Products */,
+				D2AC8B1F2EE27D5800D440C3 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -202,6 +221,7 @@
 		D292D6252EDF458100E8845A /* PrimeFlixPlus */ = {
 			isa = PBXGroup;
 			children = (
+				D2AC8B1B2EE27D1E00D440C3 /* TVVLCKit.xcframework */,
 				D2AC8B012EE14D5C00D440C3 /* Fonts */,
 				D292D67A2EDF4D9100E8845A /* UI */,
 				D292D6732EDF4C0900E8845A /* Components */,
@@ -215,6 +235,7 @@
 				D292D62A2EDF458300E8845A /* Assets.xcassets */,
 				D292D62C2EDF458300E8845A /* Preview Content */,
 				D228AD0C2EDF5C99007C6114 /* Info.plist */,
+				D2AC8B282EE281E800D440C3 /* .gitignore */,
 			);
 			path = PrimeFlixPlus;
 			sourceTree = "<group>";
@@ -346,6 +367,18 @@
 			path = Fonts;
 			sourceTree = "<group>";
 		};
+		D2AC8B1F2EE27D5800D440C3 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				D2AC8B262EE27D9600D440C3 /* AudioToolbox.framework */,
+				D2AC8B242EE27D8A00D440C3 /* VideoToolbox.framework */,
+				D2AC8B222EE27D7A00D440C3 /* AVFoundation.framework */,
+				D2AC8B212EE27D6B00D440C3 /* libiconv.tbd */,
+				D2AC8B202EE27D5800D440C3 /* libc++.tbd */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -437,6 +470,8 @@
 			mainGroup = D292D61A2EDF458100E8845A;
 			packageReferences = (
 				D2AC8B182EE2775800D440C3 /* XCRemoteSwiftPackageReference "vlckit-spm" */,
+				D2AC8B192EE278F500D440C3 /* XCRemoteSwiftPackageReference "vlckit-spm" */,
+				D2AC8B1A2EE27A5200D440C3 /* XCRemoteSwiftPackageReference "vlckit-spm" */,
 			);
 			productRefGroup = D292D6242EDF458100E8845A /* Products */;
 			projectDirPath = "";
@@ -454,6 +489,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D2AC8B292EE281E800D440C3 /* .gitignore in Resources */,
 				D292D62E2EDF458300E8845A /* Preview Assets.xcassets in Resources */,
 				D2AC8B052EE14DE100D440C3 /* Zain-Regular.ttf in Resources */,
 				D2AC8B042EE14DDD00D440C3 /* Zain-Bold.ttf in Resources */,
@@ -845,6 +881,22 @@
 
 /* Begin XCRemoteSwiftPackageReference section */
 		D2AC8B182EE2775800D440C3 /* XCRemoteSwiftPackageReference "vlckit-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/tylerjonesio/vlckit-spm";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+		D2AC8B192EE278F500D440C3 /* XCRemoteSwiftPackageReference "vlckit-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/tylerjonesio/vlckit-spm";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+		D2AC8B1A2EE27A5200D440C3 /* XCRemoteSwiftPackageReference "vlckit-spm" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/tylerjonesio/vlckit-spm";
 			requirement = {

@@ -1,0 +1,37 @@
+
+### Dependencies and Frameworks ###
+# Ignore the specific VLC package causing the issue
+TVVLCKit.xcframework
+
+# Standard Dependency Manager Ignores (if you use them)
+Pods/
+Carthage/Build/
+
+### Xcode and Build Files ###
+# Build outputs and logs
+build/
+DerivedData/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+*.mode2v3
+*.xcbkptlist
+*.xcuserstate
+
+# Project and Workspace settings (except for shared scheme files)
+xcuserdata/
+
+# Swift Package Manager
+.build/
+
+# Interface Builder and Asset Catalog caches
+*.ibns
+*.iws
+*.xccheckout
+*.xcscmblueprint
+*.xod
+!*.xcdatamodeld
+
+### macOS System Files ###
+.DS_Store
+.localized
