@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 import SwiftUI
-import TVVLCKit // Ensure this import works now
+import TVVLCKit
 
 @MainActor
 class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
@@ -83,19 +83,22 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             case .buffering:
                 self.isBuffering = true
             case .playing:
+                // When we start playing, stop buffering and enable playback state
                 self.isBuffering = false
                 self.isPlaying = true
                 self.isError = false
                 
                 // Update Duration
-                if let len = player.media.length, !len.isUnknown {
+                if let len = player.media?.length, len.intValue > 0 {
                     self.duration = Double(len.intValue) / 1000.0
                 }
             case .error:
                 self.reportError("Playback Error", reason: "Stream failed to load.")
             case .ended, .stopped:
                 self.isPlaying = false
+                self.isBuffering = false // Also clear buffering on stop/end
             default:
+                self.isBuffering = false // For any other non-buffering state, dismiss spinner
                 break
             }
         }
@@ -104,9 +107,8 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     nonisolated func mediaPlayerTimeChanged(_ aNotification: Notification!) {
         Task { @MainActor in
             guard let player = aNotification.object as? VLCMediaPlayer else { return }
-            if let time = player.time {
-                self.currentTime = Double(time.intValue) / 1000.0
-            }
+            let time = player.time
+            self.currentTime = Double(time.intValue) / 1000.0
         }
     }
     

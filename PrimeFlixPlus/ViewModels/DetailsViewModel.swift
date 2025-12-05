@@ -116,8 +116,8 @@ class DetailsViewModel: ObservableObject {
         
         let input = XtreamInput.decodeFromPlaylistUrl(sourceUrl)
         
-        // VLC FIX: Use raw extension
-        let streamUrl = "\(input.basicUrl)/movie/\(input.username)/\(input.password)/\(ep.id).\(ep.containerExtension)"
+        // FIX: Series episodes must use the correct /series/ endpoint path, not the /movie/ endpoint.
+        let streamUrl = "\(input.basicUrl)/series/\(input.username)/\(input.password)/\(ep.id).\(ep.containerExtension)"
         
         guard let context = channel.managedObjectContext else { return nil }
         let ch = Channel(context: context)
@@ -222,33 +222,46 @@ class DetailsViewModel: ObservableObject {
         let client = self.xtreamClient
         
         let result = await Task.detached(priority: .userInitiated) { () -> ([XtreamChannelInfo.Episode], [String: String], [Int]) in
+            // Create a local mutable copy of allEpisodes for the task context
             var allEpisodes: [(XtreamChannelInfo.Episode, String)] = []
+            
             await withTaskGroup(of: [(XtreamChannelInfo.Episode, String)].self) { group in
                 for vData in versionData {
+                    // Create an immutable copy of vData for the concurrent task
+                    let vDataCopy = vData
                     group.addTask {
-                        let input = XtreamInput.decodeFromPlaylistUrl(vData.playlistUrl)
-                        let seriesIdString = vData.url.replacingOccurrences(of: "series://", with: "")
+                        let input = XtreamInput.decodeFromPlaylistUrl(vDataCopy.playlistUrl)
+                        let seriesIdString = vDataCopy.url.replacingOccurrences(of: "series://", with: "")
                         guard let seriesId = Int(seriesIdString) else { return [] }
-                        return (try? await client.getSeriesEpisodes(input: input, seriesId: seriesId))?.map { ($0, vData.playlistUrl) } ?? []
+                        return (try? await client.getSeriesEpisodes(input: input, seriesId: seriesId))?.map { ($0, vDataCopy.playlistUrl) } ?? []
                     }
                 }
                 for await res in group { allEpisodes.append(contentsOf: res) }
             }
+            let safeAllEpisodes = allEpisodes
+            
             var uniqueEpisodes: [String: (XtreamChannelInfo.Episode, String)] = [:]
-            for (ep, source) in allEpisodes {
+            for (ep, source) in safeAllEpisodes {
                 let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
                 if uniqueEpisodes[key] == nil { uniqueEpisodes[key] = (ep, source) }
             }
             let finalEpisodes = uniqueEpisodes.values.map { $0.0 }
             let finalMap = uniqueEpisodes.mapValues { $0.1 }
             let finalSeasons = Set(finalEpisodes.map { $0.season }).sorted()
+            
             return (finalEpisodes, finalMap, finalSeasons)
         }.value
         
         self.xtreamEpisodes = result.0
         self.episodeSourceMap = result.1
         self.seasons = result.2.isEmpty ? [1] : result.2
-        if let first = self.seasons.first { await selectSeason(first) }
+        
+        // The inner logic of selectSeason is @MainActor isolated, so we run it on main.
+        await MainActor.run {
+            if let first = self.seasons.first {
+                Task { await self.selectSeason(first) }
+            }
+        }
     }
     
     func selectSeason(_ season: Int) async {
@@ -258,9 +271,12 @@ class DetailsViewModel: ObservableObject {
                 tmdbEpisodes[season] = seasonDetails.episodes
             }
         }
-        let merged = xtreamEpisodes.filter { $0.season == season }.sorted { $0.episodeNum < $1.episodeNum }.map { xEp in
+        
+        // FIX: Explicitly define the return type for the multi-statement closure
+        let merged = xtreamEpisodes.filter { $0.season == season }.sorted { $0.episodeNum < $1.episodeNum }.map { xEp -> MergedEpisode in
             let tEp = tmdbEpisodes[season]?.first(where: { $0.episodeNumber == xEp.episodeNum })
             let key = String(format: "S%02dE%02d", xEp.season, xEp.episodeNum)
+            
             return MergedEpisode(
                 id: xEp.id, number: xEp.episodeNum,
                 title: tEp?.name ?? xEp.title ?? "Episode \(xEp.episodeNum)",

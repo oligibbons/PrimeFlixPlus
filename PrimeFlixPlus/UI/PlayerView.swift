@@ -15,10 +15,11 @@ struct PlayerView: View {
             // 1. VLC Video Surface
             VLCVideoSurface(viewModel: viewModel)
                 .ignoresSafeArea()
-                .onTapGesture { viewModel.triggerControls() }
             
             // 2. Buffering State
-            if viewModel.isBuffering {
+            // FIX: Only show the buffer overlay if buffering is true AND playback has NOT explicitly started.
+            // This prevents the buffer spinner from obscuring the video during minor, transient re-buffer events once a stream is established.
+            if viewModel.isBuffering && !viewModel.isPlaying {
                 ZStack {
                     Color.black.opacity(0.4)
                     VStack(spacing: 20) {
