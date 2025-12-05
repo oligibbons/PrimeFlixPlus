@@ -16,7 +16,7 @@ struct DetailsView: View {
     @FocusState private var focusedField: FocusField?
     
     enum FocusField: Hashable {
-        case play, trailer, favorite, version, season(Int), episode(String)
+        case play, favorite, version, season(Int), episode(String)
     }
     
     var body: some View {
@@ -42,6 +42,7 @@ struct DetailsView: View {
         .task {
             await viewModel.loadData()
             
+            // Initial focus behavior
             if focusedField == nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     focusedField = .play
@@ -124,14 +125,14 @@ struct DetailsView: View {
                         .padding(.top, 10)
                 }
                 .padding(.horizontal, 80)
-                .focusSection() // Group Title/Meta as one focus block
+                .focusSection()
                 
                 // --- Buttons ---
                 actionButtons
                     .padding(.horizontal, 80)
-                    .focusSection() // CRITICAL: Allows navigating DOWN from here
+                    .focusSection()
                 
-                // --- Version Selector (New) ---
+                // --- Version Selector ---
                 if viewModel.availableVersions.count > 1 {
                     versionSelector
                         .padding(.horizontal, 80)
@@ -141,7 +142,7 @@ struct DetailsView: View {
                 // --- Cast ---
                 if !viewModel.cast.isEmpty {
                     castRail
-                        .focusSection() // CRITICAL: Allows navigating INTO this scroll view
+                        .focusSection()
                 }
                 
                 // --- Seasons/Episodes (Series Only) ---
@@ -193,6 +194,7 @@ struct DetailsView: View {
     
     private var actionButtons: some View {
         HStack(spacing: 30) {
+            // Play Button
             Button(action: {
                 if let playable = viewModel.getSmartPlayTarget() { onPlay(playable) }
             }) {
@@ -210,6 +212,7 @@ struct DetailsView: View {
             .buttonStyle(CinemeltCardButtonStyle())
             .focused($focusedField, equals: .play)
             
+            // Favorite Button
             Button(action: { viewModel.toggleFavorite() }) {
                 Image(systemName: viewModel.isFavorite ? "heart.fill" : "heart")
                     .font(.system(size: 30))

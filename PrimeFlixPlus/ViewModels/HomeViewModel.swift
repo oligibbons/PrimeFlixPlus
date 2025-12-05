@@ -18,7 +18,8 @@ struct HomeSection: Identifiable {
         case trending
         case recent
         case recommended
-        case genre(String)   // Stores the RAW group name (e.g. "NL | Disney")
+        case freshContent // New Type for "Your Fresh Content"
+        case genre(String)
         case provider(String)
         
         func hash(into hasher: inout Hasher) {
@@ -30,6 +31,7 @@ struct HomeSection: Identifiable {
             case .trending: hasher.combine("tr")
             case .recent: hasher.combine("rc")
             case .recommended: hasher.combine("rec")
+            case .freshContent: hasher.combine("fresh")
             }
         }
     }
@@ -108,7 +110,6 @@ class HomeViewModel: ObservableObject {
                 guard let self = self else { return }
                 if !isSyncing {
                     // Sync complete: invalidate cache and reload current tab
-                    print("🔄 Sync finished. Invalidating Home Cache.")
                     self.invalidateCache()
                 }
             }
@@ -199,13 +200,21 @@ class HomeViewModel: ObservableObject {
             await context.perform {
                 let readRepo = ChannelRepository(context: context)
                 
-                // History
+                // 1. Continue Watching (Priority #1)
                 let resume = readRepo.getSmartContinueWatching(type: tab.rawValue)
                 if !resume.isEmpty {
                     initialSections.append(HomeSection(title: "Continue Watching", type: .continueWatching, items: resume))
                 }
                 
-                // Trending
+                // 2. Your Fresh Content (Priority #2 - NEW)
+                if tab != .live {
+                    let fresh = readRepo.getFreshFranchiseContent(type: tab.rawValue)
+                    if !fresh.isEmpty {
+                        initialSections.append(HomeSection(title: "Your Fresh Content", type: .freshContent, items: fresh))
+                    }
+                }
+                
+                // 3. Trending Now
                 if !trendingIDs.isEmpty {
                     let trending = trendingIDs.compactMap { try? context.existingObject(with: $0) as? Channel }
                     if !trending.isEmpty {
@@ -213,13 +222,21 @@ class HomeViewModel: ObservableObject {
                     }
                 }
                 
-                // Favorites
+                // 4. Favorites
                 let favs = readRepo.getFavorites(type: tab.rawValue)
                 if !favs.isEmpty {
                     initialSections.append(HomeSection(title: "My List", type: .favorites, items: favs))
                 }
                 
-                // Recent
+                // 5. Recommended For You (Filtered by Locale)
+                if tab != .live {
+                    let recommended = readRepo.getRecommended(type: tab.rawValue)
+                    if !recommended.isEmpty {
+                        initialSections.append(HomeSection(title: "Recommended For You", type: .recommended, items: recommended))
+                    }
+                }
+                
+                // 6. Recently Added
                 if tab != .live {
                     let recent = readRepo.getRecentlyAdded(type: tab.rawValue, limit: 20)
                     if !recent.isEmpty {
@@ -227,7 +244,7 @@ class HomeViewModel: ObservableObject {
                     }
                 }
                 
-                // 3. Fetch ALL Group Names (Lightweight) to prepare for Pagination
+                // 7. Fetch ALL Group Names (Lightweight) to prepare for Pagination
                 allGroups = readRepo.getGroups(playlistUrl: playlistUrl, type: tab.rawValue)
             }
             
@@ -375,6 +392,9 @@ class HomeViewModel: ObservableObject {
             case .recommended:
                 self.drillDownCategory = "Recommended"
                 results = repo.getRecommended(type: type)
+            case .freshContent:
+                self.drillDownCategory = "Your Fresh Content"
+                results = section.items
             }
             
             await MainActor.run {

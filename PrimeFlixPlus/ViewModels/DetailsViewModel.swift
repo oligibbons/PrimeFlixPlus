@@ -77,6 +77,7 @@ class DetailsViewModel: ObservableObject {
         let channelRawTitle = channel.canonicalTitle ?? channel.title
         let channelType = channel.type
         
+        // 1. Load Versions in Background
         Task.detached(priority: .userInitiated) {
             let context = repo.container.newBackgroundContext()
             var versionIDs: [NSManagedObjectID] = []
@@ -90,6 +91,7 @@ class DetailsViewModel: ObservableObject {
             await MainActor.run { self.processVersions(versionIDs: safeIDs) }
         }
         
+        // 2. Parallel Fetch: TMDB Metadata & Xtream Series Data
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await self.fetchTmdbData(title: channelRawTitle, type: channelType) }
             if channelType == "series" { group.addTask { await self.fetchAggregatedSeriesData() } }
@@ -116,7 +118,7 @@ class DetailsViewModel: ObservableObject {
         
         let input = XtreamInput.decodeFromPlaylistUrl(sourceUrl)
         
-        // FIX: Series episodes must use the correct /series/ endpoint path, not the /movie/ endpoint.
+        // Ensure series uses correct endpoint
         let streamUrl = "\(input.basicUrl)/series/\(input.username)/\(input.password)/\(ep.id).\(ep.containerExtension)"
         
         guard let context = channel.managedObjectContext else { return nil }
@@ -127,7 +129,6 @@ class DetailsViewModel: ObservableObject {
         ch.playlistUrl = sourceUrl
         ch.cover = channel.cover
         
-        print("▶️ Series URL (VLC): \(streamUrl)")
         return ch
     }
     
@@ -191,29 +192,63 @@ class DetailsViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Smart TMDB Fetching (Improved)
+    
     private func fetchTmdbData(title: String, type: String) async {
         let info = TitleNormalizer.parse(rawTitle: title)
-        do {
-            if type == "series" {
-                let results = try await tmdbClient.searchTv(query: info.normalizedTitle, year: info.year)
-                if let first = results.first {
-                    let details = try await tmdbClient.getTvDetails(id: first.id)
-                    await MainActor.run { self.handleDetailsLoaded(details) }
+        
+        // STRATEGY: Define multiple attempts to maximize match rate.
+        // 1. Strict: Uses Normalized Title + Year (High precision)
+        // 2. Loose: Uses Normalized Title ONLY (Fixes wrong year in filename)
+        let searchStrategies: [(query: String, year: String?)] = [
+            (info.normalizedTitle, info.year),
+            (info.normalizedTitle, nil)
+        ]
+        
+        for (query, year) in searchStrategies {
+            // Skip invalid queries
+            if query.isEmpty { continue }
+            
+            do {
+                var foundId: Int?
+                
+                if type == "series" {
+                    let results = try await tmdbClient.searchTv(query: query, year: year)
+                    foundId = results.first?.id
+                } else {
+                    let results = try await tmdbClient.searchMovie(query: query, year: year)
+                    foundId = results.first?.id
                 }
-            } else {
-                let results = try await tmdbClient.searchMovie(query: info.normalizedTitle, year: info.year)
-                if let first = results.first {
-                    let details = try await tmdbClient.getMovieDetails(id: first.id)
-                    await MainActor.run { self.handleDetailsLoaded(details) }
+                
+                // If we found a match, fetch details and STOP searching.
+                if let id = foundId {
+                    if type == "series" {
+                        let details = try await tmdbClient.getTvDetails(id: id)
+                        await MainActor.run { self.handleDetailsLoaded(details) }
+                    } else {
+                        let details = try await tmdbClient.getMovieDetails(id: id)
+                        await MainActor.run { self.handleDetailsLoaded(details) }
+                    }
+                    return // Success!
                 }
+                
+            } catch {
+                print("⚠️ TMDB Search Attempt Failed for '\(query)' (Year: \(year ?? "None")): \(error.localizedDescription)")
             }
-        } catch { print("TMDB Error: \(error)") }
+        }
+        
+        print("❌ TMDB: No match found for '\(title)' after all strategies.")
     }
     
     private func handleDetailsLoaded(_ details: TmdbDetails) {
         self.tmdbDetails = details
         if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
         if let cast = details.aggregateCredits?.cast ?? details.credits?.cast { self.cast = cast.prefix(12).map { $0 } }
+        
+        // REFRESH EPISODES: If series data loaded *after* Xtream data, we need to re-merge to get metadata.
+        if channel.type == "series" {
+            Task { await self.selectSeason(self.selectedSeason) }
+        }
     }
     
     private func fetchAggregatedSeriesData() async {
@@ -222,12 +257,10 @@ class DetailsViewModel: ObservableObject {
         let client = self.xtreamClient
         
         let result = await Task.detached(priority: .userInitiated) { () -> ([XtreamChannelInfo.Episode], [String: String], [Int]) in
-            // Create a local mutable copy of allEpisodes for the task context
             var allEpisodes: [(XtreamChannelInfo.Episode, String)] = []
             
             await withTaskGroup(of: [(XtreamChannelInfo.Episode, String)].self) { group in
                 for vData in versionData {
-                    // Create an immutable copy of vData for the concurrent task
                     let vDataCopy = vData
                     group.addTask {
                         let input = XtreamInput.decodeFromPlaylistUrl(vDataCopy.playlistUrl)
@@ -238,10 +271,9 @@ class DetailsViewModel: ObservableObject {
                 }
                 for await res in group { allEpisodes.append(contentsOf: res) }
             }
-            let safeAllEpisodes = allEpisodes
             
             var uniqueEpisodes: [String: (XtreamChannelInfo.Episode, String)] = [:]
-            for (ep, source) in safeAllEpisodes {
+            for (ep, source) in allEpisodes {
                 let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
                 if uniqueEpisodes[key] == nil { uniqueEpisodes[key] = (ep, source) }
             }
@@ -256,7 +288,6 @@ class DetailsViewModel: ObservableObject {
         self.episodeSourceMap = result.1
         self.seasons = result.2.isEmpty ? [1] : result.2
         
-        // The inner logic of selectSeason is @MainActor isolated, so we run it on main.
         await MainActor.run {
             if let first = self.seasons.first {
                 Task { await self.selectSeason(first) }
@@ -266,19 +297,22 @@ class DetailsViewModel: ObservableObject {
     
     func selectSeason(_ season: Int) async {
         self.selectedSeason = season
+        
+        // Metadata Fetch: Ensure we have TMDB data for this season
         if tmdbEpisodes[season] == nil, let tmdbId = tmdbDetails?.id {
             if let seasonDetails = try? await tmdbClient.getTvSeason(tvId: tmdbId, seasonNumber: season) {
                 tmdbEpisodes[season] = seasonDetails.episodes
             }
         }
         
-        // FIX: Explicitly define the return type for the multi-statement closure
+        // Merge Logic: Combine Xtream (File) with TMDB (Metadata)
         let merged = xtreamEpisodes.filter { $0.season == season }.sorted { $0.episodeNum < $1.episodeNum }.map { xEp -> MergedEpisode in
             let tEp = tmdbEpisodes[season]?.first(where: { $0.episodeNumber == xEp.episodeNum })
             let key = String(format: "S%02dE%02d", xEp.season, xEp.episodeNum)
             
             return MergedEpisode(
-                id: xEp.id, number: xEp.episodeNum,
+                id: xEp.id,
+                number: xEp.episodeNum,
                 title: tEp?.name ?? xEp.title ?? "Episode \(xEp.episodeNum)",
                 overview: tEp?.overview ?? "",
                 imageUrl: tEp?.stillPath.map { URL(string: "https://image.tmdb.org/t/p/w500\($0)")! },
@@ -287,7 +321,10 @@ class DetailsViewModel: ObservableObject {
                 isWatched: false
             )
         }
-        self.displayedEpisodes = merged
+        
+        withAnimation {
+            self.displayedEpisodes = merged
+        }
     }
     
     func toggleFavorite() {
