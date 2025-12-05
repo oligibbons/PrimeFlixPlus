@@ -3,6 +3,17 @@ import CoreData
 import Combine
 import SwiftUI
 
+// MARK: - Sync Statistics Model
+struct SyncStats {
+    var moviesAdded: Int = 0
+    var seriesAdded: Int = 0
+    var liveChannelsAdded: Int = 0
+    var totalProcessed: Int = 0
+    var currentStage: String = "Initializing..."
+    
+    var totalItems: Int { moviesAdded + seriesAdded + liveChannelsAdded }
+}
+
 // Lightweight struct for diffing
 fileprivate struct ChannelSnapshot {
     let objectID: NSManagedObjectID
@@ -12,10 +23,15 @@ fileprivate struct ChannelSnapshot {
 @MainActor
 class PrimeFlixRepository: ObservableObject {
     
+    // --- State ---
     @Published var isSyncing: Bool = false
+    @Published var isInitialSync: Bool = false // True if this is a massive first-time load
     @Published var syncStatusMessage: String? = nil
     @Published var lastSyncDate: Date? = nil
     @Published var isErrorState: Bool = false
+    
+    // Real-time Feedback for Loading Screen
+    @Published var syncStats: SyncStats = SyncStats()
     
     internal let container: NSPersistentContainer
     
@@ -47,8 +63,8 @@ class PrimeFlixRepository: ObservableObject {
             try? context.save()
             
             Task.detached(priority: .userInitiated) {
-                // New playlist: Force immediate sync
-                await self.syncPlaylist(playlistTitle: title, playlistUrl: url, source: source, force: true)
+                // New playlist: Force immediate sync and mark as Initial
+                await self.syncPlaylist(playlistTitle: title, playlistUrl: url, source: source, force: true, isFirstTime: true)
             }
         }
     }
@@ -84,6 +100,11 @@ class PrimeFlixRepository: ObservableObject {
     func getGroups(playlistUrl: String, type: StreamType) -> [String] { return channelRepo.getGroups(playlistUrl: playlistUrl, type: type.rawValue) }
     func getBrowsingContent(playlistUrl: String, type: String, group: String) -> [Channel] { return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type, group: group) }
     func getTrendingMatches(type: String, tmdbResults: [String]) -> [Channel] { return channelRepo.getTrendingMatches(type: type, tmdbResults: tmdbResults) }
+    
+    // New Method for Live Search
+    func searchLiveContent(query: String) -> (categories: [String], channels: [Channel]) {
+        return channelRepo.searchLiveContent(query: query)
+    }
     
     func toggleFavorite(_ channel: Channel) {
         channelRepo.toggleFavorite(channel: channel)
@@ -135,7 +156,6 @@ class PrimeFlixRepository: ObservableObject {
     
     // MARK: - Smart Sync Logic
     
-    /// Global sync called on app launch. Respects cache timers.
     func syncAll(force: Bool = false) async {
         guard !isSyncing else { return }
         let playlists = getAllPlaylists()
@@ -143,23 +163,23 @@ class PrimeFlixRepository: ObservableObject {
         
         self.isSyncing = true
         self.isErrorState = false
+        self.syncStats = SyncStats() // Reset stats
         
         await Task.detached(priority: .background) { [weak self] in
             guard let self = self else { return }
             
             for playlist in playlists {
                 guard let source = DataSourceType(rawValue: playlist.source) else { continue }
-                // On launch (syncAll), we default to force=false so we can skip recent updates
-                await self.syncPlaylist(playlistTitle: playlist.title, playlistUrl: playlist.url, source: source, force: force)
+                await self.syncPlaylist(playlistTitle: playlist.title, playlistUrl: playlist.url, source: source, force: force, isFirstTime: false)
             }
             
             await MainActor.run {
                 if !self.isErrorState {
-                    // Only show "Done" if we actually did something visible, otherwise just go silent
                     if force || self.syncStatusMessage != nil {
                         self.syncStatusMessage = "Sync Complete"
                     }
                     self.lastSyncDate = Date()
+                    self.isInitialSync = false
                     Task {
                         try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
                         self.syncStatusMessage = nil
@@ -173,25 +193,26 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     /// The Core Sync Engine
-    /// - Parameters:
-    ///   - force: If true, ignores the time check and forces a network fetch.
-    nonisolated func syncPlaylist(playlistTitle: String, playlistUrl: String, source: DataSourceType, force: Bool) async {
-        // 1. Smart Cache Check
-        // isCacheFresh is now nonisolated, so we can call it synchronously here
+    nonisolated func syncPlaylist(playlistTitle: String, playlistUrl: String, source: DataSourceType, force: Bool, isFirstTime: Bool) async {
+        
         if !force && isCacheFresh(for: playlistUrl) {
             print("✅ [Sync] Skipping \(playlistTitle) - Cache is fresh (< 12 hours).")
             return
         }
         
         await MainActor.run {
-            self.syncStatusMessage = "Updating \(playlistTitle)..."
-            self.isSyncing = true // Ensure UI shows loading if we passed the check
+            self.syncStatusMessage = isFirstTime ? "Setting up \(playlistTitle)..." : "Checking for updates..."
+            self.isSyncing = true
+            self.isInitialSync = isFirstTime
+            self.syncStats.currentStage = "Connecting to server..."
         }
         
         let context = container.newBackgroundContext()
         context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
         
-        // 2. Snapshot Existing Data (Fast)
+        // 2. Snapshot Existing Data
+        await MainActor.run { self.syncStats.currentStage = "Analyzing local library..." }
+        
         var existingSnapshots: [String: ChannelSnapshot] = [:]
         
         await context.perform {
@@ -221,45 +242,63 @@ class PrimeFlixRepository: ObservableObject {
         do {
             var incomingStructs: [ChannelStruct] = []
             
+            await MainActor.run { self.syncStats.currentStage = "Downloading playlists..." }
+            
             // 3. Network Fetch & Parse
             if source == .xtream {
                 let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
                 let catMap = try await fetchXtreamCategoriesWithTimeout(input: input, timeoutSeconds: 30)
                 
-                // Fetch in parallel
                 async let live = xtreamClient.getLiveStreams(input: input)
                 async let vod = xtreamClient.getVodStreams(input: input)
                 async let series = xtreamClient.getSeries(input: input)
                 
                 let (liveItems, vodItems, seriesItems) = try await (live, vod, series)
                 
-                // Parse
-                incomingStructs.append(contentsOf: liveItems.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input, categoryMap: catMap) })
-                incomingStructs.append(contentsOf: vodItems.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input, categoryMap: catMap) })
-                incomingStructs.append(contentsOf: seriesItems.map { ChannelStruct.from($0, playlistUrl: playlistUrl, categoryMap: catMap) })
+                // Process & Count
+                await MainActor.run { self.syncStats.currentStage = "Processing content..." }
+                
+                let allLive = liveItems.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input, categoryMap: catMap) }
+                let allVod = vodItems.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input, categoryMap: catMap) }
+                let allSeries = seriesItems.map { ChannelStruct.from($0, playlistUrl: playlistUrl, categoryMap: catMap) }
+                
+                incomingStructs.append(contentsOf: allLive)
+                incomingStructs.append(contentsOf: allVod)
+                incomingStructs.append(contentsOf: allSeries)
+                
+                // Update Stats
+                await MainActor.run {
+                    self.syncStats.liveChannelsAdded = allLive.count
+                    self.syncStats.moviesAdded = allVod.count
+                    self.syncStats.seriesAdded = allSeries.count
+                }
                 
             } else if source == .m3u {
                 guard let url = URL(string: playlistUrl) else { throw URLError(.badURL) }
                 let (data, _) = try await UnsafeSession.shared.data(from: url)
                 if let content = String(data: data, encoding: .utf8) {
                     incomingStructs = await M3UParser.parse(content: content, playlistUrl: playlistUrl)
+                    await MainActor.run {
+                        self.syncStats.totalProcessed = incomingStructs.count
+                        self.syncStats.currentStage = "Sorting channels..."
+                    }
                 }
             }
             
-            // 4. Diffing Logic (The "Check against cache" part)
+            // 4. Diffing Logic
             var toInsert: [ChannelStruct] = []
             var toUpdate: [ChannelStruct] = []
+            
+            await MainActor.run { self.syncStats.currentStage = "Saving changes..." }
             
             for item in incomingStructs {
                 processedUrls.insert(item.url)
                 
                 if let existing = existingSnapshots[item.url] {
-                    // Only update if content (Title/Group) changed
                     if existing.contentHash != item.contentHash {
                         toUpdate.append(item)
                     }
                 } else {
-                    // New item
                     toInsert.append(item)
                 }
             }
@@ -277,12 +316,12 @@ class PrimeFlixRepository: ObservableObject {
                 try await performBatchUpdate(items: finalUpdates, existingSnapshots: existingSnapshots, context: context)
             }
             
-            // 6. Orphan Deletion (Remove items not in the new list)
+            // 6. Orphan Deletion
             let existingUrls = Set(existingSnapshots.keys)
             let orphans = existingUrls.subtracting(processedUrls)
             
             if !orphans.isEmpty {
-                await MainActor.run { self.syncStatusMessage = "Cleaning up..." }
+                await MainActor.run { self.syncStatusMessage = "Cleaning up \(orphans.count) old items..." }
                 try await performBatchDelete(urls: Array(orphans), playlistUrl: playlistUrl, context: context)
             }
             
@@ -299,34 +338,29 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     // MARK: - Nuclear Option
-    
     func nuclearResync(playlist: Playlist) async {
         guard let source = DataSourceType(rawValue: playlist.source) else { return }
         
         self.isSyncing = true
+        self.isInitialSync = true // Treat nuclear as initial
         self.syncStatusMessage = "Wiping Database..."
+        self.syncStats = SyncStats()
         
-        // 1. Wipe Data
         let bgContext = container.newBackgroundContext()
         await bgContext.perform {
             let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
             fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlist.url)
             let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
-            deleteReq.resultType = .resultTypeObjectIDs // Optional: Return IDs to merge changes
-            
-            // Execute Delete
+            deleteReq.resultType = .resultTypeObjectIDs
             try? bgContext.execute(deleteReq)
             try? bgContext.save()
             bgContext.reset()
         }
         
-        // 2. Clear Timestamp
         UserDefaults.standard.removeObject(forKey: "last_sync_\(playlist.url)")
         
-        // 3. Force Sync
-        // We use Task.detached to break out of any UI blocking, effectively restarting the process
         await Task.detached {
-            await self.syncPlaylist(playlistTitle: playlist.title, playlistUrl: playlist.url, source: source, force: true)
+            await self.syncPlaylist(playlistTitle: playlist.title, playlistUrl: playlist.url, source: source, force: true, isFirstTime: true)
             
             await MainActor.run {
                 self.syncStatusMessage = "Library Rebuilt"
@@ -334,36 +368,33 @@ class PrimeFlixRepository: ObservableObject {
                     try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
                     self.syncStatusMessage = nil
                     self.isSyncing = false
+                    self.isInitialSync = false
                 }
             }
         }.value
     }
     
-    // MARK: - Helpers & Batch Ops
+    // MARK: - Helpers
     
-    // Marked as nonisolated to allow calling from background/nonisolated contexts without await
     private nonisolated func isCacheFresh(for url: String) -> Bool {
         let key = "last_sync_\(url)"
         let lastSync = UserDefaults.standard.double(forKey: key)
-        if lastSync == 0 { return false } // Never synced
-        
+        if lastSync == 0 { return false }
         let date = Date(timeIntervalSince1970: lastSync)
-        // 12 Hour Threshold
         return Date().timeIntervalSince(date) < (12 * 60 * 60)
     }
     
-    // Marked as nonisolated for the same reason
     private nonisolated func markCacheAsFresh(for url: String) {
         let key = "last_sync_\(url)"
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)
     }
     
+    // Batch Ops (Identical to previous, omitted for brevity unless requested, but assume included)
     private func performBatchInsert(items: [ChannelStruct], context: NSManagedObjectContext) async throws {
-        let batchSize = 5000 // Increased batch size for speed
+        let batchSize = 5000
         let chunks = stride(from: 0, to: items.count, by: batchSize).map {
             Array(items[$0..<min($0 + batchSize, items.count)])
         }
-        
         await context.perform {
             for chunk in chunks {
                 let objects = chunk.map { $0.toDictionary() }
@@ -374,14 +405,11 @@ class PrimeFlixRepository: ObservableObject {
         }
         await MainActor.run { self.objectWillChange.send() }
     }
-    
+
     private func performBatchUpdate(items: [ChannelStruct], existingSnapshots: [String: ChannelSnapshot], context: NSManagedObjectContext) async throws {
         await context.perform {
             for item in items {
                 guard let snapshot = existingSnapshots[item.url] else { continue }
-                // Note: Batch Update Request is tricky with varied data.
-                // Standard fetch-update-save is safer for updates unless mass-updating a single property.
-                // We optimize by only updating the object we already have an ID for.
                 let obj = context.object(with: snapshot.objectID) as? Channel
                 obj?.title = item.title
                 obj?.group = item.group
@@ -392,13 +420,12 @@ class PrimeFlixRepository: ObservableObject {
             try? context.save()
         }
     }
-    
+
     private func performBatchDelete(urls: [String], playlistUrl: String, context: NSManagedObjectContext) async throws {
         let batchSize = 2000
         let chunks = stride(from: 0, to: urls.count, by: batchSize).map {
             Array(urls[$0..<min($0 + batchSize, urls.count)])
         }
-        
         await context.perform {
             for chunk in chunks {
                 let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
@@ -409,10 +436,9 @@ class PrimeFlixRepository: ObservableObject {
         }
         await MainActor.run { self.objectWillChange.send() }
     }
-    
+
     private func fetchXtreamCategoriesWithTimeout(input: XtreamInput, timeoutSeconds: Int) async throws -> [String: String] {
         await MainActor.run { self.syncStatusMessage = "Fetching Categories..." }
-        
         return await withTaskGroup(of: [String: String]?.self) { group in
             group.addTask {
                 var map: [String: String] = [:]

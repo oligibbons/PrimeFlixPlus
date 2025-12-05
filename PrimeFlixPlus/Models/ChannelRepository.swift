@@ -135,6 +135,46 @@ class ChannelRepository {
         )
     }
     
+    // MARK: - Live TV Internal Search (Added Feature)
+    
+    /// Searches specifically within Live TV content, returning matching categories and channels separately.
+    func searchLiveContent(query: String) -> (categories: [String], channels: [Channel]) {
+        guard !query.isEmpty else { return ([], []) }
+        
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // 1. Search Categories (Groups)
+        let groupRequest = NSFetchRequest<NSDictionary>(entityName: "Channel")
+        groupRequest.resultType = .dictionaryResultType
+        groupRequest.returnsDistinctResults = true
+        groupRequest.propertiesToFetch = ["group"]
+        // Search for groups containing the query, strictly for "live" type
+        groupRequest.predicate = NSPredicate(format: "type == 'live' AND group CONTAINS[cd] %@", normalizedQuery)
+        groupRequest.sortDescriptors = [NSSortDescriptor(key: "group", ascending: true)]
+        
+        var matchingGroups: [String] = []
+        
+        context.performAndWait {
+            if let results = try? context.fetch(groupRequest) {
+                matchingGroups = results.compactMap { $0["group"] as? String }
+            }
+        }
+        
+        // 2. Search Channels
+        let channelRequest = NSFetchRequest<Channel>(entityName: "Channel")
+        channelRequest.predicate = NSPredicate(format: "type == 'live' AND title CONTAINS[cd] %@", normalizedQuery)
+        channelRequest.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        channelRequest.fetchLimit = 50
+        
+        var matchingChannels: [Channel] = []
+        
+        context.performAndWait {
+            matchingChannels = (try? context.fetch(channelRequest)) ?? []
+        }
+        
+        return (matchingGroups, matchingChannels)
+    }
+    
     // MARK: - Smart "Continue Watching" Logic
     
     func getSmartContinueWatching(type: String) -> [Channel] {
@@ -244,8 +284,8 @@ class ChannelRepository {
             if !ch.title.localizedCaseInsensitiveContains(info.normalizedTitle) { return false }
             
             return title.contains("S\(sPadded)E\(ePadded)") ||
-                   title.contains("S\(season)E\(episode)") ||
-                   title.contains("\(season)X\(ePadded)")
+                title.contains("S\(season)E\(episode)") ||
+                title.contains("\(season)X\(ePadded)")
         }
     }
     
@@ -284,7 +324,7 @@ class ChannelRepository {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "type == %@ AND group CONTAINS[cd] %@", type, groupName)
         request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
-        request.fetchLimit = limit
+        if limit > 0 { request.fetchLimit = limit }
         
         guard let raw = try? context.fetch(request) else { return [] }
         return deduplicateChannels(raw)

@@ -4,10 +4,11 @@ struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @EnvironmentObject var repository: PrimeFlixRepository
     
+    // Updated Actions
     var onPlayChannel: (Channel) -> Void
     var onAddPlaylist: () -> Void
     var onSettings: () -> Void
-    var onSearch: () -> Void
+    var onSearch: (StreamType) -> Void // Now accepts the current tab type
     
     @State private var heroChannel: Channel?
     
@@ -47,10 +48,15 @@ struct HomeView: View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 10) {
                 
-                // Header
+                // Header (Now includes Search & Settings)
                 HomeHeaderView(
                     greeting: viewModel.timeGreeting,
-                    title: viewModel.witGreeting
+                    title: viewModel.witGreeting,
+                    onSearch: {
+                        // Pass the current active tab to the search view
+                        onSearch(viewModel.selectedTab)
+                    },
+                    onSettings: onSettings
                 )
                 
                 // Tabs
@@ -114,6 +120,10 @@ struct HomeBackgroundView: View {
 struct HomeHeaderView: View {
     let greeting: String
     let title: String
+    var onSearch: () -> Void
+    var onSettings: () -> Void
+    
+    @FocusState private var focusedButton: String?
     
     var body: some View {
         HStack(alignment: .bottom) {
@@ -128,6 +138,36 @@ struct HomeHeaderView: View {
                     .font(CinemeltTheme.fontTitle(60))
             }
             Spacer()
+            
+            // Action Buttons
+            HStack(spacing: 20) {
+                Button(action: onSearch) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.title2)
+                        .foregroundColor(focusedButton == "search" ? .black : CinemeltTheme.cream)
+                        .padding(15)
+                        .background(
+                            Circle()
+                                .fill(focusedButton == "search" ? CinemeltTheme.accent : Color.white.opacity(0.1))
+                        )
+                }
+                .buttonStyle(.card)
+                .focused($focusedButton, equals: "search")
+                
+                Button(action: onSettings) {
+                    Image(systemName: "gearshape.fill")
+                        .font(.title2)
+                        .foregroundColor(focusedButton == "settings" ? .black : CinemeltTheme.cream)
+                        .padding(15)
+                        .background(
+                            Circle()
+                                .fill(focusedButton == "settings" ? CinemeltTheme.accent : Color.white.opacity(0.1))
+                        )
+                }
+                .buttonStyle(.card)
+                .focused($focusedButton, equals: "settings")
+            }
+            .padding(.bottom, 10)
         }
         .padding(.top, 50)
         .padding(.horizontal, 80)
@@ -175,6 +215,10 @@ struct HomeFilterBar: View {
         .scaleEffect(focusedTab == type ? 1.1 : 1.0)
     }
 }
+
+// ... (Rest of the subviews like HomeLoadingState, HomeLanesView, HomeSectionRow, HomeDrillDownView, HomeProfileSelector remain unchanged)
+// For brevity, assuming they are present as provided in previous turns.
+// If you need the full file with *every* subview again, let me know, but the key changes were in HomeView and HomeHeaderView above.
 
 struct HomeLoadingState: View {
     var body: some View {

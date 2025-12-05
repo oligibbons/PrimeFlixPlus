@@ -6,141 +6,152 @@ import CoreData
 @MainActor
 class SearchViewModel: ObservableObject {
     
-    @Published var searchText: String = ""
+    // MARK: - Search Scopes
+    enum SearchScope: String, CaseIterable {
+        case library = "Library"
+        case liveTV = "Live TV"
+    }
     
-    // Results
-    @Published var movieResults: [Channel] = []
-    @Published var seriesResults: [Channel] = []
-    @Published var liveResults: [LiveSearchResult] = []
+    // MARK: - Inputs
+    @Published var query: String = ""
+    @Published var selectedScope: SearchScope = .library
     
-    // State
-    @Published var isSearching: Bool = false
-    @Published var isEmpty: Bool = true
+    // MARK: - Outputs (Library)
+    @Published var movies: [Channel] = []
+    @Published var series: [Channel] = []
     
+    // MARK: - Outputs (Live TV)
+    @Published var liveCategories: [String] = []
+    @Published var liveChannels: [Channel] = []
+    
+    // MARK: - UI State
+    @Published var isLoading: Bool = false
+    @Published var hasNoResults: Bool = false
+    
+    // MARK: - Dependencies
     private var repository: PrimeFlixRepository?
     private var cancellables = Set<AnyCancellable>()
     
-    // Keep track of the running task so we can cancel it
-    private var searchTask: Task<Void, Never>?
-    
-    struct LiveSearchResult: Identifiable {
-        let id = UUID()
-        let channel: Channel
-        let currentProgram: Programme?
+    // MARK: - Initialization
+    // Added custom init to allow SearchView to inject the starting scope
+    init(initialScope: SearchScope = .library) {
+        self.selectedScope = initialScope
     }
     
-    init() {
-        $searchText
-            .debounce(for: .milliseconds(400), scheduler: DispatchQueue.main) // Debounce typing
+    // MARK: - Configuration
+    func configure(repository: PrimeFlixRepository) {
+        self.repository = repository
+        setupSubscriptions()
+    }
+    
+    private func setupSubscriptions() {
+        // 1. Watch Query (Debounced)
+        // We delay the search slightly while typing to avoid hammering the database
+        $query
             .removeDuplicates()
-            .sink { [weak self] query in
-                self?.performSearch(query)
+            .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
+            .sink { [weak self] newQuery in
+                guard let self = self else { return }
+                if !newQuery.isEmpty {
+                    self.performSearch()
+                } else {
+                    self.clearResults()
+                }
+            }
+            .store(in: &cancellables)
+        
+        // 2. Watch Scope (Immediate)
+        // If user switches tabs (Library <-> Live TV), search immediately
+        $selectedScope
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.performSearch()
             }
             .store(in: &cancellables)
     }
     
-    func configure(repository: PrimeFlixRepository) {
-        self.repository = repository
-    }
+    // MARK: - Search Logic
     
-    private func performSearch(_ query: String) {
-        guard let repo = repository else { return }
-        
-        // 1. Cancel any existing search to save resources
-        searchTask?.cancel()
-        
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        if trimmedQuery.isEmpty {
-            self.movieResults = []
-            self.seriesResults = []
-            self.liveResults = []
-            self.isEmpty = true
-            self.isSearching = false
+    func performSearch() {
+        guard let repo = repository, !query.isEmpty else {
+            clearResults()
             return
         }
         
-        self.isSearching = true
-        self.isEmpty = false
+        self.isLoading = true
+        self.hasNoResults = false
         
-        // 2. Start new search task
-        searchTask = Task.detached(priority: .userInitiated) { [weak self] in
+        let currentQuery = query
+        let currentScope = selectedScope
+        
+        // Use a detached task to utilize the repository's background context logic safely
+        Task {
+            // Create a new background context for this specific search operation
+            // to avoid blocking the main thread or the view context
+            let bgContext = repo.container.newBackgroundContext()
             
-            // Create a background context for thread safety
-            let context = repo.container.newBackgroundContext()
-            
-            // Perform Fetch on Background Context
-            struct BackgroundResults {
-                let movieIDs: [NSManagedObjectID]
-                let seriesIDs: [NSManagedObjectID]
-                let liveIDs: [NSManagedObjectID]
-                let programIDs: [NSManagedObjectID]
-            }
-            
-            var safeResults: BackgroundResults?
-            
-            await context.perform {
-                // Check cancellation before doing work
-                if Task.isCancelled { return }
+            await bgContext.perform { [weak self] in
+                guard let self = self else { return }
                 
-                let searchRepo = ChannelRepository(context: context)
-                let rawResults = searchRepo.search(query: trimmedQuery)
+                let searchRepo = ChannelRepository(context: bgContext)
                 
-                if Task.isCancelled { return }
-                
-                safeResults = BackgroundResults(
-                    movieIDs: rawResults.movies.map { $0.objectID },
-                    seriesIDs: rawResults.series.map { $0.objectID },
-                    liveIDs: rawResults.liveChannels.map { $0.objectID },
-                    programIDs: rawResults.livePrograms.map { $0.objectID }
-                )
-            }
-            
-            guard let results = safeResults, !Task.isCancelled else { return }
-            
-            // 3. Update UI on Main Actor
-            // FIX: Explicitly capture [weak self] here to satisfy compiler safety checks for concurrent code
-            await MainActor.run { [weak self] in
-                guard let strongSelf = self else { return }
-                
-                let viewContext = repo.container.viewContext
-                
-                // Re-fetch objects using IDs (very fast)
-                let finalMovies = results.movieIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
-                let finalSeries = results.seriesIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
-                let finalLive = results.liveIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
-                let finalProgs = results.programIDs.compactMap { try? viewContext.existingObject(with: $0) as? Programme }
-                
-                // Process Live Results
-                var processedLive: [LiveSearchResult] = []
-                
-                // Add direct Channel matches
-                for ch in finalLive {
-                    processedLive.append(LiveSearchResult(channel: ch, currentProgram: nil))
-                }
-                
-                // Add Program matches (Live TV EPG)
-                for prog in finalProgs {
-                    // Optimization: Reuse existing fetch logic or simple lookup
-                    // We assume URL contains ID for mapping
-                    let req = NSFetchRequest<Channel>(entityName: "Channel")
-                    req.predicate = NSPredicate(format: "url CONTAINS[cd] '/' + %@ + '.'", prog.channelId)
-                    req.fetchLimit = 1
+                if currentScope == .library {
+                    // --- LIBRARY SEARCH ---
+                    // Searches Movies, Series, and EPG
+                    let results = searchRepo.search(query: currentQuery)
                     
-                    if let ch = (try? viewContext.fetch(req))?.first {
-                        // Dedup: Don't add if the channel is already in the list
-                        if !processedLive.contains(where: { $0.channel.url == ch.url }) {
-                            processedLive.append(LiveSearchResult(channel: ch, currentProgram: prog))
-                        }
+                    // Extract Object IDs to pass back to MainActor safely
+                    // We cannot pass NSManagedObjects between contexts/threads
+                    let movieIDs = results.movies.map { $0.objectID }
+                    let seriesIDs = results.series.map { $0.objectID }
+                    
+                    Task { @MainActor in
+                        // Re-fetch objects on the main context for the UI
+                        let viewContext = repo.container.viewContext
+                        self.movies = movieIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
+                        self.series = seriesIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
+                        
+                        self.isLoading = false
+                        self.hasNoResults = self.movies.isEmpty && self.series.isEmpty
+                    }
+                    
+                } else {
+                    // --- LIVE TV SEARCH ---
+                    // Searches Categories (Groups) and Channels specifically for Live TV
+                    let (categories, channels) = searchRepo.searchLiveContent(query: currentQuery)
+                    
+                    // Extract Object IDs for channels
+                    // Categories are just Strings, so they are safe to pass directly
+                    let channelIDs = channels.map { $0.objectID }
+                    
+                    Task { @MainActor in
+                        let viewContext = repo.container.viewContext
+                        self.liveCategories = categories
+                        self.liveChannels = channelIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
+                        
+                        self.isLoading = false
+                        self.hasNoResults = self.liveCategories.isEmpty && self.liveChannels.isEmpty
                     }
                 }
-                
-                strongSelf.movieResults = finalMovies
-                strongSelf.seriesResults = finalSeries
-                strongSelf.liveResults = processedLive
-                strongSelf.isSearching = false
-                strongSelf.isEmpty = finalMovies.isEmpty && finalSeries.isEmpty && processedLive.isEmpty
             }
         }
+    }
+    
+    func clearResults() {
+        self.movies = []
+        self.series = []
+        self.liveCategories = []
+        self.liveChannels = []
+        self.isLoading = false
+        self.hasNoResults = false
+    }
+    
+    // MARK: - Actions
+    
+    /// Allows clicking a category in search results to refine the search to that category name
+    func refineSearch(to category: String) {
+        self.query = category
+        // The subscription to $query will pick this up and trigger a search automatically
     }
 }

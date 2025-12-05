@@ -1,115 +1,96 @@
 import SwiftUI
 
 struct SearchView: View {
-    @StateObject private var viewModel = SearchViewModel()
+    @StateObject private var viewModel: SearchViewModel
     @EnvironmentObject var repository: PrimeFlixRepository
     
     var onPlay: (Channel) -> Void
+    var onBack: () -> Void
     
-    // Internal focus for the search field to grab attention on appear
     @FocusState private var isSearchFieldFocused: Bool
+    @FocusState private var focusedScope: SearchViewModel.SearchScope?
+    
+    let channelGridColumns = [
+        GridItem(.adaptive(minimum: 220, maximum: 260), spacing: 40)
+    ]
+    
+    // MARK: - Initializer
+    init(initialScope: SearchViewModel.SearchScope = .library, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
+        self._viewModel = StateObject(wrappedValue: SearchViewModel(initialScope: initialScope))
+        self.onPlay = onPlay
+        self.onBack = onBack
+    }
     
     var body: some View {
         ZStack {
-            // 1. Global Cinematic Background
-            CinemeltTheme.mainBackground
+            CinemeltTheme.mainBackground.ignoresSafeArea()
             
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 
-                // 2. The Floating Search Header (Compact)
-                // DIRECT TEXT FIELD IMPLEMENTATION (Fixes Focus Trap)
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Search Library")
-                        .font(CinemeltTheme.fontBody(20))
-                        .fontWeight(.bold)
-                        .foregroundColor(isSearchFieldFocused ? CinemeltTheme.accent : .gray)
-                        .padding(.leading, 4)
-                        .animation(.easeInOut(duration: 0.2), value: isSearchFieldFocused)
-                    
-                    TextField("Find movies, series, channels...", text: $viewModel.searchText)
-                        .font(CinemeltTheme.fontBody(26))
-                        .focused($isSearchFieldFocused)
-                        .submitLabel(.done)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 16)
-                        .background(Color.white.opacity(0.08))
-                        .cornerRadius(16)
-                        // Neon Border Effect
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(
-                                    isSearchFieldFocused ? CinemeltTheme.accent : Color.white.opacity(0.1),
-                                    lineWidth: isSearchFieldFocused ? 2 : 1
-                                )
-                        )
-                        // Bloom Effect
-                        .shadow(
-                            color: isSearchFieldFocused ? CinemeltTheme.accent.opacity(0.4) : .clear,
-                            radius: 15, x: 0, y: 0
-                        )
-                        .scaleEffect(isSearchFieldFocused ? 1.02 : 1.0)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isSearchFieldFocused)
-                }
-                .frame(maxWidth: 600)
-                .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10)
-                .padding(.vertical, 20)
-                .background(
-                    LinearGradient(
-                        colors: [CinemeltTheme.charcoal, CinemeltTheme.charcoal, CinemeltTheme.charcoal.opacity(0)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .ignoresSafeArea()
-                )
-                .zIndex(10)
-                
-                // 3. Results Area
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 40) {
+                // MARK: - Header & Input
+                VStack(spacing: 25) {
+                    HStack(spacing: 20) {
+                        Button(action: onBack) {
+                            Image(systemName: "arrow.left")
+                                .font(.title2)
+                                .foregroundColor(CinemeltTheme.cream)
+                                .padding(12)
+                                .background(Color.white.opacity(0.1))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.card)
                         
-                        if viewModel.isSearching {
+                        GlassTextField(
+                            text: $viewModel.query,
+                            placeholder: viewModel.selectedScope == .library ? "Search movies & series..." : "Search channels & categories...",
+                            icon: "magnifyingglass"
+                        )
+                        .focused($isSearchFieldFocused)
+                        .submitLabel(.search)
+                    }
+                    
+                    // Scope Picker
+                    Picker("Search Scope", selection: $viewModel.selectedScope) {
+                        ForEach(SearchViewModel.SearchScope.allCases, id: \.self) { scope in
+                            Text(scope.rawValue).tag(scope)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 500)
+                    .focused($focusedScope, equals: viewModel.selectedScope)
+                }
+                .padding(.horizontal, 50)
+                .padding(.top, 40)
+                .padding(.bottom, 40)
+                .background(
+                    LinearGradient(colors: [Color.black.opacity(0.8), Color.clear], startPoint: .top, endPoint: .bottom)
+                )
+                
+                // MARK: - Results
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 50) {
+                        
+                        if viewModel.isLoading {
                             HStack {
                                 Spacer()
-                                VStack(spacing: 20) {
-                                    ProgressView()
-                                        .tint(CinemeltTheme.accent)
-                                        .scaleEffect(2.0)
-                                    Text("Searching...")
-                                        .cinemeltBody()
-                                }
+                                ProgressView().tint(CinemeltTheme.accent).scaleEffect(2.0)
                                 Spacer()
                             }
                             .padding(.top, 100)
-                            
-                        } else if !viewModel.isEmpty {
-                            
-                            // Movies
-                            if !viewModel.movieResults.isEmpty {
-                                ResultSection(title: "Movies", items: viewModel.movieResults, onPlay: onPlay)
-                            }
-                            
-                            // Series
-                            if !viewModel.seriesResults.isEmpty {
-                                ResultSection(title: "Series", items: viewModel.seriesResults, onPlay: onPlay)
-                            }
-                            
-                            // Live TV
-                            if !viewModel.liveResults.isEmpty {
-                                LiveResultSection(items: viewModel.liveResults, onPlay: onPlay)
-                            }
-                            
-                        } else if viewModel.searchText.isEmpty {
-                            // Idle State
-                            emptyStateView(icon: "magnifyingglass", text: "Start typing to explore...")
+                        } else if viewModel.query.isEmpty {
+                            emptyStateView
+                        } else if viewModel.hasNoResults {
+                            noResultsView
                         } else {
-                            // No Results
-                            emptyStateView(icon: "exclamationmark.magnifyingglass", text: "No results found.")
+                            if viewModel.selectedScope == .library {
+                                libraryResults
+                            } else {
+                                liveTvResults
+                            }
                         }
                     }
+                    .padding(.horizontal, 50)
                     .padding(.bottom, 100)
-                    .padding(.top, 20)
-                    // CRITICAL FIX: This enables diagonal navigation across rows of different lengths
-                    .focusSection()
                 }
             }
         }
@@ -121,28 +102,123 @@ struct SearchView: View {
         }
     }
     
-    // MARK: - Components
+    // MARK: - View Components
     
-    private func emptyStateView(icon: String, text: String) -> some View {
+    private var emptyStateView: some View {
         HStack {
             Spacer()
             VStack(spacing: 20) {
-                Image(systemName: icon)
-                    .font(.system(size: 100))
-                    .foregroundColor(CinemeltTheme.accent.opacity(0.2))
-                    .shadow(color: CinemeltTheme.accent.opacity(0.2), radius: 20)
-                
-                Text(text)
-                    .font(CinemeltTheme.fontTitle(32))
-                    .foregroundColor(CinemeltTheme.cream.opacity(0.5))
+                Image(systemName: "sparkle.magnifyingglass")
+                    .font(.system(size: 80))
+                    .foregroundColor(CinemeltTheme.accent.opacity(0.3))
+                Text("What are we watching?")
+                    .font(CinemeltTheme.fontTitle(36))
+                    .foregroundColor(CinemeltTheme.cream)
+                Text("Search for content across your library.")
+                    .font(CinemeltTheme.fontBody(20))
+                    .foregroundColor(.gray)
             }
-            .offset(y: 100)
             Spacer()
+        }
+        .padding(.top, 100)
+    }
+    
+    private var noResultsView: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 15) {
+                Image(systemName: "exclamationmark.magnifyingglass")
+                    .font(.system(size: 60))
+                    .foregroundColor(.gray)
+                Text("No matches found")
+                    .font(CinemeltTheme.fontTitle(28))
+                    .foregroundColor(CinemeltTheme.cream)
+            }
+            Spacer()
+        }
+        .padding(.top, 80)
+    }
+    
+    @ViewBuilder
+    private var libraryResults: some View {
+        if !viewModel.movies.isEmpty {
+            ResultSection(title: "Movies", items: viewModel.movies, onPlay: onPlay)
+        }
+        if !viewModel.series.isEmpty {
+            ResultSection(title: "Series", items: viewModel.series, onPlay: onPlay)
+        }
+    }
+    
+    @ViewBuilder
+    private var liveTvResults: some View {
+        if !viewModel.liveCategories.isEmpty {
+            VStack(alignment: .leading, spacing: 15) {
+                Text("Matching Categories")
+                    .font(CinemeltTheme.fontTitle(28))
+                    .foregroundColor(CinemeltTheme.accent)
+                    .padding(.leading, 10)
+                
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 20) {
+                        ForEach(viewModel.liveCategories, id: \.self) { category in
+                            Button(action: {
+                                withAnimation { viewModel.refineSearch(to: category) }
+                            }) {
+                                Text(category)
+                                    .font(CinemeltTheme.fontBody(20))
+                                    .fontWeight(.medium)
+                                    .foregroundColor(CinemeltTheme.cream)
+                                    .padding(.horizontal, 24)
+                                    .padding(.vertical, 12)
+                                    .background(Color.white.opacity(0.1))
+                                    .cornerRadius(12)
+                            }
+                            .buttonStyle(.card)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 20)
+                }
+            }
+        }
+        
+        if !viewModel.liveChannels.isEmpty {
+            VStack(alignment: .leading, spacing: 25) {
+                Text("Channels")
+                    .font(CinemeltTheme.fontTitle(32))
+                    .foregroundColor(CinemeltTheme.cream)
+                    .cinemeltGlow()
+                
+                LazyVGrid(columns: channelGridColumns, spacing: 50) {
+                    ForEach(viewModel.liveChannels) { channel in
+                        VStack(spacing: 15) {
+                            AsyncImage(url: URL(string: channel.logo ?? "")) { image in
+                                image.resizable().aspectRatio(contentMode: .fit)
+                            } placeholder: {
+                                Image(systemName: "tv").font(.system(size: 40)).foregroundColor(.gray.opacity(0.3))
+                            }
+                            .frame(width: 120, height: 120)
+                            .background(Color.white.opacity(0.05))
+                            .cornerRadius(20)
+                            .shadow(radius: 5)
+                            
+                            Text(channel.title)
+                                .font(CinemeltTheme.fontBody(18))
+                                .foregroundColor(CinemeltTheme.cream)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                        }
+                        .focusable(true)
+                        .padding(10)
+                        .buttonStyle(.card)
+                        .onTapGesture { onPlay(channel) }
+                    }
+                }
+                .padding(.bottom, 40)
+            }
         }
     }
 }
-
-// MARK: - Subviews
 
 struct ResultSection: View {
     let title: String
@@ -151,130 +227,16 @@ struct ResultSection: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
-            Text(title)
-                .font(CinemeltTheme.fontTitle(36))
-                .foregroundColor(CinemeltTheme.cream)
-                .cinemeltGlow()
-                .padding(.leading, 60)
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 60) {
-                    ForEach(items) { channel in
-                        MovieCard(channel: channel) {
-                            onPlay(channel)
-                        }
-                    }
-                }
-                .padding(.horizontal, 60)
-                .padding(.vertical, 60)
-            }
-        }
-    }
-}
-
-struct LiveResultSection: View {
-    let items: [SearchViewModel.LiveSearchResult]
-    let onPlay: (Channel) -> Void
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Live TV & Events")
-                .font(CinemeltTheme.fontTitle(36))
-                .foregroundColor(CinemeltTheme.cream)
-                .cinemeltGlow()
-                .padding(.leading, 60)
-            
+            Text(title).font(CinemeltTheme.fontTitle(32)).foregroundColor(CinemeltTheme.cream)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 40) {
                     ForEach(items) { item in
-                        LiveSearchCard(item: item) {
-                            onPlay(item.channel)
-                        }
+                        MovieCard(channel: item, onClick: { onPlay(item) }, onFocus: { _ in })
                     }
                 }
-                .padding(.horizontal, 60)
-                .padding(.vertical, 60)
+                .padding(.vertical, 40)
+                .padding(.horizontal, 20)
             }
         }
-    }
-}
-
-struct LiveSearchCard: View {
-    let item: SearchViewModel.LiveSearchResult
-    let onClick: () -> Void
-    
-    @FocusState private var isFocused: Bool
-    
-    var body: some View {
-        Button(action: onClick) {
-            VStack(spacing: 0) {
-                ZStack {
-                    AsyncImage(url: URL(string: item.channel.cover ?? "")) { img in
-                        img.resizable().aspectRatio(contentMode: .fit)
-                    } placeholder: {
-                        Image(systemName: "tv").font(.largeTitle).foregroundColor(CinemeltTheme.accent.opacity(0.5))
-                    }
-                }
-                .padding(20)
-                .frame(width: 280, height: 160)
-                .background(Color.white.opacity(0.05))
-                
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(item.channel.title)
-                            .font(CinemeltTheme.fontBody(22))
-                            .fontWeight(.bold)
-                            .foregroundColor(isFocused ? .black : CinemeltTheme.cream)
-                            .lineLimit(1)
-                        Spacer()
-                    }
-                    
-                    if let prog = item.currentProgram {
-                        Text("ON NOW: \(prog.title)")
-                            .font(CinemeltTheme.fontBody(18))
-                            .fontWeight(.bold)
-                            .foregroundColor(isFocused ? .black.opacity(0.8) : CinemeltTheme.accent)
-                            .lineLimit(1)
-                        
-                        HStack {
-                            Text("\(formatTime(prog.start)) - \(formatTime(prog.end))")
-                                .font(CinemeltTheme.fontBody(16))
-                                .foregroundColor(isFocused ? .black.opacity(0.6) : .gray)
-                            
-                            Spacer()
-                            if prog.isLiveNow {
-                                Capsule()
-                                    .fill(CinemeltTheme.accent)
-                                    .frame(width: 60, height: 4)
-                            }
-                        }
-                    } else {
-                        Text("LIVE STREAM")
-                            .font(CinemeltTheme.fontBody(16))
-                            .foregroundColor(.gray)
-                            .padding(.top, 4)
-                    }
-                }
-                .padding(16)
-                .frame(width: 280, alignment: .leading)
-                .background(isFocused ? CinemeltTheme.accent : CinemeltTheme.backgroundEnd.opacity(0.8))
-            }
-            .frame(width: 280)
-        }
-        .buttonStyle(CinemeltCardButtonStyle())
-        .focused($isFocused)
-        .cornerRadius(16)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(isFocused ? Color.white.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
-        )
-        .scaleEffect(isFocused ? 1.1 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isFocused)
-    }
-    
-    private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
     }
 }

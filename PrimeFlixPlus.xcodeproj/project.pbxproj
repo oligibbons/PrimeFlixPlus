@@ -66,6 +66,7 @@
 		D2AC8B252EE27D8B00D440C3 /* VideoToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B242EE27D8A00D440C3 /* VideoToolbox.framework */; };
 		D2AC8B272EE27D9600D440C3 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B262EE27D9600D440C3 /* AudioToolbox.framework */; };
 		D2AC8B292EE281E800D440C3 /* .gitignore in Resources */ = {isa = PBXBuildFile; fileRef = D2AC8B282EE281E800D440C3 /* .gitignore */; };
+		D2AC8B2B2EE382B700D440C3 /* SmartLoadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B2A2EE382B700D440C3 /* SmartLoadingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -165,6 +166,7 @@
 		D2AC8B242EE27D8A00D440C3 /* VideoToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = VideoToolbox.framework; path = System/Library/Frameworks/VideoToolbox.framework; sourceTree = SDKROOT; };
 		D2AC8B262EE27D9600D440C3 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		D2AC8B282EE281E800D440C3 /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
+		D2AC8B2A2EE382B700D440C3 /* SmartLoadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartLoadingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -354,6 +356,7 @@
 				D2AC8B0A2EE1FB0000D440C3 /* ContinueWatchingView.swift */,
 				D2AC8B0E2EE1FB4700D440C3 /* FavoritesView.swift */,
 				D2AC8B102EE22EAF00D440C3 /* ManageCategoriesView.swift */,
+				D2AC8B2A2EE382B700D440C3 /* SmartLoadingView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -534,6 +537,7 @@
 				D228AD0B2EDF5A22007C6114 /* Persistence.swift in Sources */,
 				D292D66F2EDF4B4100E8845A /* PrimeFlixRepository.swift in Sources */,
 				D292D6842EDF576500E8845A /* PlayerView.swift in Sources */,
+				D2AC8B2B2EE382B700D440C3 /* SmartLoadingView.swift in Sources */,
 				D292D6562EDF464100E8845A /* XtreamInput.swift in Sources */,
 				D292D6822EDF573F00E8845A /* PlayerViewModel.swift in Sources */,
 				D228AD112EDF6682007C6114 /* AddPlaylistViewModel.swift in Sources */,

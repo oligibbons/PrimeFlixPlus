@@ -1,42 +1,87 @@
 import SwiftUI
 
 struct SplashView: View {
-    @State private var isAnimating = false
+    @StateObject private var repository = PrimeFlixRepository(container: PersistenceController.shared.container)
+    @State private var isActive: Bool = false
+    @State private var showSmartLoading: Bool = false
     
     var body: some View {
         ZStack {
-            // 1. Cinematic Background
-            CinemeltTheme.mainBackground
-            
-            VStack(spacing: 40) {
-                // 2. Pulsing Logo
-                // Ensure "CinemeltLogo" exists in Assets, or this will just be empty (but won't crash)
-                Image("CinemeltLogo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 350, height: 350)
-                    .scaleEffect(isAnimating ? 1.05 : 1.0)
-                    // Deep Amber Shadow for atmosphere
-                    .shadow(color: CinemeltTheme.accent.opacity(0.6), radius: isAnimating ? 60 : 30)
-                    .animation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true), value: isAnimating)
-                
-                // 3. Brand Text
-                Text("CINEMELT")
-                    .font(CinemeltTheme.fontTitle(80))
-                    .foregroundColor(CinemeltTheme.cream)
-                    .cinemeltGlow()
-                    .opacity(isAnimating ? 1 : 0.8)
-                    .animation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true), value: isAnimating)
-                
-                // 4. Loader
-                ProgressView()
-                    .tint(CinemeltTheme.accent)
-                    .scaleEffect(2.0)
-                    .padding(.top, 40)
+            if isActive {
+                if repository.getAllPlaylists().isEmpty {
+                    AddPlaylistView()
+                        .environmentObject(repository)
+                } else {
+                    if showSmartLoading {
+                        SmartLoadingView()
+                            .environmentObject(repository)
+                            .transition(.opacity)
+                    } else {
+                        HomeView(
+                            onPlayChannel: { _ in }, // Handled internally by HomeView usually
+                            onAddPlaylist: {}, // Handled by HomeView state
+                            onSettings: {},
+                            onSearch: {}
+                        )
+                        .environmentObject(repository)
+                        .transition(.opacity)
+                    }
+                }
+            } else {
+                // Logo Splash
+                ZStack {
+                    CinemeltTheme.mainBackground.ignoresSafeArea()
+                    
+                    Image("CinemeltLogo") // Ensure this exists in Assets
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 400)
+                        .cinemeltGlow()
+                }
             }
         }
         .onAppear {
-            isAnimating = true
+            // 1. Kick off the smart sync immediately
+            // This is non-blocking and runs on a background thread
+            Task {
+                await repository.syncAll(force: false)
+            }
+            
+            // 2. Handle UI Transition
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                withAnimation {
+                    self.isActive = true
+                }
+                
+                // 3. Check if we need the Smart Loading Screen
+                checkSyncStatus()
+            }
+        }
+    }
+    
+    private func checkSyncStatus() {
+        // Monitor the repository state
+        // If it's an initial huge sync, keep showing the loading screen
+        // We check periodically
+        
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
+            // Access state safely
+            if repository.isInitialSync {
+                withAnimation { self.showSmartLoading = true }
+            } else {
+                // Once initial sync is done, or if it was never needed (cached), go to Home
+                if self.showSmartLoading {
+                    // If we were showing it, fade it out
+                    withAnimation(.easeOut(duration: 1.0)) {
+                        self.showSmartLoading = false
+                    }
+                }
+                
+                // If we aren't syncing anymore, stop checking
+                if !repository.isSyncing {
+                    timer.invalidate()
+                }
+            }
         }
     }
 }
