@@ -199,6 +199,28 @@ class SettingsViewModel: ObservableObject {
         URLCache.shared.removeAllCachedResponses()
     }
     
+    // MARK: - Sync Actions
+    
+    /// Standard Update: Checks for new content on server (incremental).
+    /// Forces a network check, bypassing the 12-hour cache rule.
+    func forceUpdate() {
+        Task {
+            await repository?.syncAll(force: true)
+        }
+    }
+    
+    /// Nuclear Option: Wipes DB and redownloads everything for all playlists.
+    func nuclearResync() {
+        guard let repo = repository else { return }
+        
+        Task {
+            // Iterate sequentially or in parallel; sequential is safer for DB locks
+            for playlist in playlists {
+                await repo.nuclearResync(playlist: playlist)
+            }
+        }
+    }
+    
     // MARK: - Auto-Hide Logic
     
     /// Scans all known categories and hides those that do not match the preferred language.

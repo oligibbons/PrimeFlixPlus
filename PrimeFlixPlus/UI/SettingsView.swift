@@ -46,7 +46,7 @@ struct SettingsView: View {
                 Spacer()
                 
                 // Version Info
-                Text("PrimeFlix v1.2")
+                Text("Cinemelt v1.2")
                     .font(CinemeltTheme.fontBody(18))
                     .foregroundColor(.gray)
                     .padding(.horizontal, 20)
@@ -125,7 +125,7 @@ struct SettingsView: View {
                                 .buttonStyle(CinemeltCardButtonStyle())
                             }
                             
-                            // NEW: Auto-Hide Custom Toggle (Replaces standard Toggle for tvOS compatibility)
+                            // Auto-Hide Custom Toggle (Replaces standard Toggle for tvOS compatibility)
                             Button(action: {
                                 viewModel.autoHideForeign.toggle()
                                 if viewModel.autoHideForeign {
@@ -216,20 +216,51 @@ struct SettingsView: View {
                                 .cinemeltGlow()
                             
                             HStack(spacing: 30) {
+                                // 1. Update Library (Standard)
                                 ActionCard(
                                     icon: "arrow.triangle.2.circlepath",
-                                    title: "Force Sync",
-                                    subtitle: "Fix category names",
-                                    action: { Task { await repository.syncAll() } }
+                                    title: "Update Library",
+                                    subtitle: "Fetch new content",
+                                    action: { viewModel.forceUpdate() }
                                 )
                                 
-                                ActionCard(
-                                    icon: "trash",
-                                    title: "Clear Cache",
-                                    subtitle: "Free up space",
-                                    action: { viewModel.clearCache() }
-                                )
+                                // 2. Nuclear Resync (Wipe & Reload)
+                                Button(action: { viewModel.nuclearResync() }) {
+                                    HStack(spacing: 15) {
+                                        Image(systemName: "exclamationmark.arrow.circlepath")
+                                            .font(.title)
+                                            .foregroundColor(.red) // Red for danger/nuclear
+                                            .frame(width: 40)
+                                        
+                                        VStack(alignment: .leading) {
+                                            Text("Nuclear Resync")
+                                                .font(CinemeltTheme.fontBody(22))
+                                                .fontWeight(.bold)
+                                                .foregroundColor(.red.opacity(0.9))
+                                            Text("Wipe and rebuild all data")
+                                                .font(CinemeltTheme.fontBody(16))
+                                                .foregroundColor(.gray)
+                                        }
+                                    }
+                                    .padding(20)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color.red.opacity(0.05)) // Subtle red tint background
+                                    .cornerRadius(16)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(CinemeltCardButtonStyle())
                             }
+                            
+                            // Cache Clear
+                            ActionCard(
+                                icon: "trash",
+                                title: "Clear Image Cache",
+                                subtitle: "Free up disk space",
+                                action: { viewModel.clearCache() }
+                            )
                         }
                         .padding(40)
                         .cinemeltGlass()
@@ -243,35 +274,33 @@ struct SettingsView: View {
                                     .cinemeltGlow()
                                 
                                 ForEach(viewModel.playlists, id: \.self) { playlist in
-                                    Button(action: {}) {
-                                        HStack {
-                                            Image(systemName: "person.circle.fill")
-                                                .font(.title)
-                                                .foregroundColor(CinemeltTheme.cream.opacity(0.5))
-                                            
-                                            VStack(alignment: .leading) {
-                                                Text(playlist.title)
-                                                    .font(CinemeltTheme.fontBody(24))
-                                                    .fontWeight(.bold)
-                                                    .foregroundColor(CinemeltTheme.cream)
-                                                Text(playlist.url)
-                                                    .font(CinemeltTheme.fontBody(18))
-                                                    .foregroundColor(.gray)
-                                                    .lineLimit(1)
-                                            }
-                                            Spacer()
-                                            Button(action: { viewModel.deletePlaylist(playlist) }) {
-                                                Image(systemName: "trash")
-                                                    .foregroundColor(.red.opacity(0.8))
-                                                    .font(.title2)
-                                            }
-                                            .buttonStyle(.plain)
+                                    HStack {
+                                        Image(systemName: "person.circle.fill")
+                                            .font(.title)
+                                            .foregroundColor(CinemeltTheme.cream.opacity(0.5))
+                                        
+                                        VStack(alignment: .leading) {
+                                            Text(playlist.title)
+                                                .font(CinemeltTheme.fontBody(24))
+                                                .fontWeight(.bold)
+                                                .foregroundColor(CinemeltTheme.cream)
+                                            Text(playlist.url)
+                                                .font(CinemeltTheme.fontBody(18))
+                                                .foregroundColor(.gray)
+                                                .lineLimit(1)
                                         }
-                                        .padding(20)
-                                        .background(Color.white.opacity(0.05))
-                                        .cornerRadius(16)
+                                        Spacer()
+                                        Button(action: { viewModel.deletePlaylist(playlist) }) {
+                                            Image(systemName: "trash")
+                                                .foregroundColor(.red.opacity(0.8))
+                                                .font(.title2)
+                                        }
+                                        .buttonStyle(CinemeltCardButtonStyle())
+                                        .frame(width: 50, height: 50)
                                     }
-                                    .buttonStyle(CinemeltCardButtonStyle())
+                                    .padding(20)
+                                    .background(Color.white.opacity(0.05))
+                                    .cornerRadius(16)
                                 }
                             }
                             .padding(40)

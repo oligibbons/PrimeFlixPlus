@@ -47,7 +47,8 @@ class PrimeFlixRepository: ObservableObject {
             try? context.save()
             
             Task.detached(priority: .userInitiated) {
-                await self.syncPlaylist(playlistTitle: title, playlistUrl: url, source: source)
+                // New playlist: Force immediate sync
+                await self.syncPlaylist(playlistTitle: title, playlistUrl: url, source: source, force: true)
             }
         }
     }
@@ -55,13 +56,20 @@ class PrimeFlixRepository: ObservableObject {
     func deletePlaylist(_ playlist: Playlist) {
         let context = container.viewContext
         let plUrl = playlist.url
-        // Optimized delete using Batch Request
+        
+        // 1. Delete Channels (Batch)
         let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
         fetch.predicate = NSPredicate(format: "playlistUrl == %@", plUrl)
         let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
         _ = try? context.execute(deleteReq)
+        
+        // 2. Delete Playlist Entity
         context.delete(playlist)
         try? context.save()
+        
+        // 3. Clear Cache Timestamp
+        UserDefaults.standard.removeObject(forKey: "last_sync_\(plUrl)")
+        
         self.objectWillChange.send()
     }
     
@@ -127,24 +135,30 @@ class PrimeFlixRepository: ObservableObject {
     
     // MARK: - Smart Sync Logic
     
-    func syncAll() async {
+    /// Global sync called on app launch. Respects cache timers.
+    func syncAll(force: Bool = false) async {
         guard !isSyncing else { return }
         let playlists = getAllPlaylists()
         guard !playlists.isEmpty else { return }
         
         self.isSyncing = true
         self.isErrorState = false
-        self.syncStatusMessage = "Syncing Library..."
         
         await Task.detached(priority: .background) { [weak self] in
             guard let self = self else { return }
+            
             for playlist in playlists {
                 guard let source = DataSourceType(rawValue: playlist.source) else { continue }
-                await self.syncPlaylist(playlistTitle: playlist.title, playlistUrl: playlist.url, source: source, isAutoSync: true)
+                // On launch (syncAll), we default to force=false so we can skip recent updates
+                await self.syncPlaylist(playlistTitle: playlist.title, playlistUrl: playlist.url, source: source, force: force)
             }
+            
             await MainActor.run {
                 if !self.isErrorState {
-                    self.syncStatusMessage = "Sync Complete"
+                    // Only show "Done" if we actually did something visible, otherwise just go silent
+                    if force || self.syncStatusMessage != nil {
+                        self.syncStatusMessage = "Sync Complete"
+                    }
                     self.lastSyncDate = Date()
                     Task {
                         try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
@@ -158,21 +172,33 @@ class PrimeFlixRepository: ObservableObject {
         }.value
     }
     
-    nonisolated func syncPlaylist(playlistTitle: String, playlistUrl: String, source: DataSourceType, isAutoSync: Bool = false) async {
-        await MainActor.run {
-            if !isAutoSync { self.isSyncing = true; self.isErrorState = false }
-            self.syncStatusMessage = "Checking Library..."
+    /// The Core Sync Engine
+    /// - Parameters:
+    ///   - force: If true, ignores the time check and forces a network fetch.
+    nonisolated func syncPlaylist(playlistTitle: String, playlistUrl: String, source: DataSourceType, force: Bool) async {
+        // 1. Smart Cache Check
+        // isCacheFresh is now nonisolated, so we can call it synchronously here
+        if !force && isCacheFresh(for: playlistUrl) {
+            print("✅ [Sync] Skipping \(playlistTitle) - Cache is fresh (< 12 hours).")
+            return
         }
         
-        // 1. FAST Snapshot: Fetch [URL: Hash] only.
-        var existingSnapshots: [String: ChannelSnapshot] = [:]
+        await MainActor.run {
+            self.syncStatusMessage = "Updating \(playlistTitle)..."
+            self.isSyncing = true // Ensure UI shows loading if we passed the check
+        }
+        
         let context = container.newBackgroundContext()
+        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        
+        // 2. Snapshot Existing Data (Fast)
+        var existingSnapshots: [String: ChannelSnapshot] = [:]
         
         await context.perform {
             let req = NSFetchRequest<NSDictionary>(entityName: "Channel")
             req.resultType = .dictionaryResultType
             req.predicate = NSPredicate(format: "playlistUrl == %@", playlistUrl)
-            req.propertiesToFetch = ["url", "title", "group"]
+            req.propertiesToFetch = ["url", "title", "group", "objectID"]
             
             if let results = try? context.fetch(req) {
                 for dict in results {
@@ -195,19 +221,19 @@ class PrimeFlixRepository: ObservableObject {
         do {
             var incomingStructs: [ChannelStruct] = []
             
-            // 2. Network Fetch & Parse
+            // 3. Network Fetch & Parse
             if source == .xtream {
                 let input = XtreamInput.decodeFromPlaylistUrl(playlistUrl)
                 let catMap = try await fetchXtreamCategoriesWithTimeout(input: input, timeoutSeconds: 30)
                 
-                await MainActor.run { self.syncStatusMessage = "Updating Content..." }
-                
+                // Fetch in parallel
                 async let live = xtreamClient.getLiveStreams(input: input)
                 async let vod = xtreamClient.getVodStreams(input: input)
                 async let series = xtreamClient.getSeries(input: input)
                 
                 let (liveItems, vodItems, seriesItems) = try await (live, vod, series)
                 
+                // Parse
                 incomingStructs.append(contentsOf: liveItems.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input, categoryMap: catMap) })
                 incomingStructs.append(contentsOf: vodItems.map { ChannelStruct.from($0, playlistUrl: playlistUrl, input: input, categoryMap: catMap) })
                 incomingStructs.append(contentsOf: seriesItems.map { ChannelStruct.from($0, playlistUrl: playlistUrl, categoryMap: catMap) })
@@ -220,7 +246,7 @@ class PrimeFlixRepository: ObservableObject {
                 }
             }
             
-            // 3. Diffing
+            // 4. Diffing Logic (The "Check against cache" part)
             var toInsert: [ChannelStruct] = []
             var toUpdate: [ChannelStruct] = []
             
@@ -228,16 +254,17 @@ class PrimeFlixRepository: ObservableObject {
                 processedUrls.insert(item.url)
                 
                 if let existing = existingSnapshots[item.url] {
+                    // Only update if content (Title/Group) changed
                     if existing.contentHash != item.contentHash {
                         toUpdate.append(item)
                     }
                 } else {
+                    // New item
                     toInsert.append(item)
                 }
             }
             
-            // 4. Batch Execution
-            // CRITICAL FIX: Shadow variables with 'let' to satisfy Concurrency Checker
+            // 5. Batch Execution
             if !toInsert.isEmpty {
                 let finalInserts = toInsert
                 await MainActor.run { self.syncStatusMessage = "Adding \(finalInserts.count) new items..." }
@@ -250,7 +277,7 @@ class PrimeFlixRepository: ObservableObject {
                 try await performBatchUpdate(items: finalUpdates, existingSnapshots: existingSnapshots, context: context)
             }
             
-            // 5. Orphan Deletion
+            // 6. Orphan Deletion (Remove items not in the new list)
             let existingUrls = Set(existingSnapshots.keys)
             let orphans = existingUrls.subtracting(processedUrls)
             
@@ -259,37 +286,80 @@ class PrimeFlixRepository: ObservableObject {
                 try await performBatchDelete(urls: Array(orphans), playlistUrl: playlistUrl, context: context)
             }
             
-            if !isAutoSync {
-                await MainActor.run {
-                    self.syncStatusMessage = "Done"
-                    self.lastSyncDate = Date()
-                    Task {
-                        try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
-                        self.syncStatusMessage = nil
-                        self.isSyncing = false
-                    }
-                }
-            }
+            // 7. Mark as Fresh
+            markCacheAsFresh(for: playlistUrl)
             
         } catch {
             print("❌ Sync Failed: \(error)")
             await MainActor.run {
                 self.isErrorState = true
-                self.isSyncing = false
                 self.syncStatusMessage = "Sync Failed"
-                Task {
-                    try? await Task.sleep(nanoseconds: 4 * 1_000_000_000)
-                    self.syncStatusMessage = nil
-                    self.isErrorState = false
-                }
             }
         }
     }
     
-    // MARK: - High Performance Batch Operations
+    // MARK: - Nuclear Option
+    
+    func nuclearResync(playlist: Playlist) async {
+        guard let source = DataSourceType(rawValue: playlist.source) else { return }
+        
+        self.isSyncing = true
+        self.syncStatusMessage = "Wiping Database..."
+        
+        // 1. Wipe Data
+        let bgContext = container.newBackgroundContext()
+        await bgContext.perform {
+            let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
+            fetch.predicate = NSPredicate(format: "playlistUrl == %@", playlist.url)
+            let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
+            deleteReq.resultType = .resultTypeObjectIDs // Optional: Return IDs to merge changes
+            
+            // Execute Delete
+            try? bgContext.execute(deleteReq)
+            try? bgContext.save()
+            bgContext.reset()
+        }
+        
+        // 2. Clear Timestamp
+        UserDefaults.standard.removeObject(forKey: "last_sync_\(playlist.url)")
+        
+        // 3. Force Sync
+        // We use Task.detached to break out of any UI blocking, effectively restarting the process
+        await Task.detached {
+            await self.syncPlaylist(playlistTitle: playlist.title, playlistUrl: playlist.url, source: source, force: true)
+            
+            await MainActor.run {
+                self.syncStatusMessage = "Library Rebuilt"
+                Task {
+                    try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
+                    self.syncStatusMessage = nil
+                    self.isSyncing = false
+                }
+            }
+        }.value
+    }
+    
+    // MARK: - Helpers & Batch Ops
+    
+    // Marked as nonisolated to allow calling from background/nonisolated contexts without await
+    private nonisolated func isCacheFresh(for url: String) -> Bool {
+        let key = "last_sync_\(url)"
+        let lastSync = UserDefaults.standard.double(forKey: key)
+        if lastSync == 0 { return false } // Never synced
+        
+        let date = Date(timeIntervalSince1970: lastSync)
+        // 12 Hour Threshold
+        return Date().timeIntervalSince(date) < (12 * 60 * 60)
+    }
+    
+    // Marked as nonisolated for the same reason
+    private nonisolated func markCacheAsFresh(for url: String) {
+        let key = "last_sync_\(url)"
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)
+    }
     
     private func performBatchInsert(items: [ChannelStruct], context: NSManagedObjectContext) async throws {
-        let batchSize = 2000
+        let batchSize = 5000 // Increased batch size for speed
         let chunks = stride(from: 0, to: items.count, by: batchSize).map {
             Array(items[$0..<min($0 + batchSize, items.count)])
         }
@@ -309,20 +379,22 @@ class PrimeFlixRepository: ObservableObject {
         await context.perform {
             for item in items {
                 guard let snapshot = existingSnapshots[item.url] else { continue }
-                if let obj = try? context.existingObject(with: snapshot.objectID) as? Channel {
-                    obj.title = item.title
-                    obj.group = item.group
-                    obj.cover = item.cover
-                    if obj.canonicalTitle == nil { obj.canonicalTitle = item.canonicalTitle }
-                    if obj.quality == nil { obj.quality = item.quality }
-                }
+                // Note: Batch Update Request is tricky with varied data.
+                // Standard fetch-update-save is safer for updates unless mass-updating a single property.
+                // We optimize by only updating the object we already have an ID for.
+                let obj = context.object(with: snapshot.objectID) as? Channel
+                obj?.title = item.title
+                obj?.group = item.group
+                obj?.cover = item.cover
+                if obj?.canonicalTitle == nil { obj?.canonicalTitle = item.canonicalTitle }
+                if obj?.quality == nil { obj?.quality = item.quality }
             }
             try? context.save()
         }
     }
     
     private func performBatchDelete(urls: [String], playlistUrl: String, context: NSManagedObjectContext) async throws {
-        let batchSize = 1000
+        let batchSize = 2000
         let chunks = stride(from: 0, to: urls.count, by: batchSize).map {
             Array(urls[$0..<min($0 + batchSize, urls.count)])
         }
@@ -334,7 +406,6 @@ class PrimeFlixRepository: ObservableObject {
                 let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
                 _ = try? context.execute(deleteReq)
             }
-            context.reset()
         }
         await MainActor.run { self.objectWillChange.send() }
     }

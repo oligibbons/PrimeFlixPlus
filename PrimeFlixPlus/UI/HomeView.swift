@@ -47,28 +47,34 @@ struct HomeView: View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 10) {
                 
-                // UPDATED HEADER: Uses Time Greeting + Wit Message
+                // Header
                 HomeHeaderView(
                     greeting: viewModel.timeGreeting,
                     title: viewModel.witGreeting
                 )
                 
+                // Tabs
                 HomeFilterBar(
                     selectedTab: viewModel.selectedTab,
                     onSelect: { tab in
-                        withAnimation { viewModel.selectTab(tab) }
+                        viewModel.selectTab(tab)
                     }
                 )
                 
                 if viewModel.isLoading {
                     HomeLoadingState()
                 } else {
+                    // Content Lanes
                     HomeLanesView(
                         sections: viewModel.sections,
+                        isLoadingMore: viewModel.isLoadingMore,
                         onOpenCategory: { sec in viewModel.openCategory(sec) },
                         onPlay: onPlayChannel,
                         onFocus: { ch in
                             withAnimation(.easeInOut(duration: 0.5)) { heroChannel = ch }
+                        },
+                        onLoadMore: {
+                            viewModel.loadMoreGenres()
                         }
                     )
                 }
@@ -120,7 +126,6 @@ struct HomeHeaderView: View {
                 Text(title)
                     .cinemeltTitle()
                     .font(CinemeltTheme.fontTitle(60))
-                    // Glow removed per request
             }
             Spacer()
         }
@@ -187,9 +192,11 @@ struct HomeLoadingState: View {
 
 struct HomeLanesView: View {
     let sections: [HomeSection]
+    let isLoadingMore: Bool
     let onOpenCategory: (HomeSection) -> Void
     let onPlay: (Channel) -> Void
     let onFocus: (Channel) -> Void
+    let onLoadMore: () -> Void
     
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 50) {
@@ -201,9 +208,26 @@ struct HomeLanesView: View {
                     onFocus: onFocus
                 )
             }
+            
+            // MARK: - Infinite Scroll Trigger
+            Color.clear
+                .frame(height: 50)
+                .onAppear {
+                    onLoadMore()
+                }
+            
+            if isLoadingMore {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                        .tint(CinemeltTheme.accent)
+                        .scaleEffect(1.5)
+                    Spacer()
+                }
+                .padding(.bottom, 50)
+            }
         }
         .padding(.bottom, 100)
-        // FIX: Add focusSection to allow better navigation between rows of different lengths
         .focusSection()
     }
 }
@@ -241,7 +265,6 @@ struct HomeSectionRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 60) {
                     ForEach(section.items) { channel in
-                        // Enforce frame stability
                         ZStack {
                             if case .continueWatching = section.type {
                                 ContinueWatchingCard(channel: channel) { onPlay(channel) }

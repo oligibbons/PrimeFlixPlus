@@ -3,6 +3,8 @@ import CoreData
 import Combine
 import SwiftUI
 
+// MARK: - Data Models
+
 struct HomeSection: Identifiable {
     // We use a combination of Title + Type to ensure uniqueness if two categories clean to the same name
     var id: String { "\(title)_\(type)" }
@@ -33,37 +35,57 @@ struct HomeSection: Identifiable {
     }
 }
 
+// MARK: - Tab State Container
+/// Caches the state of a specific tab so switching back is instant.
+struct HomeTabState {
+    var sections: [HomeSection] = []
+    var allGroupNames: [String] = [] // All available categories, not yet loaded
+    var loadedGroupIndex: Int = 0    // Pointer for pagination
+    var hasLoadedInitial: Bool = false
+}
+
 @MainActor
 class HomeViewModel: ObservableObject {
     
-    // Navigation
+    // --- Navigation & State ---
     @Published var selectedTab: StreamType = .movie
-    
-    // Data Sources
-    @Published var playlists: [Playlist] = []
     @Published var selectedPlaylist: Playlist?
     
-    // The "Rails" for the Home Screen
+    // The "Rails" for the Home Screen (Driven by current tab)
     @Published var sections: [HomeSection] = []
     
-    // Loading State
+    // UI State
     @Published var isLoading: Bool = false
-    @Published var loadingMessage: String = ""
-    
-    // Drill Down
-    @Published var drillDownCategory: String? = nil
-    @Published var displayedGridChannels: [Channel] = []
+    @Published var isLoadingMore: Bool = false // For bottom pagination spinner
     
     // Greetings
     @Published var timeGreeting: String = "Welcome Back"
     @Published var witGreeting: String = "Ready to watch?"
     
-    // Access User Preferences
+    // Drill Down State
+    @Published var drillDownCategory: String? = nil
+    @Published var displayedGridChannels: [Channel] = []
+    
+    // --- Internal Caching ---
+    // We keep a separate state for each tab to allow instant switching
+    private var tabCache: [StreamType: HomeTabState] = [
+        .movie: HomeTabState(),
+        .series: HomeTabState(),
+        .live: HomeTabState()
+    ]
+    
+    // --- Preferences ---
     @AppStorage("preferredLanguage") var preferredLanguage: String = "English"
     
+    // --- Dependencies ---
     private var repository: PrimeFlixRepository?
     private let tmdbClient = TmdbClient()
     private var cancellables = Set<AnyCancellable>()
+    
+    // Task management for cancellation
+    private var currentFetchTask: Task<Void, Never>?
+    
+    // MARK: - Setup
     
     func configure(repository: PrimeFlixRepository) {
         self.repository = repository
@@ -75,52 +97,241 @@ class HomeViewModel: ObservableObject {
         
         updateGreeting()
         
-        // Initial load of cached data
-        refreshContent(forceLoadingState: sections.isEmpty)
+        // Initial Load
+        loadTab(selectedTab)
         
-        // 1. Listen specifically for Sync Status changes to auto-refresh when sync completes
+        // Listen for Sync completion to clear cache and refresh
         repository.$isSyncing
             .removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] isSyncing in
                 guard let self = self else { return }
-                
                 if !isSyncing {
-                    // Sync just finished. Now it is safe to refresh the UI once.
-                    print("🔄 Sync finished. Refreshing Home UI.")
-                    // Add a small delay to ensure Core Data context is fully merged
-                    Task {
-                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
-                        self.refreshContent(forceLoadingState: false)
-                    }
-                } else {
-                    // Sync started. Do nothing. Let the user browse cached data undisturbed.
-                    print("⏳ Sync started. Pausing UI updates.")
+                    // Sync complete: invalidate cache and reload current tab
+                    print("🔄 Sync finished. Invalidating Home Cache.")
+                    self.invalidateCache()
                 }
             }
             .store(in: &cancellables)
         
-        // 2. Listen for Category/Settings Changes (Auto-refresh on Hide/Unhide/Auto-Hide)
+        // Listen for Settings changes (Hidden Categories)
         NotificationCenter.default.publisher(for: CategoryPreferences.didChangeNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                print("🔄 Categories changed. Refreshing Home UI immediately.")
-                self?.refreshContent(forceLoadingState: false)
+                self?.invalidateCache()
             }
             .store(in: &cancellables)
     }
     
+    @Published var playlists: [Playlist] = []
+    
     func selectPlaylist(_ playlist: Playlist) {
         self.selectedPlaylist = playlist
         updateGreeting()
-        refreshContent(forceLoadingState: true)
+        invalidateCache() // Playlist changed, data is invalid
     }
     
+    // MARK: - Tab Management (The Smart Part)
+    
     func selectTab(_ tab: StreamType) {
+        guard tab != selectedTab else { return }
+        
+        // 1. Cancel any ongoing fetch for the previous tab
+        currentFetchTask?.cancel()
+        
         self.selectedTab = tab
-        self.drillDownCategory = nil
-        refreshContent(forceLoadingState: false)
+        
+        // 2. Instant Cache Restore
+        if tabCache[tab]?.hasLoadedInitial == true {
+            self.sections = tabCache[tab]?.sections ?? []
+            self.isLoading = false
+        } else {
+            // 3. Cold Start for this tab
+            self.sections = []
+            self.isLoading = true
+            loadTab(tab)
+        }
     }
+    
+    private func invalidateCache() {
+        // Reset all caches
+        tabCache = [
+            .movie: HomeTabState(),
+            .series: HomeTabState(),
+            .live: HomeTabState()
+        ]
+        // Reload current
+        loadTab(selectedTab)
+    }
+    
+    // MARK: - Phase 1: Initial Load (Critical Lanes)
+    
+    private func loadTab(_ tab: StreamType) {
+        guard let repo = repository else { return }
+        
+        // Cancel previous task to prevent race conditions
+        currentFetchTask?.cancel()
+        
+        self.isLoading = true
+        let playlistUrl = selectedPlaylist?.url ?? ""
+        let lang = preferredLanguage
+        
+        currentFetchTask = Task {
+            // A. Fetch "Fast" Data (Favorites, History, Recent)
+            // We run this on a background context
+            let context = repo.container.newBackgroundContext()
+            
+            // 1. Fetch Trending IDs (Network call - might be slow, so we allow it to fail/timeout gently)
+            var trendingIDs: [NSManagedObjectID] = []
+            if tab != .live {
+                let titles = (try? await tmdbClient.getTrending(type: tab.rawValue))?.map { $0.displayTitle } ?? []
+                if !titles.isEmpty {
+                    trendingIDs = await repo.getTrendingMatchesAsync(type: tab.rawValue, tmdbResults: titles)
+                }
+            }
+            
+            if Task.isCancelled { return }
+            
+            // 2. Build Critical Sections
+            var initialSections: [HomeSection] = []
+            var allGroups: [String] = []
+            
+            await context.perform {
+                let readRepo = ChannelRepository(context: context)
+                
+                // History
+                let resume = readRepo.getSmartContinueWatching(type: tab.rawValue)
+                if !resume.isEmpty {
+                    initialSections.append(HomeSection(title: "Continue Watching", type: .continueWatching, items: resume))
+                }
+                
+                // Trending
+                if !trendingIDs.isEmpty {
+                    let trending = trendingIDs.compactMap { try? context.existingObject(with: $0) as? Channel }
+                    if !trending.isEmpty {
+                        initialSections.append(HomeSection(title: "Trending Now", type: .trending, items: trending))
+                    }
+                }
+                
+                // Favorites
+                let favs = readRepo.getFavorites(type: tab.rawValue)
+                if !favs.isEmpty {
+                    initialSections.append(HomeSection(title: "My List", type: .favorites, items: favs))
+                }
+                
+                // Recent
+                if tab != .live {
+                    let recent = readRepo.getRecentlyAdded(type: tab.rawValue, limit: 20)
+                    if !recent.isEmpty {
+                        initialSections.append(HomeSection(title: "Recently Added", type: .recent, items: recent))
+                    }
+                }
+                
+                // 3. Fetch ALL Group Names (Lightweight) to prepare for Pagination
+                allGroups = readRepo.getGroups(playlistUrl: playlistUrl, type: tab.rawValue)
+            }
+            
+            if Task.isCancelled { return }
+            
+            // 4. Update Main Actor (Render Initial View)
+            // No await needed here because we are already on MainActor due to Task
+            self.finalizeInitialLoad(tab: tab, sections: initialSections, allGroups: allGroups, lang: lang)
+        }
+    }
+    
+    // Helper to update state safely on MainActor
+    private func finalizeInitialLoad(tab: StreamType, sections: [HomeSection], allGroups: [String], lang: String) {
+        // Apply sorting/filtering to groups
+        let cleanGroups = allGroups.filter {
+            CategoryPreferences.shared.shouldShow(group: $0, language: lang)
+        }
+        
+        // Update Cache State
+        var state = self.tabCache[tab] ?? HomeTabState()
+        state.sections = sections
+        state.allGroupNames = cleanGroups
+        state.loadedGroupIndex = 0
+        state.hasLoadedInitial = true
+        self.tabCache[tab] = state
+        
+        // Update UI if this is still the active tab
+        if self.selectedTab == tab {
+            self.sections = sections
+            self.isLoading = false
+            // Immediately trigger the first batch of genres
+            self.loadMoreGenres()
+        }
+    }
+    
+    // MARK: - Phase 2: Lazy Pagination (Genres)
+    
+    func loadMoreGenres() {
+        guard let repo = repository, !isLoadingMore else { return }
+        
+        // Use 'let' to snapshot state
+        let state = tabCache[selectedTab] ?? HomeTabState()
+        
+        // Check if we have more groups to load
+        guard state.loadedGroupIndex < state.allGroupNames.count else { return }
+        
+        self.isLoadingMore = true
+        let type = selectedTab.rawValue
+        
+        // Determine batch range (Load 5 categories at a time)
+        let startIndex = state.loadedGroupIndex
+        let endIndex = min(startIndex + 5, state.allGroupNames.count)
+        let groupsToLoad = Array(state.allGroupNames[startIndex..<endIndex])
+        
+        Task {
+            let context = repo.container.newBackgroundContext()
+            var newSections: [HomeSection] = []
+            
+            await context.perform {
+                let readRepo = ChannelRepository(context: context)
+                
+                for rawGroup in groupsToLoad {
+                    let items = readRepo.getByGenre(type: type, groupName: rawGroup, limit: 15)
+                    
+                    if !items.isEmpty {
+                        let cleanTitle = CategoryPreferences.shared.cleanName(rawGroup)
+                        
+                        let isPremium = ["Netflix", "Disney", "Pixar", "Marvel", "Apple", "HBO", "4K"].contains { rawGroup.localizedCaseInsensitiveContains($0) }
+                        let sectionType: HomeSection.SectionType = isPremium ? .provider(rawGroup) : .genre(rawGroup)
+                        
+                        newSections.append(HomeSection(title: cleanTitle, type: sectionType, items: items))
+                    }
+                }
+            }
+            
+            if Task.isCancelled { return }
+            
+            // No await needed here because we are already on MainActor due to Task
+            self.finalizeMoreGenres(newSections: newSections, newIndex: endIndex)
+        }
+    }
+    
+    // Helper to update state safely on MainActor
+    private func finalizeMoreGenres(newSections: [HomeSection], newIndex: Int) {
+        // 1. Update Cache
+        var currentState = self.tabCache[self.selectedTab]!
+        currentState.sections.append(contentsOf: newSections)
+        currentState.loadedGroupIndex = newIndex
+        self.tabCache[self.selectedTab] = currentState
+        
+        // 2. Update UI (Append)
+        withAnimation {
+            self.sections.append(contentsOf: newSections)
+        }
+        
+        self.isLoadingMore = false
+        
+        // Optimization: Keep loading if screen is empty
+        if self.sections.count < 4 && newIndex < currentState.allGroupNames.count {
+            self.loadMoreGenres()
+        }
+    }
+    
+    // MARK: - Drill Down & UI Helpers
     
     private func updateGreeting() {
         let hour = Calendar.current.component(.hour, from: Date())
@@ -131,180 +342,41 @@ class HomeViewModel: ObservableObject {
         
         let playfulMessages = [
             "Popcorn ready?", "Let's find something amazing.", "Cinema mode: On.",
-            "Your library looks great.", "Time to relax.", "Ready for the next episode?",
-            "The show must go on.", "Discover something new.", "It's movie night.",
-            "Press play and drift away."
+            "Your library looks great.", "Time to relax.", "Discover something new."
         ]
         
         if playlists.isEmpty { self.witGreeting = "Let's get you set up." }
-        else if sections.isEmpty { self.witGreeting = "Building your cinema..." }
         else { self.witGreeting = playfulMessages.randomElement() ?? "Ready to watch?" }
     }
-    
-    // MARK: - Main Refresh Logic
-    
-    func refreshContent(forceLoadingState: Bool = false) {
-        guard let repo = repository else { return }
-        
-        if forceLoadingState {
-            self.isLoading = true
-            self.sections = []
-        }
-        
-        let currentTab = selectedTab
-        let currentPlaylist = selectedPlaylist
-        let client = self.tmdbClient
-        let typeStr = currentTab.rawValue
-        let userLang = self.preferredLanguage
-        
-        // Run network logic in background task
-        Task {
-            // 1. Fetch Trending Titles (Background)
-            var trendingTitles: [String] = []
-            if currentTab != .live {
-                do {
-                    // TMDB network call - slow, so keep it off main thread
-                    let results = try await client.getTrending(type: typeStr)
-                    trendingTitles = results.map { $0.displayTitle }
-                } catch {
-                    print("Trending fetch error: \(error)")
-                }
-            }
-            
-            // 1.5 Fetch Trending IDs (Background - Performance Optimization)
-            var trendingIDs: [NSManagedObjectID] = []
-            if !trendingTitles.isEmpty {
-                trendingIDs = await repo.getTrendingMatchesAsync(type: typeStr, tmdbResults: trendingTitles)
-            }
-            
-            // 2. Build Sections (Main Actor)
-            await MainActor.run {
-                var newSections: [HomeSection] = []
-                
-                // --- 1. Standard Lanes ---
-                
-                // Continue Watching
-                let resumeItems = repo.getSmartContinueWatching(type: typeStr)
-                if !resumeItems.isEmpty {
-                    newSections.append(HomeSection(title: "Continue Watching", type: .continueWatching, items: resumeItems))
-                }
-                
-                // Recommended For You
-                let recs = repo.getRecommended(type: typeStr)
-                if !recs.isEmpty {
-                    newSections.append(HomeSection(title: "Recommended For You", type: .recommended, items: recs))
-                }
-                
-                // Trending
-                if !trendingIDs.isEmpty {
-                    let context = repo.container.viewContext
-                    let trendingMatches = trendingIDs.compactMap { try? context.existingObject(with: $0) as? Channel }
-                    
-                    if !trendingMatches.isEmpty {
-                        newSections.append(HomeSection(title: "Trending Now", type: .trending, items: trendingMatches))
-                    }
-                }
-                
-                // Favorites
-                let favs = repo.getFavorites(type: typeStr)
-                if !favs.isEmpty {
-                    newSections.append(HomeSection(title: "My List", type: .favorites, items: favs))
-                }
-                
-                // Recent (Only for VOD)
-                if currentTab != .live {
-                    let recent = repo.getRecentlyAdded(type: typeStr, limit: 20)
-                    if !recent.isEmpty {
-                        newSections.append(HomeSection(title: "Recently Added", type: .recent, items: recent))
-                    }
-                }
-                
-                // --- 2. Smart Category Lanes ---
-                
-                if let pl = currentPlaylist {
-                    let allGroups = repo.getGroups(playlistUrl: pl.url, type: currentTab)
-                    var addedGroups = Set<String>()
-                    
-                    // Smart Keywords for type detection (styling)
-                    let premiumKeywords = ["Netflix", "Disney", "Pixar", "Marvel", "Apple", "Amazon", "Hulu", "HBO", "4K", "UHD"]
-                    
-                    // Consolidated Loop: Filter, Clean, and Add
-                    for rawGroup in allGroups {
-                        // A. FILTER: Check against User Language & Hidden Categories (using SettingsViewModel logic)
-                        if !CategoryPreferences.shared.shouldShow(group: rawGroup, language: userLang) {
-                            continue
-                        }
-                        
-                        // B. CLEAN: Remove prefixes like "NL | "
-                        let cleanTitle = CategoryPreferences.shared.cleanName(rawGroup)
-                        
-                        // C. DEDUP: Skip if we already added this RAW group or a cleaned version of it
-                        if addedGroups.contains(rawGroup) { continue }
-                        
-                        // D. FETCH CONTENT
-                        let items = repo.getByGenre(type: typeStr, groupName: rawGroup, limit: 20)
-                        
-                        if !items.isEmpty {
-                            // Determine type for potential UI styling
-                            let isPremium = premiumKeywords.contains { rawGroup.localizedCaseInsensitiveContains($0) }
-                            let type: HomeSection.SectionType = isPremium ? .provider(rawGroup) : .genre(rawGroup)
-                            
-                            newSections.append(HomeSection(title: cleanTitle, type: type, items: items))
-                            addedGroups.insert(rawGroup)
-                        }
-                        
-                        // E. LIMIT: Prevent infinite scrolling performance issues
-                        if newSections.count >= 20 { break }
-                    }
-                }
-                
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    self.sections = newSections
-                    self.isLoading = false
-                    self.updateGreeting()
-                }
-            }
-        }
-    }
-    
-    // MARK: - Drill Down Logic
     
     func openCategory(_ section: HomeSection) {
         guard let repo = repository, let pl = selectedPlaylist else { return }
         let type = selectedTab.rawValue
         
-        // Fetch content for the "See All" grid
         Task {
             let results: [Channel]
             
             switch section.type {
             case .genre(let rawGroup), .provider(let rawGroup):
-                self.drillDownCategory = section.title // Show Clean Title in Header
-                // Use Raw Group ID/Name to fetch content
+                self.drillDownCategory = section.title
                 results = repo.getBrowsingContent(playlistUrl: pl.url, type: type, group: rawGroup)
-                
             case .recent:
                 self.drillDownCategory = "Recently Added"
                 results = repo.getRecentFallback(type: type, limit: 200)
-                
             case .favorites:
                 self.drillDownCategory = "My List"
                 results = repo.getFavorites(type: type)
-                
             case .continueWatching:
                 self.drillDownCategory = "Continue Watching"
                 results = section.items
-                
             case .trending:
                 self.drillDownCategory = "Trending Now"
                 results = section.items
-                
             case .recommended:
-                self.drillDownCategory = "Recommended For You"
+                self.drillDownCategory = "Recommended"
                 results = repo.getRecommended(type: type)
             }
             
-            // Update UI on MainActor
             await MainActor.run {
                 self.displayedGridChannels = results
             }
