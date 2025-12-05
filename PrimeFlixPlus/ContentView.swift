@@ -49,85 +49,85 @@ struct ContentView: View {
     
     @EnvironmentObject var repository: PrimeFlixRepository
     
+    // Layout Constants must match SidebarView
+    private let collapsedSidebarWidth: CGFloat = 100
+    
     var body: some View {
-        ZStack {
+        ZStack(alignment: .leading) {
             // 1. Global Cinematic Background
             CinemeltTheme.mainBackground
                 .ignoresSafeArea()
             
-            // 2. Main Layout (Sidebar + Content)
-            HStack(spacing: 0) {
-                
-                // LEFT: Glassmorphic Sidebar
-                if !isPlayerMode {
-                    SidebarView(currentSelection: $currentDestination)
-                        .zIndex(2)
-                        .transition(.move(edge: .leading))
-                }
-                
-                // RIGHT: Content Area
-                ZStack {
-                    switch currentDestination {
-                    case .home:
-                        HomeView(
-                            onPlayChannel: { channel in navigateToContent(channel) },
-                            onAddPlaylist: { currentDestination = .addPlaylist },
-                            onSettings: { currentDestination = .settings },
-                            onSearch: { currentDestination = .search }
-                        )
-                        
-                    case .search:
-                        SearchView(
-                            onPlay: { channel in navigateToContent(channel) }
-                        )
-                    
-                    case .continueWatching:
-                        ContinueWatchingView(
-                            onPlay: { channel in navigateToContent(channel) },
-                            onBack: { currentDestination = .home }
-                        )
-                        
-                    case .favorites:
-                        FavoritesView(
-                            onPlay: { channel in navigateToContent(channel) },
-                            onBack: { currentDestination = .home }
-                        )
-                        
-                    case .details(let channel):
-                        DetailsView(
-                            channel: channel,
-                            onPlay: { playable in
-                                navigate(to: .player(playable))
-                            },
-                            onBack: { goBack() }
-                        )
-                        
-                    case .player(let channel):
-                        PlayerView(
-                            channel: channel,
-                            onBack: { goBack() }
-                        )
-                        
-                    case .settings:
-                        SettingsView(onBack: { goBack() })
-                        
-                    case .addPlaylist:
-                        AddPlaylistView(
-                            onPlaylistAdded: {
-                                navigationStack.removeAll()
-                                currentDestination = .home
-                            },
-                            onBack: { goBack() }
-                        )
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .animation(.easeInOut(duration: 0.35), value: currentDestination)
-                // MARK: - CRITICAL FIX
-                // Marking the content area as a focus section ensures that when the user
-                // returns to it from the Sidebar, focus is restored to the last used item.
-                .focusSection()
+            // 2. Sidebar
+            if !isPlayerMode {
+                SidebarView(currentSelection: $currentDestination)
+                    .zIndex(2)
+                    .transition(.move(edge: .leading))
             }
+            
+            // 3. Main Content
+            ZStack {
+                switch currentDestination {
+                case .home:
+                    HomeView(
+                        onPlayChannel: { channel in navigateToContent(channel) },
+                        onAddPlaylist: { currentDestination = .addPlaylist },
+                        onSettings: { currentDestination = .settings },
+                        onSearch: { currentDestination = .search }
+                    )
+                    
+                case .search:
+                    SearchView(
+                        onPlay: { channel in navigateToContent(channel) }
+                    )
+                
+                case .continueWatching:
+                    ContinueWatchingView(
+                        onPlay: { channel in navigateToContent(channel) },
+                        onBack: { currentDestination = .home }
+                    )
+                    
+                case .favorites:
+                    FavoritesView(
+                        onPlay: { channel in navigateToContent(channel) },
+                        onBack: { currentDestination = .home }
+                    )
+                    
+                case .details(let channel):
+                    DetailsView(
+                        channel: channel,
+                        onPlay: { playable in
+                            navigate(to: .player(playable))
+                        },
+                        onBack: { goBack() }
+                    )
+                    
+                case .player(let channel):
+                    PlayerView(
+                        channel: channel,
+                        onBack: { goBack() }
+                    )
+                    
+                case .settings:
+                    SettingsView(onBack: { goBack() })
+                    
+                case .addPlaylist:
+                    AddPlaylistView(
+                        onPlaylistAdded: {
+                            navigationStack.removeAll()
+                            currentDestination = .home
+                        },
+                        onBack: { goBack() }
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Fix: Padding matches the exact width of the collapsed sidebar (100)
+            // This ensures content aligns perfectly with the "rail" when the menu is closed.
+            .padding(.leading, isPlayerMode ? 0 : collapsedSidebarWidth)
+            .animation(.easeInOut(duration: 0.35), value: currentDestination)
+            .focusSection()
+            .zIndex(1)
         }
         .onExitCommand {
             if !navigationStack.isEmpty {
