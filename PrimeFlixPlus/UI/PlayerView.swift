@@ -21,46 +21,71 @@ struct PlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             
-            // 1. VLC Video Surface (The "Playhead")
-            // Acts as the base layer and default focus.
-            VLCVideoSurface(viewModel: viewModel)
-                .ignoresSafeArea()
-                .focusable()
-                .focused($focusedField, equals: .videoSurface)
-                
-                // Scrubbing Logic (Active only when this "Playhead" layer is focused)
-                .onMoveCommand { direction in
-                    viewModel.triggerControls(forceShow: true)
+            GeometryReader { geo in
+                ZStack {
+                    // 1. VLC Video Surface (The "Playhead")
+                    // Acts as the base layer and default focus.
+                    VLCVideoSurface(viewModel: viewModel)
+                        .ignoresSafeArea()
                     
-                    switch direction {
-                    case .left:
-                        viewModel.seekBackward()
-                    case .right:
-                        viewModel.seekForward()
-                    case .up:
-                        // Navigate "Up" to the Controls layer
-                        if viewModel.showControls {
-                            focusedField = .upperControls
-                        } else {
-                            // If controls are hidden, showing them usually defaults focus here anyway,
-                            // but we can be explicit if needed.
+                    // 2. Interaction Layer (Inputs)
+                    // This sits on top of the video to capture all focus and gestures.
+                    // It is transparent but hit-testable.
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .focusable()
+                        .focused($focusedField, equals: .videoSurface)
+                        
+                        // --- GESTURES ---
+                        
+                        // Continuous Scrubbing (Swipe gesture on Siri Remote)
+                        // Maps horizontal drag translation to time seeking
+                        .gesture(
+                            DragGesture(minimumDistance: 20, coordinateSpace: .global)
+                                .onChanged { value in
+                                    viewModel.startScrubbing(translation: value.translation.width, screenWidth: geo.size.width)
+                                }
+                                .onEnded { _ in
+                                    viewModel.endScrubbing()
+                                }
+                        )
+                    
+                        // Discrete Moves (Clicking D-Pad edges)
+                        .onMoveCommand { direction in
                             viewModel.triggerControls(forceShow: true)
+                            
+                            switch direction {
+                            case .left:
+                                viewModel.seekBackward()
+                            case .right:
+                                viewModel.seekForward()
+                            case .up:
+                                // Navigate "Up" to the Controls layer
+                                if viewModel.showControls {
+                                    focusedField = .upperControls
+                                } else {
+                                    // If controls are hidden, showing them usually defaults focus here anyway,
+                                    // but we can be explicit if needed.
+                                    viewModel.triggerControls(forceShow: true)
+                                }
+                            default:
+                                break
+                            }
                         }
-                    default:
-                        break
-                    }
+                        
+                        .onPlayPauseCommand {
+                            viewModel.togglePlayPause()
+                        }
+                        .onExitCommand {
+                            // Standard Back behavior when on the playhead
+                            print("🔙 Menu Pressed on Playhead - Exiting")
+                            viewModel.cleanup()
+                            onBack()
+                        }
                 }
-                .onPlayPauseCommand {
-                    viewModel.togglePlayPause()
-                }
-                .onExitCommand {
-                    // Standard Back behavior when on the playhead
-                    print("🔙 Menu Pressed on Playhead - Exiting")
-                    viewModel.cleanup()
-                    onBack()
-                }
+            }
             
-            // 2. Buffering State
+            // 3. Buffering State
             if viewModel.isBuffering {
                 ZStack {
                     Color.black.opacity(0.4)
@@ -75,12 +100,12 @@ struct PlayerView: View {
                 }
             }
             
-            // 3. Error State
+            // 4. Error State
             if viewModel.isError {
                 errorOverlay
             }
             
-            // 4. Controls Overlay
+            // 5. Controls Overlay
             // We pass the focus binding down so the overlay knows if it's active
             if viewModel.showControls {
                 ControlsOverlayView(
@@ -150,15 +175,6 @@ struct PlayerView: View {
             .background(CinemeltTheme.charcoal)
             .cornerRadius(30)
         }
-    }
-    
-    private func formatTime(_ seconds: Double) -> String {
-        if seconds.isNaN || seconds.isInfinite { return "--:--" }
-        let totalSeconds = Int(seconds)
-        let h = totalSeconds / 3600
-        let m = (totalSeconds % 3600) / 60
-        let s = totalSeconds % 60
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
     }
 }
 

@@ -1,3 +1,5 @@
+// oligibbons/primeflixplus/PrimeFlixPlus-d5b2deac233716cf4e62244788059449d29d9f26/PrimeFlixPlus/UI/SyncStatusOverlay.swift
+
 import SwiftUI
 
 struct SyncStatusOverlay: View {
@@ -5,6 +7,7 @@ struct SyncStatusOverlay: View {
     
     var body: some View {
         VStack {
+            // 1. The Toast Content
             if let message = repository.syncStatusMessage {
                 HStack(spacing: 16) {
                     // Status Icon
@@ -43,13 +46,17 @@ struct SyncStatusOverlay: View {
                 )
                 .shadow(color: .black.opacity(0.4), radius: 10, x: 0, y: 5)
                 .transition(.move(edge: .top).combined(with: .opacity))
-                .animation(.spring(response: 0.5, dampingFraction: 0.7), value: repository.syncStatusMessage)
-                .padding(.top, 60) // Safe Area inset
+                .padding(.top, 60) // Safe Area inset to push it down slightly from the bezel
             }
+            
+            // 2. Pusher to force top alignment
             Spacer()
         }
-        .frame(maxWidth: .infinity, alignment: .top)
-        .ignoresSafeArea()
-        .allowsHitTesting(false) // Let clicks pass through
+        // 3. Frame & Interaction Settings
+        // Forces the VStack to fill the screen so alignment works...
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // ... but strictly ignore all touches so swipes pass through to the app.
+        .allowsHitTesting(false)
+        .animation(.spring(response: 0.5, dampingFraction: 0.7), value: repository.syncStatusMessage)
     }
 }

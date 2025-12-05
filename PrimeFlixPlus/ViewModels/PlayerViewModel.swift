@@ -1,4 +1,4 @@
-
+// oligibbons/primeflixplus/PrimeFlixPlus-7315d01e01d1e889e041552206b1fb283d2eeb2d/PrimeFlixPlus/ViewModels/PlayerViewModel.swift
 
 import Foundation
 import Combine
@@ -17,6 +17,9 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     @Published var isError: Bool = false
     @Published var errorMessage: String? = nil
     @Published var showControls: Bool = false
+    
+    // Scrubbing State (New)
+    @Published var isScrubbing: Bool = false
     
     // Metadata
     @Published var videoTitle: String = ""
@@ -48,17 +51,12 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     // MARK: - VLC Setup
     
     private func setupVLC(url: String) {
-        // 1. Basic percent encoding for spaces, but keep structure intact
         guard let mediaUrl = URL(string: url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url) else {
             reportError("Invalid URL", reason: url)
             return
         }
         
-        // 2. Create Media Object
         let media = VLCMedia(url: mediaUrl)
-        
-        // 3. Network Optimizations
-        // Increase caching to 3000ms (3s) to handle slow IPTV responses without stuttering
         media.addOptions([
             "network-caching": 3000,
             "clock-jitter": 0,
@@ -68,13 +66,12 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         vlcPlayer.media = media
         vlcPlayer.delegate = self
         
-        // 4. Start Playback
         vlcPlayer.play()
         self.isPlaying = true
         self.isBuffering = true
         
         startProgressTracking()
-        triggerControls() // Show controls immediately on start
+        triggerControls()
     }
     
     // MARK: - VLC Delegate Methods
@@ -113,14 +110,12 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     nonisolated func mediaPlayerTimeChanged(_ aNotification: Notification) {
         Task { @MainActor in
-            guard let player = aNotification.object as? VLCMediaPlayer else { return }
+            // Don't update time if user is actively scrubbing
+            guard !self.isScrubbing else { return }
             
-            // OPTIMIZATION: Only update if the difference is significant to avoid
-            // fighting with the optimistic scrubbing updates.
-            let newTime = Double(player.time.intValue) / 1000.0
-            if abs(newTime - self.currentTime) > 0.5 || player.isPlaying {
-                self.currentTime = newTime
-            }
+            guard let player = aNotification.object as? VLCMediaPlayer else { return }
+            let time = player.time
+            self.currentTime = Double(time.intValue) / 1000.0
         }
     }
     
@@ -139,7 +134,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         triggerControls(forceShow: true)
     }
     
-    // MARK: - Seeking Logic
+    // MARK: - Discrete Seeking (Click)
     
     func seekForward(seconds: Int = 10) {
         seek(by: seconds)
@@ -152,25 +147,38 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private func seek(by seconds: Int) {
         guard vlcPlayer.isSeekable else { return }
         
-        // 1. Calculate new time
-        let currentMs = Int32(self.currentTime * 1000) // Use local source of truth for smoothness
+        let currentMs = Int32(self.currentTime * 1000)
         let deltaMs = Int32(seconds * 1000)
         let newTimeMs = currentMs + deltaMs
-        
-        // 2. Bounds checking
         let maxTimeMs = Int32(duration * 1000)
         let safeTimeMs = max(0, min(newTimeMs, maxTimeMs))
         
-        // 3. Optimistic UI Update (CRITICAL FIX)
-        // We update the UI immediately so the user sees the slider move.
-        // We don't wait for VLC to report back.
         self.currentTime = Double(safeTimeMs) / 1000.0
-        
-        // 4. Apply Seek to Player
         vlcPlayer.time = VLCTime(int: safeTimeMs)
-        
-        // 5. Feedback
         triggerControls(forceShow: true)
+    }
+    
+    // MARK: - Continuous Scrubbing (Drag)
+    
+    func startScrubbing(translation: CGFloat, screenWidth: CGFloat) {
+        isScrubbing = true
+        triggerControls(forceShow: true)
+        
+        // Calculate scrubbing sensitivity (e.g., full swipe width = 2 minutes)
+        let sensitivity: Double = 120.0 // seconds
+        let percentage = Double(translation / screenWidth)
+        let timeDelta = sensitivity * percentage
+        
+        var newTime = currentTime + timeDelta
+        newTime = max(0, min(newTime, duration))
+        
+        self.currentTime = newTime
+    }
+    
+    func endScrubbing() {
+        isScrubbing = false
+        let ms = Int32(currentTime * 1000)
+        vlcPlayer.time = VLCTime(int: ms)
     }
     
     // MARK: - UI Management
@@ -182,7 +190,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if (vlcPlayer.isPlaying || forceShow == false) && !isError {
             controlHideTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
                 guard let self = self else { return }
-                if self.vlcPlayer.isPlaying {
+                if self.vlcPlayer.isPlaying && !self.isScrubbing {
                     withAnimation { self.showControls = false }
                 }
             }
@@ -211,13 +219,10 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         progressTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             
-            // Failsafe: If time is moving, kill the spinner (even if delegate missed the event)
-            // Only do this if we are actually playing to avoid hiding it during seek buffering
-            if self.vlcPlayer.isPlaying && self.currentTime > 0 && self.isBuffering {
+            if self.currentTime > 0 && self.isBuffering {
                 Task { @MainActor in self.isBuffering = false }
             }
             
-            // Save Progress (every 5s)
             if Int(self.currentTime) % 5 == 0 {
                 guard let repo = self.repository, let channel = self.currentChannel else { return }
                 let pos = Int64(self.currentTime * 1000)
