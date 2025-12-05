@@ -129,6 +129,9 @@ class SettingsViewModel: ObservableObject {
     @AppStorage("preferredResolution") var preferredResolution: String = "4K UHD"
     @AppStorage("autoHideForeign") var autoHideForeign: Bool = false
     
+    // NEW: Default Playback Speed
+    @AppStorage("defaultPlaybackSpeed") var defaultPlaybackSpeed: Double = 1.0
+    
     // --- Configuration Options ---
     let availableLanguages = [
         "English", "Dutch", "French", "German", "Spanish",

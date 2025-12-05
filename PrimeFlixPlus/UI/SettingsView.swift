@@ -46,7 +46,7 @@ struct SettingsView: View {
                 Spacer()
                 
                 // Version Info
-                Text("Cinemelt v1.2")
+                Text("Cinemelt v1.3")
                     .font(CinemeltTheme.fontBody(18))
                     .foregroundColor(.gray)
                     .padding(.horizontal, 20)
@@ -125,7 +125,7 @@ struct SettingsView: View {
                                 .buttonStyle(CinemeltCardButtonStyle())
                             }
                             
-                            // Auto-Hide Custom Toggle (Replaces standard Toggle for tvOS compatibility)
+                            // Auto-Hide Custom Toggle
                             Button(action: {
                                 viewModel.autoHideForeign.toggle()
                                 if viewModel.autoHideForeign {
@@ -179,29 +179,60 @@ struct SettingsView: View {
                                 .foregroundColor(CinemeltTheme.accent)
                                 .cinemeltGlow()
                             
-                            // Resolution Chips
-                            VStack(alignment: .leading, spacing: 15) {
-                                Text("Preferred Quality")
-                                    .font(CinemeltTheme.fontBody(22))
-                                    .foregroundColor(CinemeltTheme.cream.opacity(0.8))
-                                
-                                HStack(spacing: 20) {
-                                    ForEach(viewModel.availableResolutions, id: \.self) { res in
-                                        Button(action: { viewModel.preferredResolution = res }) {
-                                            Text(res)
-                                                .font(CinemeltTheme.fontBody(20))
-                                                .fontWeight(viewModel.preferredResolution == res ? .bold : .regular)
-                                                .padding(.horizontal, 24)
-                                                .padding(.vertical, 12)
-                                                .background(
-                                                    viewModel.preferredResolution == res ?
-                                                    CinemeltTheme.accent : Color.white.opacity(0.05)
-                                                )
-                                                .cornerRadius(12)
+                            HStack(alignment: .top, spacing: 40) {
+                                // Resolution Chips
+                                VStack(alignment: .leading, spacing: 15) {
+                                    Text("Preferred Quality")
+                                        .font(CinemeltTheme.fontBody(22))
+                                        .foregroundColor(CinemeltTheme.cream.opacity(0.8))
+                                    
+                                    HStack(spacing: 20) {
+                                        ForEach(viewModel.availableResolutions, id: \.self) { res in
+                                            Button(action: { viewModel.preferredResolution = res }) {
+                                                Text(res)
+                                                    .font(CinemeltTheme.fontBody(20))
+                                                    .fontWeight(viewModel.preferredResolution == res ? .bold : .regular)
+                                                    .padding(.horizontal, 24)
+                                                    .padding(.vertical, 12)
+                                                    .background(
+                                                        viewModel.preferredResolution == res ?
+                                                        CinemeltTheme.accent : Color.white.opacity(0.05)
+                                                    )
+                                                    .cornerRadius(12)
+                                            }
+                                            .buttonStyle(CinemeltCardButtonStyle())
+                                            .foregroundColor(viewModel.preferredResolution == res ? .black : CinemeltTheme.cream)
                                         }
-                                        .buttonStyle(CinemeltCardButtonStyle())
-                                        .foregroundColor(viewModel.preferredResolution == res ? .black : CinemeltTheme.cream)
                                     }
+                                }
+                                
+                                Spacer()
+                                
+                                // NEW: Default Playback Speed
+                                VStack(alignment: .leading, spacing: 15) {
+                                    Text("Default Speed")
+                                        .font(CinemeltTheme.fontBody(22))
+                                        .foregroundColor(CinemeltTheme.cream.opacity(0.8))
+                                    
+                                    Menu {
+                                        ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
+                                            Button("\(String(format: "%g", speed))x") {
+                                                viewModel.defaultPlaybackSpeed = speed
+                                            }
+                                        }
+                                    } label: {
+                                        HStack {
+                                            Text("\(String(format: "%g", viewModel.defaultPlaybackSpeed))x")
+                                                .font(CinemeltTheme.fontBody(22))
+                                                .fontWeight(.bold)
+                                            Image(systemName: "chevron.down")
+                                        }
+                                        .padding(.horizontal, 20)
+                                        .padding(.vertical, 12)
+                                        .background(Color.white.opacity(0.05))
+                                        .cornerRadius(12)
+                                    }
+                                    .buttonStyle(CinemeltCardButtonStyle())
                                 }
                             }
                         }
@@ -229,7 +260,7 @@ struct SettingsView: View {
                                     HStack(spacing: 15) {
                                         Image(systemName: "exclamationmark.arrow.circlepath")
                                             .font(.title)
-                                            .foregroundColor(.red) // Red for danger/nuclear
+                                            .foregroundColor(.red)
                                             .frame(width: 40)
                                         
                                         VStack(alignment: .leading) {
@@ -244,7 +275,7 @@ struct SettingsView: View {
                                     }
                                     .padding(20)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Color.red.opacity(0.05)) // Subtle red tint background
+                                    .background(Color.red.opacity(0.05))
                                     .cornerRadius(16)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 16)
@@ -381,7 +412,6 @@ struct LanguageSelectionView: View {
                         ForEach(viewModel.availableLanguages, id: \.self) { lang in
                             Button(action: {
                                 viewModel.preferredLanguage = lang
-                                // Trigger Auto-Hide again if enabled when language changes
                                 if viewModel.autoHideForeign {
                                     viewModel.runAutoHidingLogic()
                                 }

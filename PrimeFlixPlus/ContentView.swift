@@ -115,7 +115,12 @@ struct ContentView: View, Equatable {
                 case .player(let channel):
                     PlayerView(
                         channel: channel,
-                        onBack: { goBack() }
+                        onBack: { goBack() },
+                        onPlayChannel: { nextChannel in
+                            // Switch directly to the next channel (Play Next Episode)
+                            // We do NOT push to stack here to avoid infinite back-stack depth
+                            currentDestination = .player(nextChannel)
+                        }
                     )
                     
                 case .settings:
