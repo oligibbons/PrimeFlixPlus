@@ -120,7 +120,7 @@ class M3UParser {
         let info = TitleNormalizer.parse(rawTitle: rawTitle) // CPU Heavy Step
         
         // Heuristic Type Detection
-        let type: String
+        var type: String
         let lowerUrl = streamUrl.lowercased()
         
         if lowerUrl.contains("/movie/") || lowerUrl.hasSuffix(".mp4") || lowerUrl.hasSuffix(".mkv") {
@@ -131,14 +131,19 @@ class M3UParser {
             type = "live"
         }
         
-        // Extract Season/Episode info if it looks like a series episode hidden in a VOD/M3U list
+        // Extract Season/Episode info using the Centralized Logic
         var s = 0
         var e = 0
         
         if type == "series" || type == "movie" {
-            let parsed = parseSeasonEpisode(from: rawTitle)
+            let parsed = ChannelStruct.parseSeasonEpisode(from: rawTitle)
             s = parsed.0
             e = parsed.1
+            
+            // If we found S/E data, enforce "series" type even if URL looked like a movie
+            if s > 0 || e > 0 {
+                type = "series"
+            }
         }
         
         return ChannelStruct(
@@ -150,36 +155,9 @@ class M3UParser {
             type: type,
             canonicalTitle: rawTitle,
             quality: info.quality,
-            // Updated to satisfy the new initializer from IntermediateModels.swift
-            seriesId: nil, // M3U files rarely provide a clean Series ID, so we leave it nil
+            seriesId: nil, // M3U files rarely provide a clean Series ID
             season: s,
             episode: e
         )
-    }
-    
-    // Regex helper for M3U titles (e.g. "The Office S01 E05")
-    // Replicated here to keep the Parser self-contained within the Task
-    private static func parseSeasonEpisode(from title: String) -> (Int, Int) {
-        let patterns = [
-            "(?i)(S)(\\d+)\\s*(E)(\\d+)", // S01E01
-            "(?i)(\\d+)x(\\d+)"           // 1x01
-        ]
-        
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern),
-               let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)) {
-                
-                let nsString = title as NSString
-                // Adjust ranges based on pattern groups
-                let sIndex = match.numberOfRanges == 5 ? 2 : 1
-                let eIndex = match.numberOfRanges == 5 ? 4 : 2
-                
-                if let s = Int(nsString.substring(with: match.range(at: sIndex))),
-                   let e = Int(nsString.substring(with: match.range(at: eIndex))) {
-                    return (s, e)
-                }
-            }
-        }
-        return (0, 0)
     }
 }

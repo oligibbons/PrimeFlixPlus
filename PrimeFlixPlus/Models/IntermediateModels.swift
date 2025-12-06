@@ -123,7 +123,6 @@ struct ChannelStruct {
         )
     }
     
-    // Helper to allow ingesting specific episodes if needed later
     static func from(_ item: XtreamChannelInfo.Episode, seriesId: String, playlistUrl: String, input: XtreamInput, cover: String?) -> ChannelStruct {
         let rawName = item.title ?? "Episode \(item.episodeNum)"
         let streamUrl = "\(input.basicUrl)/series/\(input.username)/\(input.password)/\(item.id).\(item.containerExtension)"
@@ -143,14 +142,20 @@ struct ChannelStruct {
         )
     }
     
-    // MARK: - Metadata Extraction Helper
+    // MARK: - Centralized Metadata Extraction (Public)
     
-    /// Extracts S01E01 style info from a string.
-    /// Moved here from runtime logic to ingestion logic for performance.
-    private static func parseSeasonEpisode(from title: String) -> (Int, Int) {
+    /// Extracts S01E01 or Absolute Ordering (Episode 100) info from a string.
+    /// Now public so M3UParser can use it, ensuring consistency.
+    static func parseSeasonEpisode(from title: String) -> (Int, Int) {
         let patterns = [
-            "(?i)(S)(\\d+)\\s*(E)(\\d+)", // S01E01
-            "(?i)(\\d+)x(\\d+)"           // 1x01
+            // Standard: S01E01, S1E1
+            "(?i)S(\\d{1,2})\\s*E(\\d{1,2})",
+            // X Notation: 1x01
+            "(?i)(\\d{1,2})x(\\d{1,2})",
+            // Verbose: Season 1 Episode 1
+            "(?i)Season\\s*(\\d{1,2}).*Episode\\s*(\\d{1,3})",
+            // Absolute: Episode 100 (Treats as Season 1, Ep 100)
+            "(?i)(?:^|\\s)(?:Ep|Episode)[\\.]?\\s*(\\d{1,4})"
         ]
         
         for pattern in patterns {
@@ -158,16 +163,31 @@ struct ChannelStruct {
                let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)) {
                 
                 let nsString = title as NSString
-                // Adjust ranges based on pattern groups
-                let sIndex = match.numberOfRanges == 5 ? 2 : 1
-                let eIndex = match.numberOfRanges == 5 ? 4 : 2
                 
-                if let s = Int(nsString.substring(with: match.range(at: sIndex))),
-                   let e = Int(nsString.substring(with: match.range(at: eIndex))) {
+                // Case A: S01E01 (2 groups)
+                if match.numberOfRanges >= 3 {
+                    let s = Int(nsString.substring(with: match.range(at: 1))) ?? 0
+                    let e = Int(nsString.substring(with: match.range(at: 2))) ?? 0
                     return (s, e)
+                }
+                // Case B: Absolute Ordering (1 group) -> Default to Season 1
+                else if match.numberOfRanges == 2 {
+                    let e = Int(nsString.substring(with: match.range(at: 1))) ?? 0
+                    return (1, e)
                 }
             }
         }
+        
+        // Fallback: Check for loose number at end of string (Risky, but useful for Anime: "One Piece - 1050")
+        // Only if it doesn't look like a year (19xx or 20xx)
+        if let looseRegex = try? NSRegularExpression(pattern: "\\s-\\s(\\d{1,4})(?:\\s|$|\\[|\\()"),
+           let match = looseRegex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)) {
+            let valStr = (title as NSString).substring(with: match.range(at: 1))
+            if let val = Int(valStr), (val < 1900 || val > 2100) {
+                return (1, val)
+            }
+        }
+        
         return (0, 0)
     }
 }
