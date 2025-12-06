@@ -11,27 +11,27 @@ class ChannelRepository {
     // MARK: - "Your Fresh Content" (Killer Feature)
     
     /// Finds new content (Sequels, New Seasons) for franchises the user has interacted with.
+    /// NOW UPGRADED: Checks History, Favorites, AND "Loose Mode" Onboarding choices.
     func getFreshFranchiseContent(type: String) -> [Channel] {
-        // 1. Identify "Franchises" from History & Favorites
+        // 1. Identify "Franchises" from History, Favorites, AND Taste Profile
         var franchiseRoots = Set<String>()
-        var watchedIds = Set<String>()
+        var watchedIds = Set<String>() // Set of URLs we know are watched
         
         context.performAndWait {
-            // A. From History
+            // A. From Watch History (Local Playback)
             let historyReq = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
             historyReq.fetchLimit = 100
             if let history = try? context.fetch(historyReq) {
                 for item in history {
                     watchedIds.insert(item.channelUrl)
                     if let ch = self.getChannel(byUrl: item.channelUrl), ch.type == type {
-                        // Use the consolidated franchise root logic
                         let root = self.extractFranchiseRoot(from: ch.title)
                         if root.count > 3 { franchiseRoots.insert(root) }
                     }
                 }
             }
             
-            // B. From Favorites
+            // B. From Core Data Favorites (Local Library)
             let favReq = NSFetchRequest<Channel>(entityName: "Channel")
             favReq.predicate = NSPredicate(format: "isFavorite == YES AND type == %@", type)
             if let favs = try? context.fetch(favReq) {
@@ -40,11 +40,31 @@ class ChannelRepository {
                     if root.count > 3 { franchiseRoots.insert(root) }
                 }
             }
+            
+            // C. From Taste Profile (Onboarding "Loose Mode" Items) - NEW
+            let tasteReq = NSFetchRequest<TasteItem>(entityName: "TasteItem")
+            // "Loved" or "Watched" status implies interest in the franchise
+            let typePredicate = (type == "series") ? "tv" : "movie"
+            tasteReq.predicate = NSPredicate(format: "mediaType == %@ AND (status == 'loved' OR status == 'watched')", typePredicate)
+            
+            if let tasteItems = try? context.fetch(tasteReq) {
+                for item in tasteItems {
+                    if let title = item.title {
+                        let root = self.extractFranchiseRoot(from: title)
+                        if root.count > 3 { franchiseRoots.insert(root) }
+                        
+                        // Note: We don't have a URL for these loose items, so we can't add to 'watchedIds'.
+                        // This means if the user has the file locally but hasn't watched it, it might show up.
+                        // Ideally, we would match local content to this ID to exclude it, but for "Fresh Content",
+                        // showing the movie they just said they loved is actually okay (it puts it front and center).
+                    }
+                }
+            }
         }
         
         if franchiseRoots.isEmpty { return [] }
         
-        // 2. Search for UNWATCHED items matching these roots
+        // 2. Search for items matching these roots
         var freshContent: [Channel] = []
         let candidatesReq = NSFetchRequest<Channel>(entityName: "Channel")
         candidatesReq.predicate = NSPredicate(format: "type == %@", type)
@@ -54,17 +74,21 @@ class ChannelRepository {
         context.performAndWait {
             if let candidates = try? context.fetch(candidatesReq) {
                 for ch in candidates {
-                    // Skip if already watched
+                    // Skip if already watched (Local check)
                     if watchedIds.contains(ch.url) { continue }
                     
                     // Check if it belongs to a known franchise
                     let title = self.extractFranchiseRoot(from: ch.title)
-                    // Quick check: Does title start with any root?
+                    
+                    // Fuzzy contains check
                     if franchiseRoots.contains(where: { title.localizedCaseInsensitiveContains($0) }) {
-                        freshContent.append(ch)
+                        // Avoid duplicates if multiple roots match
+                        if !freshContent.contains(where: { $0.url == ch.url }) {
+                            freshContent.append(ch)
+                        }
                     }
                     
-                    if freshContent.count >= 15 { break }
+                    if freshContent.count >= 20 { break }
                 }
             }
         }
@@ -79,13 +103,12 @@ class ChannelRepository {
         let info = TitleNormalizer.parse(rawTitle: title)
         var clean = info.normalizedTitle
         
-        // 2. Remove Season/Episode markers (already handled by TitleNormalizer, safe redundancy)
+        // 2. Remove Season/Episode markers
         if let range = clean.range(of: " S\\d+", options: .regularExpression) {
             clean = String(clean[..<range.lowerBound])
         }
         
         // 3. Remove Sequel Numbers (e.g. "Iron Man 2" -> "Iron Man")
-        // NOTE: This must be done AFTER normalization (which converts Roman numerals to digits).
         if let range = clean.range(of: "\\s\\d+$", options: .regularExpression) {
             clean = String(clean[..<range.lowerBound])
         }
@@ -105,21 +128,29 @@ class ChannelRepository {
         var preferredGroups = Set<String>()
         var regionalWhitelist = Set<String>()
         
-        // Current System Locale (e.g., "US", "GB", "FR")
+        // NEW: Load Taste Profile Genres
+        var onboardingGenres: [String] = []
+        
+        // Current System Locale
         let systemRegion = Locale.current.regionCode?.uppercased() ?? "US"
         regionalWhitelist.insert(systemRegion)
         
         context.performAndWait {
-            // Analyze History for Regions
+            // A. Taste Profile (Onboarding)
+            let profileReq = NSFetchRequest<TasteProfile>(entityName: "TasteProfile")
+            if let profile = try? context.fetch(profileReq).first {
+                if let genresStr = profile.selectedGenres {
+                    onboardingGenres = genresStr.components(separatedBy: ",")
+                }
+            }
+            
+            // B. Analyze History for Regions
             let historyReq = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
             historyReq.fetchLimit = 50
             if let history = try? context.fetch(historyReq) {
                 for item in history {
                     if let ch = self.getChannel(byUrl: item.channelUrl), ch.type == type {
                         preferredGroups.insert(ch.group)
-                        
-                        // Smart Exception Logic:
-                        // If user watched a channel from a foreign group (e.g. "FR | Action"), add "FR" to whitelist.
                         if let prefix = extractRegionPrefix(from: ch.group) {
                             regionalWhitelist.insert(prefix)
                         }
@@ -127,7 +158,7 @@ class ChannelRepository {
                 }
             }
             
-            // From Favorites
+            // C. From Favorites
             let favReq = NSFetchRequest<Channel>(entityName: "Channel")
             favReq.predicate = NSPredicate(format: "isFavorite == YES AND type == %@", type)
             if let favs = try? context.fetch(favReq) {
@@ -140,11 +171,30 @@ class ChannelRepository {
             }
         }
         
-        if preferredGroups.isEmpty { return [] }
+        // Logic: If we have Onboarding Genres, we MUST prioritize searching for groups that match them.
+        // e.g. If user picked "Sci-Fi", we look for groups containing "Sci-Fi"
         
-        // 2. Fetch Unwatched Items from these Groups
         let request = NSFetchRequest<Channel>(entityName: "Channel")
-        request.predicate = NSPredicate(format: "type == %@ AND group IN %@", type, preferredGroups)
+        
+        var predicates: [NSPredicate] = [NSPredicate(format: "type == %@", type)]
+        
+        // Construct sophisticated predicate
+        // 1. Match preferred groups OR groups matching onboarding genres
+        var groupPredicates: [NSPredicate] = []
+        
+        if !preferredGroups.isEmpty {
+            groupPredicates.append(NSPredicate(format: "group IN %@", preferredGroups))
+        }
+        
+        for genre in onboardingGenres {
+            groupPredicates.append(NSPredicate(format: "group CONTAINS[cd] %@", genre))
+        }
+        
+        if !groupPredicates.isEmpty {
+            predicates.append(NSCompoundPredicate(orPredicateWithSubpredicates: groupPredicates))
+        }
+        
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         request.sortDescriptors = [NSSortDescriptor(key: "addedAt", ascending: false)]
         request.fetchLimit = 200
         
@@ -157,13 +207,11 @@ class ChannelRepository {
                 for ch in candidates {
                     if results.count >= 20 { break }
                     
-                    // --- Locale Filter ---
-                    // If the group has a region prefix (e.g. "DE | Drama"), it MUST be in the whitelist.
+                    // Locale Filter
                     if let prefix = extractRegionPrefix(from: ch.group) {
-                        // Special case: Keep "4K", "UHD", "VIP" generic tags
                         let isGeneric = ["4K", "UHD", "VIP", "VOD", "3D", "HEVC"].contains(prefix)
                         if !isGeneric && !regionalWhitelist.contains(prefix) {
-                            continue // Skip this foreign content
+                            continue
                         }
                     }
                     
@@ -180,11 +228,9 @@ class ChannelRepository {
     }
     
     private func extractRegionPrefix(from group: String) -> String? {
-        // Matches "US |", "UK:", "FR -" pattern
         let parts = group.components(separatedBy: CharacterSet(charactersIn: "|:-"))
         if let first = parts.first {
             let trimmed = first.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-            // Check if it looks like a country code (2-3 letters)
             if trimmed.count >= 2 && trimmed.count <= 3 && trimmed.allSatisfy({ $0.isLetter }) {
                 return trimmed
             }
@@ -208,7 +254,6 @@ class ChannelRepository {
         
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // 1. Search Channels (Targeting the clean 'title' for best UX)
         let channelReq = NSFetchRequest<Channel>(entityName: "Channel")
         channelReq.predicate = NSPredicate(format: "title CONTAINS[cd] %@", normalizedQuery)
         channelReq.fetchLimit = 50
@@ -230,7 +275,7 @@ class ChannelRepository {
             }
         }
         
-        // 2. Search EPG
+        // Search EPG
         let epgReq = NSFetchRequest<Programme>(entityName: "Programme")
         let now = Date()
         let threeHoursLater = now.addingTimeInterval(10800)
@@ -247,7 +292,6 @@ class ChannelRepository {
             programs = (try? context.fetch(epgReq)) ?? []
         }
         
-        // 3. Deduplicate Series
         let uniqueSeries = deduplicateChannels(series)
         
         return SearchResults(
@@ -258,14 +302,13 @@ class ChannelRepository {
         )
     }
     
-    // MARK: - Live TV Internal Search
+    // MARK: - Live TV Search
     
     func searchLiveContent(query: String) -> (categories: [String], channels: [Channel]) {
         guard !query.isEmpty else { return ([], []) }
         
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // 1. Search Categories (Groups)
         let groupRequest = NSFetchRequest<NSDictionary>(entityName: "Channel")
         groupRequest.resultType = .dictionaryResultType
         groupRequest.returnsDistinctResults = true
@@ -281,7 +324,6 @@ class ChannelRepository {
             }
         }
         
-        // 2. Search Channels
         let channelRequest = NSFetchRequest<Channel>(entityName: "Channel")
         channelRequest.predicate = NSPredicate(format: "type == 'live' AND title CONTAINS[cd] %@", normalizedQuery)
         channelRequest.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
@@ -296,7 +338,7 @@ class ChannelRepository {
         return (matchingGroups, matchingChannels)
     }
     
-    // MARK: - Smart "Continue Watching" Logic
+    // MARK: - Smart "Continue Watching"
     
     func getSmartContinueWatching(type: String) -> [Channel] {
         let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
@@ -331,7 +373,6 @@ class ChannelRepository {
                         results.append(channel)
                         processedSeriesMap[seriesKey] = true
                     } else {
-                        // FIX: Next episode logic should leverage the new S/E metadata directly if present
                         if let nextEp = findNextEpisode(currentChannel: channel) {
                             results.append(nextEp)
                             processedSeriesMap[seriesKey] = true
@@ -346,9 +387,7 @@ class ChannelRepository {
     }
     
     private func findNextEpisode(currentChannel: Channel) -> Channel? {
-        // --- OPTIMIZATION START: Use structured metadata first ---
         if currentChannel.seriesId != nil, currentChannel.season > 0, currentChannel.episode > 0 {
-            // Check next episode in current season
             if let next = findSpecificEpisodeByMetadata(
                 playlistUrl: currentChannel.playlistUrl,
                 seriesId: currentChannel.seriesId!,
@@ -357,7 +396,6 @@ class ChannelRepository {
             ) {
                 return next
             }
-            // Check first episode of next season
             if let nextSeason = findSpecificEpisodeByMetadata(
                 playlistUrl: currentChannel.playlistUrl,
                 seriesId: currentChannel.seriesId!,
@@ -367,46 +405,21 @@ class ChannelRepository {
                 return nextSeason
             }
         }
-        // --- OPTIMIZATION END ---
         
-        // --- FALLBACK: Legacy regex logic ---
         let raw = currentChannel.title
-        // IMPORTANT: We now call the Centralized Season/Episode Parser in IntermediateModels
         let (s, e) = ChannelStruct.parseSeasonEpisode(from: raw)
         
-        // If we found any S/E using the robust logic, use it to find the next item
         if s > 0 || e > 0 {
             return findNext(currentChannel: currentChannel, season: s, episode: e)
         }
         return nil
     }
     
-    /// NEW: Optimized lookup using Core Data's structured metadata (seriesId, season, episode)
     private func findSpecificEpisodeByMetadata(playlistUrl: String, seriesId: String, season: Int, episode: Int) -> Channel? {
         let req = NSFetchRequest<Channel>(entityName: "Channel")
         req.predicate = NSPredicate(format: "playlistUrl == %@ AND seriesId == %@ AND season == %d AND episode == %d", playlistUrl, seriesId, season, episode)
         req.fetchLimit = 1
         return try? context.fetch(req).first
-    }
-    
-    // Legacy Regex lookup (kept for robustness, but should be secondary)
-    private func extractSeasonEpisode(from title: String, pattern: String) -> (Int, Int)? {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        let nsString = title as NSString
-        let results = regex.matches(in: title, range: NSRange(location: 0, length: nsString.length))
-        
-        guard let match = results.first, match.numberOfRanges >= 3 else { return nil }
-        
-        let sIndex = match.numberOfRanges == 5 ? 2 : 1
-        let eIndex = match.numberOfRanges == 5 ? 4 : 2
-        
-        let sRange = match.range(at: sIndex)
-        let eRange = match.range(at: eIndex)
-        
-        guard let s = Int(nsString.substring(with: sRange)),
-              let e = Int(nsString.substring(with: eRange)) else { return nil }
-        
-        return (s, e)
     }
     
     private func findNext(currentChannel: Channel, season: Int, episode: Int) -> Channel? {
@@ -445,7 +458,7 @@ class ChannelRepository {
         }
     }
     
-    // MARK: - Smart Categorization
+    // MARK: - Standard Helpers
     
     func getFavorites(type: String) -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
@@ -508,8 +521,6 @@ class ChannelRepository {
         return matches
     }
     
-    // MARK: - Basic Fetching
-    
     func getChannel(byUrl url: String) -> Channel? {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "url == %@", url)
@@ -533,7 +544,6 @@ class ChannelRepository {
         let rawSource = channel.canonicalTitle ?? channel.title
         let info = TitleNormalizer.parse(rawTitle: rawSource)
         let targetTitle = info.normalizedTitle.lowercased()
-        
         let prefix = String(targetTitle.prefix(4))
         
         let request = NSFetchRequest<Channel>(entityName: "Channel")

@@ -5,7 +5,10 @@ struct SettingsView: View {
     @EnvironmentObject var repository: PrimeFlixRepository
     
     var onBack: () -> Void
-    var onSpeedTest: () -> Void // <- NEW ACTION
+    var onSpeedTest: () -> Void
+    
+    // NEW: Trigger for re-taking the questionnaire
+    @State private var showOnboarding: Bool = false
     
     @FocusState private var focusedField: String?
     
@@ -47,7 +50,7 @@ struct SettingsView: View {
                 Spacer()
                 
                 // Version Info
-                Text("Cinemelt v1.3")
+                Text("Cinemelt v1.4")
                     .font(CinemeltTheme.fontBody(18))
                     .foregroundColor(.gray)
                     .padding(.horizontal, 20)
@@ -62,12 +65,29 @@ struct SettingsView: View {
             )
             
             // RIGHT PANE: Content Scroll
-            // Wrapped in NavigationView to support drill-down for Language/Categories
             NavigationView {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 50) {
                         
-                        // --- SECTION 1: CONTENT & FILTERING ---
+                        // --- SECTION 1: PERSONALIZATION (NEW) ---
+                        VStack(alignment: .leading, spacing: 25) {
+                            Text("Personalization")
+                                .font(CinemeltTheme.fontTitle(32))
+                                .foregroundColor(CinemeltTheme.accent)
+                                .cinemeltGlow()
+                            
+                            // Re-take Taste Profile
+                            ActionCard(
+                                icon: "sparkles.tv.fill",
+                                title: "Taste Profile",
+                                subtitle: "Update genres, moods, and favorites",
+                                action: { showOnboarding = true }
+                            )
+                        }
+                        .padding(40)
+                        .cinemeltGlass()
+                        
+                        // --- SECTION 2: CONTENT & FILTERING ---
                         VStack(alignment: .leading, spacing: 25) {
                             Text("Content Preferences")
                                 .font(CinemeltTheme.fontTitle(32))
@@ -152,7 +172,6 @@ struct SettingsView: View {
                                     
                                     Spacer()
                                     
-                                    // Custom Switch Visual
                                     ZStack {
                                         Capsule()
                                             .fill(viewModel.autoHideForeign ? CinemeltTheme.accent : Color.white.opacity(0.2))
@@ -173,7 +192,7 @@ struct SettingsView: View {
                         .padding(40)
                         .cinemeltGlass()
                         
-                        // --- SECTION 2: PLAYBACK ---
+                        // --- SECTION 3: PLAYBACK ---
                         VStack(alignment: .leading, spacing: 25) {
                             Text("Playback")
                                 .font(CinemeltTheme.fontTitle(32))
@@ -181,7 +200,6 @@ struct SettingsView: View {
                                 .cinemeltGlow()
                             
                             HStack(alignment: .top, spacing: 40) {
-                                // Resolution Chips
                                 VStack(alignment: .leading, spacing: 15) {
                                     Text("Preferred Quality")
                                         .font(CinemeltTheme.fontBody(22))
@@ -209,7 +227,6 @@ struct SettingsView: View {
                                 
                                 Spacer()
                                 
-                                // NEW: Default Playback Speed (Replaced Menu with ScrollView/Buttons for tvOS 15 support)
                                 VStack(alignment: .leading, spacing: 15) {
                                     Text("Default Speed")
                                         .font(CinemeltTheme.fontBody(22))
@@ -234,32 +251,30 @@ struct SettingsView: View {
                                                 .foregroundColor(viewModel.defaultPlaybackSpeed == speed ? .black : CinemeltTheme.cream)
                                             }
                                         }
-                                        .padding(10) // Padding for focus expansion
+                                        .padding(10)
                                     }
-                                    .frame(maxWidth: 600) // Constrain width
+                                    .frame(maxWidth: 600)
                                 }
                             }
                         }
                         .padding(40)
                         .cinemeltGlass()
                         
-                        // --- SECTION 3: DATA & SYNC ---
+                        // --- SECTION 4: DATA & SYNC ---
                         VStack(alignment: .leading, spacing: 25) {
                             Text("Data & Sync")
                                 .font(CinemeltTheme.fontTitle(32))
                                 .foregroundColor(CinemeltTheme.accent)
                                 .cinemeltGlow()
                             
-                            // NEW: Network Speed Test
                             ActionCard(
                                 icon: "bolt.badge.a",
                                 title: "Network Speed Test",
                                 subtitle: "Check connection quality for streaming",
-                                action: onSpeedTest // <- NEW ACTION
+                                action: onSpeedTest
                             )
                             
                             HStack(spacing: 30) {
-                                // 1. Update Library (Standard)
                                 ActionCard(
                                     icon: "arrow.triangle.2.circlepath",
                                     title: "Update Library",
@@ -267,7 +282,6 @@ struct SettingsView: View {
                                     action: { viewModel.forceUpdate() }
                                 )
                                 
-                                // 2. Nuclear Resync (Wipe & Reload)
                                 Button(action: { viewModel.nuclearResync() }) {
                                     HStack(spacing: 15) {
                                         Image(systemName: "exclamationmark.arrow.circlepath")
@@ -297,7 +311,6 @@ struct SettingsView: View {
                                 .buttonStyle(CinemeltCardButtonStyle())
                             }
                             
-                            // Cache Clear
                             ActionCard(
                                 icon: "trash",
                                 title: "Clear Image Cache",
@@ -308,7 +321,7 @@ struct SettingsView: View {
                         .padding(40)
                         .cinemeltGlass()
                         
-                        // --- SECTION 4: PROFILES ---
+                        // --- SECTION 5: PROFILES ---
                         if !viewModel.playlists.isEmpty {
                             VStack(alignment: .leading, spacing: 25) {
                                 Text("Active Profiles")
@@ -359,6 +372,10 @@ struct SettingsView: View {
             .focusSection()
         }
         .background(CinemeltTheme.mainBackground)
+        // MODAL INJECTION
+        .fullScreenCover(isPresented: $showOnboarding) {
+            OnboardingView(onComplete: { showOnboarding = false })
+        }
         .onAppear {
             viewModel.configure(repository: repository)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -369,7 +386,7 @@ struct SettingsView: View {
     }
 }
 
-// Helper View for Grid Buttons
+// (ActionCard and LanguageSelectionView reused from previous file)
 struct ActionCard: View {
     let icon: String
     let title: String
@@ -403,7 +420,6 @@ struct ActionCard: View {
     }
 }
 
-// Subview for Language Selection (included for completeness as it's defined in the original file)
 struct LanguageSelectionView: View {
     @ObservedObject var viewModel: SettingsViewModel
     @Environment(\.presentationMode) var presentationMode

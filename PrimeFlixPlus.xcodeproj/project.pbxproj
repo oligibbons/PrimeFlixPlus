@@ -71,6 +71,11 @@
 		D2AC8B2F2EE4828C00D440C3 /* NetworkSpeedTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B2E2EE4828C00D440C3 /* NetworkSpeedTester.swift */; };
 		D2AC8B312EE486E700D440C3 /* VPNDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B302EE486E700D440C3 /* VPNDetector.swift */; };
 		D2AC8B332EE488ED00D440C3 /* VPNWarningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B322EE488ED00D440C3 /* VPNWarningView.swift */; };
+		D2AC8B352EE49CD300D440C3 /* UserPreferencesRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B342EE49CD300D440C3 /* UserPreferencesRepository.swift */; };
+		D2AC8B372EE49D5C00D440C3 /* OnboardingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B362EE49D5C00D440C3 /* OnboardingViewModel.swift */; };
+		D2AC8B392EE49D7B00D440C3 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B382EE49D7B00D440C3 /* OnboardingView.swift */; };
+		D2AC8B3B2EE4A03100D440C3 /* TasteProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B3A2EE4A03100D440C3 /* TasteProfile.swift */; };
+		D2AC8B3D2EE4A05000D440C3 /* TasteItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B3C2EE4A05000D440C3 /* TasteItem.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -175,6 +180,11 @@
 		D2AC8B2E2EE4828C00D440C3 /* NetworkSpeedTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkSpeedTester.swift; sourceTree = "<group>"; };
 		D2AC8B302EE486E700D440C3 /* VPNDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VPNDetector.swift; sourceTree = "<group>"; };
 		D2AC8B322EE488ED00D440C3 /* VPNWarningView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VPNWarningView.swift; sourceTree = "<group>"; };
+		D2AC8B342EE49CD300D440C3 /* UserPreferencesRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserPreferencesRepository.swift; sourceTree = "<group>"; };
+		D2AC8B362EE49D5C00D440C3 /* OnboardingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingViewModel.swift; sourceTree = "<group>"; };
+		D2AC8B382EE49D7B00D440C3 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		D2AC8B3A2EE4A03100D440C3 /* TasteProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasteProfile.swift; sourceTree = "<group>"; };
+		D2AC8B3C2EE4A05000D440C3 /* TasteItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasteItem.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -290,6 +300,8 @@
 				D292D6632EDF49C900E8845A /* Programme.swift */,
 				D228AD0A2EDF5A22007C6114 /* Persistence.swift */,
 				D228AD0E2EDF6061007C6114 /* IntermediateModels.swift */,
+				D2AC8B3A2EE4A03100D440C3 /* TasteProfile.swift */,
+				D2AC8B3C2EE4A05000D440C3 /* TasteItem.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -318,6 +330,7 @@
 			isa = PBXGroup;
 			children = (
 				D292D66E2EDF4B4100E8845A /* PrimeFlixRepository.swift */,
+				D2AC8B342EE49CD300D440C3 /* UserPreferencesRepository.swift */,
 			);
 			path = Repositories;
 			sourceTree = "<group>";
@@ -334,6 +347,7 @@
 				D2AC8B082EE1FAE000D440C3 /* ContinueWatchingViewModel.swift */,
 				D2AC8B0C2EE1FB2F00D440C3 /* FavoritesViewModel.swift */,
 				D2AC8B2E2EE4828C00D440C3 /* NetworkSpeedTester.swift */,
+				D2AC8B362EE49D5C00D440C3 /* OnboardingViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -369,6 +383,7 @@
 				D2AC8B2A2EE382B700D440C3 /* SmartLoadingView.swift */,
 				D2AC8B2C2EE481D100D440C3 /* NetworkSpeedTestView.swift */,
 				D2AC8B322EE488ED00D440C3 /* VPNWarningView.swift */,
+				D2AC8B382EE49D7B00D440C3 /* OnboardingView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -534,6 +549,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D292D6722EDF4B7B00E8845A /* HomeViewModel.swift in Sources */,
+				D2AC8B3B2EE4A03100D440C3 /* TasteProfile.swift in Sources */,
 				D2AC8AF62EE0ADE900D440C3 /* SearchViewModel.swift in Sources */,
 				D2AC8AFE2EE1475700D440C3 /* GlassTextField.swift in Sources */,
 				D2AC8B112EE22EAF00D440C3 /* ManageCategoriesView.swift in Sources */,
@@ -542,6 +558,7 @@
 				D292D6772EDF4C3300E8845A /* HomeComponents.swift in Sources */,
 				D292D6642EDF49C900E8845A /* Programme.swift in Sources */,
 				D292D6522EDF45C000E8845A /* DataSource.swift in Sources */,
+				D2AC8B3D2EE4A05000D440C3 /* TasteItem.swift in Sources */,
 				D2AC8AFA2EE1419400D440C3 /* CinemeltStyle.swift in Sources */,
 				D2AC8B2F2EE4828C00D440C3 /* NetworkSpeedTester.swift in Sources */,
 				D292D6602EDF492100E8845A /* Channel.swift in Sources */,
@@ -560,6 +577,7 @@
 				D292D65A2EDF46EA00E8845A /* WatchProgress.swift in Sources */,
 				D2AC8B092EE1FAE000D440C3 /* ContinueWatchingViewModel.swift in Sources */,
 				D292D6542EDF45FE00E8845A /* XtreamModels.swift in Sources */,
+				D2AC8B352EE49CD300D440C3 /* UserPreferencesRepository.swift in Sources */,
 				D2AC8AFC2EE141AE00D440C3 /* SidebarView.swift in Sources */,
 				D228AD172EDF7311007C6114 /* SyncStatusOverlay.swift in Sources */,
 				D228AD1B2EDF7952007C6114 /* UnsafeSession.swift in Sources */,
@@ -569,7 +587,9 @@
 				D228AD0F2EDF6061007C6114 /* IntermediateModels.swift in Sources */,
 				D292D6692EDF4A4600E8845A /* M3UData.swift in Sources */,
 				D292D67C2EDF4D9E00E8845A /* HomeView.swift in Sources */,
+				D2AC8B372EE49D5C00D440C3 /* OnboardingViewModel.swift in Sources */,
 				D292D6272EDF458100E8845A /* PrimeFlixPlusApp.swift in Sources */,
+				D2AC8B392EE49D7B00D440C3 /* OnboardingView.swift in Sources */,
 				D2AC8B0D2EE1FB2F00D440C3 /* FavoritesViewModel.swift in Sources */,
 				D2AC8B0F2EE1FB4700D440C3 /* FavoritesView.swift in Sources */,
 				D2AC8B002EE148C100D440C3 /* EpisodeCard.swift in Sources */,

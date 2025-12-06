@@ -8,11 +8,14 @@ struct AddPlaylistView: View, Equatable {
     
     @StateObject private var viewModel = AddPlaylistViewModel()
     
-    // Dependency Injection (Stable)
+    // Dependency Injection
     let repository: PrimeFlixRepository
     
     var onPlaylistAdded: () -> Void
     var onBack: () -> Void
+    
+    // State for Onboarding Interception
+    @State private var showOnboarding: Bool = false
     
     // Define focusable fields
     enum Field: Hashable {
@@ -86,9 +89,8 @@ struct AddPlaylistView: View, Equatable {
                 VStack(spacing: 35) {
                     if viewModel.isLoading {
                         VStack(spacing: 30) {
-                            ProgressView()
-                                .tint(CinemeltTheme.accent)
-                                .scaleEffect(2.5)
+                            CinemeltLoadingIndicator()
+                                .scaleEffect(1.5)
                             Text("Authenticating...")
                                 .font(CinemeltTheme.fontBody(28))
                                 .foregroundColor(CinemeltTheme.accent)
@@ -105,9 +107,7 @@ struct AddPlaylistView: View, Equatable {
                                 .foregroundColor(focusedField == .url ? CinemeltTheme.accent : .gray)
                                 .padding(.leading, 4)
                             
-                            // FIX: Wrapped in ZStack to decouple scaling from the TextField
                             ZStack {
-                                // 1. The Visual Background (Scales)
                                 RoundedRectangle(cornerRadius: 16)
                                     .fill(Color.white.opacity(0.08))
                                     .overlay(
@@ -124,9 +124,8 @@ struct AddPlaylistView: View, Equatable {
                                     .scaleEffect(focusedField == .url ? 1.02 : 1.0)
                                     .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focusedField)
                                 
-                                // 2. The Input (Static Frame)
                                 TextField("http://provider.dns", text: $viewModel.serverUrl)
-                                    .textFieldStyle(.plain) // FIX: Disable system focus animations
+                                    .textFieldStyle(.plain)
                                     .font(CinemeltTheme.fontBody(26))
                                     .focused($focusedField, equals: .url)
                                     .submitLabel(.next)
@@ -226,7 +225,12 @@ struct AddPlaylistView: View, Equatable {
                         Button(action: {
                             Task {
                                 await viewModel.addAccount()
-                                if viewModel.isSuccess { onPlaylistAdded() }
+                                if viewModel.isSuccess {
+                                    // Trigger Onboarding instead of immediate exit
+                                    withAnimation {
+                                        showOnboarding = true
+                                    }
+                                }
                             }
                         }) {
                             HStack {
@@ -260,11 +264,18 @@ struct AddPlaylistView: View, Equatable {
         }
         .onAppear {
             viewModel.configure(repository: repository)
-            // FIX: Increased delay to 0.5s to ensure view is settled before focusing
-            // This matches the behavior in SearchView which works correctly.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if self.focusedField == nil { self.focusedField = .url }
             }
+        }
+        // INTEGRATION: Present Onboarding on Success
+        .fullScreenCover(isPresented: $showOnboarding, onDismiss: {
+            // Once onboarding is done (or skipped), proceed to Main App
+            onPlaylistAdded()
+        }) {
+            OnboardingView(onComplete: {
+                showOnboarding = false
+            })
         }
     }
 }

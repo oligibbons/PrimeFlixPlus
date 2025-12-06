@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The central Design System for "Cinemelt" v2.0.
+/// The central Design System for "Cinemelt" v2.1 (Visual Refinement Update).
 struct CinemeltTheme {
     
     // MARK: - Colors
@@ -67,7 +67,8 @@ struct GrainOverlay: View {
     var body: some View {
         GeometryReader { geo in
             Canvas { context, size in
-                for _ in 0..<Int(size.width * size.height / 400) {
+                // Optimized grain count for performance
+                for _ in 0..<Int(size.width * size.height / 500) {
                     let x = Double.random(in: 0...size.width)
                     let y = Double.random(in: 0...size.height)
                     let opacity = Double.random(in: 0...0.5)
@@ -77,6 +78,41 @@ struct GrainOverlay: View {
             }
         }
         .allowsHitTesting(false)
+    }
+}
+
+// MARK: - Premium Loading Indicator (NEW)
+struct CinemeltLoadingIndicator: View {
+    @State private var isAnimating: Bool = false
+    
+    var body: some View {
+        ZStack {
+            // Track
+            Circle()
+                .stroke(Color.white.opacity(0.1), lineWidth: 8)
+                .frame(width: 80, height: 80)
+            
+            // Spinner
+            Circle()
+                .trim(from: 0, to: 0.6)
+                .stroke(
+                    AngularGradient(
+                        gradient: Gradient(colors: [CinemeltTheme.accent, CinemeltTheme.accentDim]),
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 8, lineCap: .round)
+                )
+                .frame(width: 80, height: 80)
+                .rotationEffect(Angle(degrees: isAnimating ? 360 : 0))
+                .animation(
+                    Animation.linear(duration: 1.0)
+                        .repeatForever(autoreverses: false),
+                    value: isAnimating
+                )
+        }
+        .onAppear {
+            isAnimating = true
+        }
     }
 }
 
@@ -93,15 +129,20 @@ struct CinemeltGlassModifier: ViewModifier {
             .shadow(color: .black.opacity(0.4), radius: 15, x: 0, y: 10)
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    .stroke(LinearGradient(
+                        colors: [.white.opacity(0.2), .white.opacity(0.05)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ), lineWidth: 1)
             )
     }
 }
 
 struct CinemeltTextGlow: ViewModifier {
     func body(content: Content) -> some View {
-        // GLOW REMOVED per request: Clean, crisp text.
+        // Subtle glow for emphasis
         content
+            .shadow(color: CinemeltTheme.accent.opacity(0.3), radius: 8, x: 0, y: 0)
     }
 }
 
@@ -113,7 +154,8 @@ struct CinemeltCardButtonView: View {
     
     var body: some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.98 : (isFocused ? 1.1 : 1.0))
+            // Micro-Interaction: Bouncy scale on press
+            .scaleEffect(configuration.isPressed ? 0.95 : (isFocused ? 1.1 : 1.0))
             // Ambilight Glow
             .shadow(
                 color: isFocused ? CinemeltTheme.accent.opacity(0.7) : .black.opacity(0.3),
@@ -130,7 +172,11 @@ struct CinemeltCardButtonView: View {
                     .stroke(Color.white.opacity(isFocused ? 0.8 : 0), lineWidth: 2)
                     .blur(radius: isFocused ? 1 : 0)
             )
-            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isFocused)
+            // Animation Stack
+            // 1. Focus: Smooth spring
+            .animation(.spring(response: 0.35, dampingFraction: 0.65), value: isFocused)
+            // 2. Press: Rapid, tactile bounce (Pulse effect)
+            .animation(.spring(response: 0.2, dampingFraction: 0.4), value: configuration.isPressed)
             .zIndex(isFocused ? 1 : 0)
     }
 }

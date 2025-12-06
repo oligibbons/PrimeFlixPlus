@@ -1,21 +1,31 @@
 import SwiftUI
 
+// MARK: - Scroll Offset Logic
+struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @EnvironmentObject var repository: PrimeFlixRepository
     
-    // Updated Actions
     var onPlayChannel: (Channel) -> Void
     var onAddPlaylist: () -> Void
     var onSettings: () -> Void
-    var onSearch: (StreamType) -> Void // Now accepts the current tab type
+    var onSearch: (StreamType) -> Void
     
     @State private var heroChannel: Channel?
     
+    // Parallax State
+    @State private var scrollOffset: CGFloat = 0
+    
     var body: some View {
         ZStack {
-            // 1. Dynamic Background Layer
-            HomeBackgroundView(heroChannel: heroChannel)
+            // 1. Dynamic Background Layer with Parallax
+            HomeBackgroundView(heroChannel: heroChannel, scrollOffset: scrollOffset)
             
             // 2. Main Content Switcher
             if viewModel.selectedPlaylist == nil {
@@ -46,25 +56,30 @@ struct HomeView: View {
     // MARK: - Main Feed
     var mainFeed: some View {
         ScrollView(.vertical, showsIndicators: false) {
+            // Scroll Tracker
+            GeometryReader { geo in
+                Color.clear
+                    .preference(
+                        key: ScrollOffsetPreferenceKey.self,
+                        value: geo.frame(in: .named("homeScrollSpace")).minY
+                    )
+            }
+            .frame(height: 0)
+            
             VStack(alignment: .leading, spacing: 10) {
                 
-                // Header (Now includes Search & Settings)
+                // Header
                 HomeHeaderView(
                     greeting: viewModel.timeGreeting,
                     title: viewModel.witGreeting,
-                    onSearch: {
-                        // Pass the current active tab to the search view
-                        onSearch(viewModel.selectedTab)
-                    },
+                    onSearch: { onSearch(viewModel.selectedTab) },
                     onSettings: onSettings
                 )
                 
                 // Tabs
                 HomeFilterBar(
                     selectedTab: viewModel.selectedTab,
-                    onSelect: { tab in
-                        viewModel.selectTab(tab)
-                    }
+                    onSelect: { tab in viewModel.selectTab(tab) }
                 )
                 
                 if viewModel.isLoading {
@@ -79,12 +94,16 @@ struct HomeView: View {
                         onFocus: { ch in
                             withAnimation(.easeInOut(duration: 0.5)) { heroChannel = ch }
                         },
-                        onLoadMore: {
-                            viewModel.loadMoreGenres()
-                        }
+                        onLoadMore: { viewModel.loadMoreGenres() }
                     )
                 }
             }
+        }
+        .coordinateSpace(name: "homeScrollSpace")
+        .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+            // Smoothly animate the offset change or set directly
+            // Direct set is usually better for scroll sync
+            self.scrollOffset = value
         }
     }
 }
@@ -93,6 +112,7 @@ struct HomeView: View {
 
 struct HomeBackgroundView: View {
     let heroChannel: Channel?
+    var scrollOffset: CGFloat = 0
     
     var body: some View {
         ZStack {
@@ -103,10 +123,13 @@ struct HomeBackgroundView: View {
                     AsyncImage(url: URL(string: hero.cover ?? "")) { image in
                         image.resizable()
                             .aspectRatio(contentMode: .fill)
-                            .frame(width: geo.size.width, height: geo.size.height)
+                            .frame(width: geo.size.width, height: geo.size.height + 200) // Taller for parallax
                             .blur(radius: 80)
                             .opacity(0.5)
                             .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .clear, location: 0.7)], startPoint: .topTrailing, endPoint: .bottomLeading))
+                            // Parallax Effect: Move background slightly up as user scrolls down
+                            .offset(y: -scrollOffset * 0.15)
+                            .animation(.linear(duration: 0.1), value: scrollOffset)
                     } placeholder: { Color.clear }
                 }
                 .ignoresSafeArea()
@@ -114,6 +137,24 @@ struct HomeBackgroundView: View {
                 .id(hero.url)
             }
         }
+    }
+}
+
+struct HomeLoadingState: View {
+    var body: some View {
+        HStack {
+            Spacer()
+            VStack(spacing: 30) {
+                // Use Premium Spinner
+                CinemeltLoadingIndicator()
+                
+                Text("Loading Library...")
+                    .cinemeltBody()
+                    .transition(.opacity)
+            }
+            Spacer()
+        }
+        .padding(.top, 100)
     }
 }
 
@@ -216,24 +257,6 @@ struct HomeFilterBar: View {
     }
 }
 
-// ... (Rest of the subviews like HomeLoadingState, HomeLanesView, HomeSectionRow, HomeDrillDownView, HomeProfileSelector remain unchanged)
-// For brevity, assuming they are present as provided in previous turns.
-// If you need the full file with *every* subview again, let me know, but the key changes were in HomeView and HomeHeaderView above.
-
-struct HomeLoadingState: View {
-    var body: some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 30) {
-                ProgressView().tint(CinemeltTheme.accent).scaleEffect(2.0)
-                Text("Loading Library...").cinemeltBody()
-            }
-            Spacer()
-        }
-        .padding(.top, 100)
-    }
-}
-
 struct HomeLanesView: View {
     let sections: [HomeSection]
     let isLoadingMore: Bool
@@ -253,7 +276,6 @@ struct HomeLanesView: View {
                 )
             }
             
-            // MARK: - Infinite Scroll Trigger
             Color.clear
                 .frame(height: 50)
                 .onAppear {
@@ -263,9 +285,8 @@ struct HomeLanesView: View {
             if isLoadingMore {
                 HStack {
                     Spacer()
-                    ProgressView()
-                        .tint(CinemeltTheme.accent)
-                        .scaleEffect(1.5)
+                    CinemeltLoadingIndicator()
+                        .scaleEffect(0.8)
                     Spacer()
                 }
                 .padding(.bottom, 50)

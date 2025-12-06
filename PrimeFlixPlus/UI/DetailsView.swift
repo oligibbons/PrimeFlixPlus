@@ -88,9 +88,8 @@ struct DetailsView: View {
     
     private var loadingState: some View {
         VStack(spacing: 30) {
-            ProgressView()
-                .tint(CinemeltTheme.accent)
-                .scaleEffect(2.0)
+            // Updated: Premium Spinner implementation
+            CinemeltLoadingIndicator()
             
             Text("Loading Details...")
                 .font(CinemeltTheme.fontBody(24))

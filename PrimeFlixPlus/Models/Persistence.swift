@@ -37,7 +37,7 @@ struct PersistenceController {
             NSAttributeDescription(name: "addedAt", type: .dateAttributeType),
             NSAttributeDescription(name: "isFavorite", type: .booleanAttributeType),
             
-            // NEW: Structured Series Metadata for "Next Episode" Logic
+            // Structured Series Metadata
             NSAttributeDescription(name: "seriesId", type: .stringAttributeType),
             NSAttributeDescription(name: "season", type: .integer16AttributeType),
             NSAttributeDescription(name: "episode", type: .integer16AttributeType)
@@ -87,9 +87,44 @@ struct PersistenceController {
             NSAttributeDescription(name: "voteAverage", type: .doubleAttributeType),
             NSAttributeDescription(name: "lastUpdated", type: .dateAttributeType)
         ]
+        
+        // --- NEW Entity: TasteProfile (Onboarding) ---
+        // Stores high-level preferences (Moods, Genres)
+        let tasteProfileEntity = NSEntityDescription()
+        tasteProfileEntity.name = "TasteProfile"
+        tasteProfileEntity.managedObjectClassName = "TasteProfile"
+        
+        tasteProfileEntity.properties = [
+            NSAttributeDescription(name: "id", type: .stringAttributeType), // Singleton ID "user_main"
+            NSAttributeDescription(name: "selectedMoods", type: .stringAttributeType), // Comma-separated
+            NSAttributeDescription(name: "selectedGenres", type: .stringAttributeType), // Comma-separated
+            NSAttributeDescription(name: "isOnboardingComplete", type: .booleanAttributeType)
+        ]
+        
+        // --- NEW Entity: TasteItem (Specific Shows) ---
+        // Stores specific shows the user has marked as Watched/Loved (Loose Mode)
+        let tasteItemEntity = NSEntityDescription()
+        tasteItemEntity.name = "TasteItem"
+        tasteItemEntity.managedObjectClassName = "TasteItem"
+        
+        tasteItemEntity.properties = [
+            NSAttributeDescription(name: "tmdbId", type: .integer64AttributeType),
+            NSAttributeDescription(name: "title", type: .stringAttributeType),
+            NSAttributeDescription(name: "mediaType", type: .stringAttributeType), // "movie" or "tv"
+            NSAttributeDescription(name: "status", type: .stringAttributeType), // "watched", "loved"
+            NSAttributeDescription(name: "createdAt", type: .dateAttributeType)
+        ]
 
         // --- Finalize Model ---
-        model.entities = [playlistEntity, channelEntity, progEntity, epgEntity, metaEntity]
+        model.entities = [
+            playlistEntity,
+            channelEntity,
+            progEntity,
+            epgEntity,
+            metaEntity,
+            tasteProfileEntity,
+            tasteItemEntity
+        ]
         
         // 2. Initialize Container
         container = NSPersistentContainer(name: "PrimeFlixPlus", managedObjectModel: model)
@@ -100,10 +135,12 @@ struct PersistenceController {
         
         container.loadPersistentStores { (storeDescription, error) in
             if let error = error as NSError? {
+                // In production, handle migration failures gracefully
                 print("Core Data Error: \(error), \(error.userInfo)")
             }
         }
         
+        // Handle migration automatically where possible
         container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
     }
 }
@@ -114,6 +151,27 @@ extension NSAttributeDescription {
         self.init()
         self.name = name
         self.attributeType = type
-        self.isOptional = true // Default to optional to avoid crash on missing data
+        self.isOptional = true
     }
+}
+
+// MARK: - Generated Classes Stub
+// Core Data needs classes to map to these entities.
+// Since we defined them in code, we must provide the class definitions here or in separate files.
+
+@objc(TasteProfile)
+public class TasteProfile: NSManagedObject {
+    @NSManaged public var id: String
+    @NSManaged public var selectedMoods: String?
+    @NSManaged public var selectedGenres: String?
+    @NSManaged public var isOnboardingComplete: Bool
+}
+
+@objc(TasteItem)
+public class TasteItem: NSManagedObject {
+    @NSManaged public var tmdbId: Int64
+    @NSManaged public var title: String?
+    @NSManaged public var mediaType: String?
+    @NSManaged public var status: String?
+    @NSManaged public var createdAt: Date?
 }

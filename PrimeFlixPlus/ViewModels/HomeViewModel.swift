@@ -18,7 +18,7 @@ struct HomeSection: Identifiable {
         case trending
         case recent
         case recommended
-        case freshContent // New Type for "Your Fresh Content"
+        case freshContent // "Your Fresh Content"
         case genre(String)
         case provider(String)
         
@@ -102,7 +102,7 @@ class HomeViewModel: ObservableObject {
         // Initial Load
         loadTab(selectedTab)
         
-        // Listen for Sync completion to clear cache and refresh
+        // Listener 1: Sync completion (Full Refresh)
         repository.$isSyncing
             .removeDuplicates()
             .receive(on: RunLoop.main)
@@ -115,7 +115,21 @@ class HomeViewModel: ObservableObject {
             }
             .store(in: &cancellables)
         
-        // Listen for Settings changes (Hidden Categories)
+        // Listener 2: Repository Updates (e.g., Onboarding Completion, Favorites toggled)
+        // This connects the "Fresh Content" engine to the UI dynamically.
+        repository.objectWillChange
+            .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                // Only refresh if not syncing to avoid UI thrashing during heavy loads
+                if !self.repository!.isSyncing {
+                    print("🔄 HomeViewModel: Detected repository change, refreshing current tab...")
+                    self.invalidateCache()
+                }
+            }
+            .store(in: &cancellables)
+        
+        // Listener 3: Settings changes (Hidden Categories)
         NotificationCenter.default.publisher(for: CategoryPreferences.didChangeNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -206,7 +220,7 @@ class HomeViewModel: ObservableObject {
                     initialSections.append(HomeSection(title: "Continue Watching", type: .continueWatching, items: resume))
                 }
                 
-                // 2. Your Fresh Content (Priority #2 - NEW)
+                // 2. Your Fresh Content (Priority #2 - NOW INCLUDES ONBOARDING PICKS)
                 if tab != .live {
                     let fresh = readRepo.getFreshFranchiseContent(type: tab.rawValue)
                     if !fresh.isEmpty {
@@ -228,7 +242,7 @@ class HomeViewModel: ObservableObject {
                     initialSections.append(HomeSection(title: "My List", type: .favorites, items: favs))
                 }
                 
-                // 5. Recommended For You (Filtered by Locale)
+                // 5. Recommended For You (Filtered by Locale & Onboarding Genres)
                 if tab != .live {
                     let recommended = readRepo.getRecommended(type: tab.rawValue)
                     if !recommended.isEmpty {
