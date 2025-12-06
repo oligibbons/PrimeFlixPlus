@@ -10,7 +10,7 @@ struct ContentInfo {
     let rawTitle: String
     let normalizedTitle: String
     let quality: String      // "4K UHD", "1080p", "SD", etc.
-    let language: String?    // "English", "French", etc.
+    let language: String?    // "English", "French", "etc."
     let year: String?
     
     // Helper to score quality for sorting (Higher is better)
@@ -35,11 +35,10 @@ struct ContentInfo {
 }
 
 /// Utility to parse raw IPTV titles into clean metadata.
-/// Optimized with static Regex caching for high performance.
+/// Optimized with static Regex caching and fuzzy matching algorithms.
 enum TitleNormalizer {
     
     // MARK: - Thread-Safe Caching
-    // CRITICAL FIX: Caches parsing results to prevent CPU spikes during scrolling.
     private static let cache = NSCache<NSString, ContentInfoWrapper>()
     
     // MARK: - Compiled Regex Patterns
@@ -87,21 +86,25 @@ enum TitleNormalizer {
     )
     
     // 8. IPTV Specific Artifacts (The "Dirty" Stuff)
-    // Removes: [COLOR red], |UK|, US :, ***, ==>, (1), (2), [Backup]
     private static let iptvArtifactsRegex = try! NSRegularExpression(
         pattern: "(\\[/?(COLOR|B|I)[^\\]]*\\])|(\\|[A-Z]+\\|)|(\\*{2,})|(==>)|(\\(\\d+\\))|(\\[\\d+\\])|(C:\\s*)|(G:\\s*)",
         options: [.caseInsensitive]
     )
     
-    // 9. Prefixes: "UK :", "US - ", "001 - ", "VOD |"
+    // 9. Prefixes: "UK :", "VOD |", "4K |"
     private static let prefixRegex = try! NSRegularExpression(
-        pattern: "^(\\d+[\\.\\:\\- ]+)|([A-Z]{2,3}\\s*[\\|\\:\\-]\\s*)",
+        pattern: "^(?:[A-Z0-9]{2,4}\\s*[|:-]\\s*)+",
         options: [.caseInsensitive]
     )
     
     // 10. General Cleanup: Brackets, parentheses, dots, underscores
     private static let cleanupRegex = try! NSRegularExpression(pattern: "[._\\-\\[\\]\\(\\)]", options: [])
     private static let multiSpaceRegex = try! NSRegularExpression(pattern: "\\s+", options: [])
+    
+    // MARK: - Roman Numeral Map
+    private static let romanNumerals = [
+        " IX": " 9", " VIII": " 8", " VII": " 7", " VI": " 6", " IV": " 4", " V": " 5", " III": " 3", " II": " 2"
+    ]
     
     // MARK: - Language Data
     private static let languageMap: [String: String] = [
@@ -120,12 +123,6 @@ enum TitleNormalizer {
         "MULTI": "Multi-Audio", "MULTISUB": "Multi-Audio", "MSUB": "Multi-Audio", "SUB": "Subbed"
     ]
     
-    // Compiled regex for languages
-    private static let langRegex: NSRegularExpression = {
-        let keys = languageMap.keys.joined(separator: "|")
-        return try! NSRegularExpression(pattern: "\\b(" + keys + ")\\b", options: [.caseInsensitive])
-    }()
-    
     // MARK: - Main Parsing
     
     static func parse(rawTitle: String) -> ContentInfo {
@@ -135,14 +132,12 @@ enum TitleNormalizer {
             return cached.info
         }
         
-        // Work with a mutable copy
         var processingTitle = rawTitle.replacingOccurrences(of: "_", with: " ")
                                       .replacingOccurrences(of: ".", with: " ")
         
-        // 2. Extract Year (Before cleaning, as brackets might be removed)
+        // 2. Extract Year
         var year: String? = nil
         let range = NSRange(processingTitle.startIndex..<processingTitle.endIndex, in: processingTitle)
-        
         if let match = yearRegex.firstMatch(in: processingTitle, options: [], range: range) {
             let yearRange = match.range(at: 1)
             if let r = Range(yearRange, in: processingTitle) {
@@ -178,11 +173,15 @@ enum TitleNormalizer {
             }
         }
         
-        // 5. Aggressive Scrubbing
-        // Remove IPTV specific artifacts first (Kodi colors, weird pipes)
-        processingTitle = strip(processingTitle, regex: iptvArtifactsRegex)
+        // 5. Roman Numeral Normalization
+        for (roman, digit) in romanNumerals {
+            if processingTitle.hasSuffix(roman) || processingTitle.contains(roman + " ") {
+                processingTitle = processingTitle.replacingOccurrences(of: roman, with: digit)
+            }
+        }
         
-        // Remove technical metadata
+        // 6. Aggressive Scrubbing
+        processingTitle = strip(processingTitle, regex: iptvArtifactsRegex)
         processingTitle = strip(processingTitle, regex: resolutionRegex)
         processingTitle = strip(processingTitle, regex: codecRegex)
         processingTitle = strip(processingTitle, regex: audioRegex)
@@ -191,22 +190,15 @@ enum TitleNormalizer {
         processingTitle = strip(processingTitle, regex: seasonRegex)
         processingTitle = strip(processingTitle, regex: langRegex)
         
-        // 6. Remove Prefixes (Country codes, numbers)
-        // Repeat twice to catch nested prefixes like "001 | UK | BBC"
-        processingTitle = strip(processingTitle, regex: prefixRegex)
+        // 7. Remove Prefixes (Country codes, numbers)
         processingTitle = strip(processingTitle, regex: prefixRegex)
         
-        // 7. Final Cleanup
-        // Remove brackets, dots, leftover symbols
+        // 8. Final Cleanup
         processingTitle = strip(processingTitle, regex: cleanupRegex, replacement: " ")
-        
-        // Remove prefixes like "US | Movie Name" if regex missed them
         if processingTitle.contains("|") {
             let parts = processingTitle.split(separator: "|")
             if let last = parts.last { processingTitle = String(last) }
         }
-        
-        // Collapse multiple spaces
         processingTitle = strip(processingTitle, regex: multiSpaceRegex, replacement: " ")
         
         let finalTitle = processingTitle.trimmingCharacters(in: .whitespacesAndNewlines).capitalized
@@ -234,5 +226,44 @@ enum TitleNormalizer {
     /// Generates a strict key for grouping duplicates
     static func generateGroupKey(_ normalizedTitle: String) -> String {
         return normalizedTitle.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
+    }
+    
+    // MARK: - Fuzzy Matching (Levenshtein Distance)
+    
+    /// Returns a score between 0.0 (No match) and 1.0 (Perfect match)
+    static func similarity(between s1: String, and s2: String) -> Double {
+        let t1 = s1.lowercased().filter { $0.isLetter || $0.isNumber }
+        let t2 = s2.lowercased().filter { $0.isLetter || $0.isNumber }
+        
+        if t1 == t2 { return 1.0 }
+        if t1.isEmpty || t2.isEmpty { return 0.0 }
+        
+        let dist = levenshtein(t1, t2)
+        let maxLen = Double(max(t1.count, t2.count))
+        return 1.0 - (Double(dist) / maxLen)
+    }
+    
+    private static func levenshtein(_ s1: String, _ s2: String) -> Int {
+        let a = Array(s1.utf16)
+        let b = Array(s2.utf16)
+        
+        let m = a.count
+        let n = b.count
+        var d = [[Int]](repeating: [Int](repeating: 0, count: n + 1), count: m + 1)
+        
+        for i in 0...m { d[i][0] = i }
+        for j in 0...n { d[0][j] = j }
+        
+        for i in 1...m {
+            for j in 1...n {
+                let cost = (a[i - 1] == b[j - 1]) ? 0 : 1
+                d[i][j] = min(
+                    d[i - 1][j] + 1,      // deletion
+                    d[i][j - 1] + 1,      // insertion
+                    d[i - 1][j - 1] + cost // substitution
+                )
+            }
+        }
+        return d[m][n]
     }
 }

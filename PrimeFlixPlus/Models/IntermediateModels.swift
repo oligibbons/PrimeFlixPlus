@@ -164,22 +164,23 @@ struct ChannelStruct {
                 
                 let nsString = title as NSString
                 
-                // Case A: S01E01 (2 groups)
+                // Case A: S01E01 (2 groups) - Checks for standard S/E formats with 2 capture groups
                 if match.numberOfRanges >= 3 {
+                    // This logic assumes Season is always Group 1 and Episode is Group 2 (relative to base match range)
                     let s = Int(nsString.substring(with: match.range(at: 1))) ?? 0
                     let e = Int(nsString.substring(with: match.range(at: 2))) ?? 0
-                    return (s, e)
+                    if s > 0 || e > 0 { return (s, e) }
                 }
-                // Case B: Absolute Ordering (1 group) -> Default to Season 1
+                // Case B: Absolute Ordering (1 group)
                 else if match.numberOfRanges == 2 {
                     let e = Int(nsString.substring(with: match.range(at: 1))) ?? 0
-                    return (1, e)
+                    return (1, e) // Default to Season 1 for absolute episode numbers
                 }
             }
         }
         
         // Fallback: Check for loose number at end of string (Risky, but useful for Anime: "One Piece - 1050")
-        // Only if it doesn't look like a year (19xx or 20xx)
+        // Only if it doesn't look like a year (19xx or 20xx). This is a safe final check.
         if let looseRegex = try? NSRegularExpression(pattern: "\\s-\\s(\\d{1,4})(?:\\s|$|\\[|\\()"),
            let match = looseRegex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)) {
             let valStr = (title as NSString).substring(with: match.range(at: 1))

@@ -24,7 +24,8 @@ class ChannelRepository {
                 for item in history {
                     watchedIds.insert(item.channelUrl)
                     if let ch = self.getChannel(byUrl: item.channelUrl), ch.type == type {
-                        let root = extractFranchiseRoot(from: ch.title)
+                        // Use the consolidated franchise root logic
+                        let root = self.extractFranchiseRoot(from: ch.title)
                         if root.count > 3 { franchiseRoots.insert(root) }
                     }
                 }
@@ -35,7 +36,7 @@ class ChannelRepository {
             favReq.predicate = NSPredicate(format: "isFavorite == YES AND type == %@", type)
             if let favs = try? context.fetch(favReq) {
                 for fav in favs {
-                    let root = extractFranchiseRoot(from: fav.title)
+                    let root = self.extractFranchiseRoot(from: fav.title)
                     if root.count > 3 { franchiseRoots.insert(root) }
                 }
             }
@@ -57,7 +58,7 @@ class ChannelRepository {
                     if watchedIds.contains(ch.url) { continue }
                     
                     // Check if it belongs to a known franchise
-                    let title = ch.title
+                    let title = self.extractFranchiseRoot(from: ch.title)
                     // Quick check: Does title start with any root?
                     if franchiseRoots.contains(where: { title.localizedCaseInsensitiveContains($0) }) {
                         freshContent.append(ch)
@@ -71,22 +72,25 @@ class ChannelRepository {
         return freshContent
     }
     
-    /// Simple heuristic to strip " 2", ": The Movie", " S01" etc to find the base name.
+    /// **OPTIMIZED:** Relies on TitleNormalizer to clean technical junk first, then strips
+    /// common sequel/subtitle patterns to find the base name for franchise grouping.
     private func extractFranchiseRoot(from title: String) -> String {
+        // 1. Get the fully cleaned, normalized title from the single source of truth.
         let info = TitleNormalizer.parse(rawTitle: title)
         var clean = info.normalizedTitle
         
-        // Remove Season/Episode markers
+        // 2. Remove Season/Episode markers (already handled by TitleNormalizer, safe redundancy)
         if let range = clean.range(of: " S\\d+", options: .regularExpression) {
             clean = String(clean[..<range.lowerBound])
         }
         
-        // Remove Sequel Numbers (e.g. "Iron Man 2" -> "Iron Man")
+        // 3. Remove Sequel Numbers (e.g. "Iron Man 2" -> "Iron Man")
+        // NOTE: This must be done AFTER normalization (which converts Roman numerals to digits).
         if let range = clean.range(of: "\\s\\d+$", options: .regularExpression) {
             clean = String(clean[..<range.lowerBound])
         }
         
-        // Remove subtitles (e.g. "Mission: Impossible - Fallout" -> "Mission: Impossible")
+        // 4. Remove subtitles (e.g. "Mission: Impossible - Fallout" -> "Mission: Impossible")
         if let range = clean.range(of: "[:\\-]", options: .regularExpression) {
             clean = String(clean[..<range.lowerBound])
         }
@@ -327,6 +331,7 @@ class ChannelRepository {
                         results.append(channel)
                         processedSeriesMap[seriesKey] = true
                     } else {
+                        // FIX: Next episode logic should leverage the new S/E metadata directly if present
                         if let nextEp = findNextEpisode(currentChannel: channel) {
                             results.append(nextEp)
                             processedSeriesMap[seriesKey] = true
@@ -341,6 +346,30 @@ class ChannelRepository {
     }
     
     private func findNextEpisode(currentChannel: Channel) -> Channel? {
+        // --- OPTIMIZATION START: Use structured metadata first ---
+        if currentChannel.seriesId != nil, currentChannel.season > 0, currentChannel.episode > 0 {
+            // Check next episode in current season
+            if let next = findSpecificEpisodeByMetadata(
+                playlistUrl: currentChannel.playlistUrl,
+                seriesId: currentChannel.seriesId!,
+                season: Int(currentChannel.season),
+                episode: Int(currentChannel.episode) + 1
+            ) {
+                return next
+            }
+            // Check first episode of next season
+            if let nextSeason = findSpecificEpisodeByMetadata(
+                playlistUrl: currentChannel.playlistUrl,
+                seriesId: currentChannel.seriesId!,
+                season: Int(currentChannel.season) + 1,
+                episode: 1
+            ) {
+                return nextSeason
+            }
+        }
+        // --- OPTIMIZATION END ---
+        
+        // --- FALLBACK: Legacy regex logic ---
         let raw = currentChannel.title
         if let (s, e) = extractSeasonEpisode(from: raw, pattern: "(?i)(S)(\\d+)\\s*(E)(\\d+)") {
             return findNext(currentChannel: currentChannel, season: s, episode: e)
@@ -349,6 +378,14 @@ class ChannelRepository {
             return findNext(currentChannel: currentChannel, season: s, episode: e)
         }
         return nil
+    }
+    
+    /// NEW: Optimized lookup using Core Data's structured metadata (seriesId, season, episode)
+    private func findSpecificEpisodeByMetadata(playlistUrl: String, seriesId: String, season: Int, episode: Int) -> Channel? {
+        let req = NSFetchRequest<Channel>(entityName: "Channel")
+        req.predicate = NSPredicate(format: "playlistUrl == %@ AND type == 'series' AND seriesId == %@ AND season == %d AND episode == %d", playlistUrl, seriesId, season, episode)
+        req.fetchLimit = 1
+        return try? context.fetch(req).first
     }
     
     private func extractSeasonEpisode(from title: String, pattern: String) -> (Int, Int)? {

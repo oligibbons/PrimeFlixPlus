@@ -290,6 +290,8 @@ class DetailsViewModel: ObservableObject {
         guard let sourceUrl = episodeSourceMap[key] else { return nil }
         
         let input = XtreamInput.decodeFromPlaylistUrl(sourceUrl)
+        
+        // Ensure series uses correct endpoint
         let streamUrl = "\(input.basicUrl)/series/\(input.username)/\(input.password)/\(ep.id).\(ep.containerExtension)"
         
         guard let context = channel.managedObjectContext else { return nil }
