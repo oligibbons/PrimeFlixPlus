@@ -16,6 +16,7 @@ struct PlayerView: View {
         case videoSurface // The "Playhead" / Scrubbing Zone
         case upperControls // The Heart Button / Top Bar
         case miniDetails // The Swipe-Down overlay
+        case autoPlayOverlay // The Timer Overlay
     }
     @FocusState private var focusedField: PlayerFocus?
     
@@ -32,11 +33,10 @@ struct PlayerView: View {
                     
                     // 2. Interaction Layer (Inputs)
                     // This sits on top of the video to capture all focus and gestures.
-                    // CRITICAL FIX: .focusable(!showMiniDetails) disables this layer when overlay is open,
-                    // forcing focus to the Overlay instead of the Player.
+                    // CRITICAL FIX: Disable focus when ANY overlay is active
                     Color.clear
                         .contentShape(Rectangle())
-                        .focusable(!viewModel.showMiniDetails)
+                        .focusable(!viewModel.showMiniDetails && !viewModel.showAutoPlay)
                         .focused($focusedField, equals: .videoSurface)
                         
                         // --- GESTURES ---
@@ -44,8 +44,8 @@ struct PlayerView: View {
                         .background(
                             SiriRemoteSwipeHandler(
                                 onPan: { x, y in
-                                    // LOCK: Disable scrubbing if Mini Details is open
-                                    if viewModel.showMiniDetails { return }
+                                    // LOCK: Disable scrubbing if Overlays are open
+                                    if viewModel.showMiniDetails || viewModel.showAutoPlay { return }
                                     
                                     // Priority: Scrubbing (Horizontal)
                                     if abs(x) > abs(y) {
@@ -61,7 +61,7 @@ struct PlayerView: View {
                                     }
                                 },
                                 onEnd: {
-                                    if !viewModel.showMiniDetails {
+                                    if !viewModel.showMiniDetails && !viewModel.showAutoPlay {
                                         viewModel.endScrubbing()
                                     }
                                 }
@@ -71,7 +71,7 @@ struct PlayerView: View {
                         // Discrete Moves (D-Pad / Arrows)
                         .onMoveCommand { direction in
                             // LOCK: Do not allow player navigation if overlay is open
-                            if viewModel.showMiniDetails { return }
+                            if viewModel.showMiniDetails || viewModel.showAutoPlay { return }
                             
                             viewModel.triggerControls(forceShow: true)
                             
@@ -100,7 +100,7 @@ struct PlayerView: View {
                         
                         .onPlayPauseCommand {
                             // LOCK: Disable toggle if overlay is active
-                            if !viewModel.showMiniDetails {
+                            if !viewModel.showMiniDetails && !viewModel.showAutoPlay {
                                 viewModel.togglePlayPause()
                             }
                         }
@@ -140,7 +140,6 @@ struct PlayerView: View {
                             .shadow(radius: 20)
                         
                         // Fallback Image (Backdrop)
-                        // Ideally we would fetch a frame here, but using cover art for context
                         AsyncImage(url: URL(string: channel.cover ?? "")) { img in
                             img.resizable().aspectRatio(contentMode: .fill)
                         } placeholder: {
@@ -192,9 +191,20 @@ struct PlayerView: View {
                 .focusSection() // Ensures focus is trapped here
             }
             
-            // 7. Controls Overlay
+            // 7. Auto Play Overlay (Timer)
+            if viewModel.showAutoPlay {
+                AutoPlayOverlay(viewModel: viewModel)
+                    .zIndex(60)
+                    .focusSection()
+                    .onAppear {
+                        // Trap focus immediately
+                        focusedField = .autoPlayOverlay
+                    }
+            }
+            
+            // 8. Controls Overlay
             // We pass the focus binding down so the overlay knows if it's active
-            if viewModel.showControls && !viewModel.showMiniDetails {
+            if viewModel.showControls && !viewModel.showMiniDetails && !viewModel.showAutoPlay {
                 ControlsOverlayView(
                     viewModel: viewModel,
                     channel: channel,
@@ -210,16 +220,19 @@ struct PlayerView: View {
                 focusedField = .videoSurface
             }
         }
+        // Listener for Auto-Play Trigger
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PlayNextEpisode"))) { note in
+            if let nextChannel = note.object as? Channel {
+                viewModel.cleanup()
+                onPlayChannel?(nextChannel)
+            }
+        }
         // Auto-Focus logic for Play/Pause state
         .onChange(of: viewModel.showControls) { show in
-            // When controls appear (pause), default focus to playhead
-            // When controls disappear (play), ensure focus stays on playhead
-            // ONLY if overlay is closed
-            if show && !viewModel.showMiniDetails {
+            if show && !viewModel.showMiniDetails && !viewModel.showAutoPlay {
                 focusedField = .videoSurface
             }
         }
-        // Logic to keep controls visible when navigating top buttons
         .onChange(of: focusedField) { focus in
             if focus == .upperControls {
                 viewModel.triggerControls(forceShow: true)
@@ -270,6 +283,74 @@ struct PlayerView: View {
         let m = (totalSeconds % 3600) / 60
         let s = totalSeconds % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
+    }
+}
+
+// MARK: - Auto Play Overlay
+struct AutoPlayOverlay: View {
+    @ObservedObject var viewModel: PlayerViewModel
+    @FocusState private var isPlayNowFocused: Bool
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.85).ignoresSafeArea()
+            
+            HStack(spacing: 60) {
+                // Info
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Up Next")
+                        .font(CinemeltTheme.fontBody(28))
+                        .foregroundColor(.gray)
+                    
+                    if let next = viewModel.nextEpisode {
+                        Text(next.title)
+                            .font(CinemeltTheme.fontTitle(50))
+                            .foregroundColor(CinemeltTheme.cream)
+                            .lineLimit(2)
+                            .cinemeltGlow()
+                    }
+                    
+                    HStack(spacing: 15) {
+                        Image(systemName: "timer")
+                            .foregroundColor(CinemeltTheme.accent)
+                        Text("Playing in \(viewModel.autoPlayCounter) seconds")
+                            .font(CinemeltTheme.fontBody(24))
+                            .foregroundColor(CinemeltTheme.accent)
+                            .monospacedDigit()
+                    }
+                }
+                .frame(width: 500)
+                
+                // Actions
+                VStack(spacing: 20) {
+                    Button(action: { viewModel.confirmAutoPlay() }) {
+                        HStack {
+                            Image(systemName: "play.fill")
+                            Text("Play Now")
+                        }
+                        .font(CinemeltTheme.fontTitle(28))
+                        .padding(.horizontal, 40)
+                        .padding(.vertical, 20)
+                        .background(CinemeltTheme.accent)
+                        .cornerRadius(16)
+                    }
+                    .buttonStyle(CinemeltCardButtonStyle())
+                    .focused($isPlayNowFocused)
+                    
+                    Button(action: { viewModel.cancelAutoPlay() }) {
+                        Text("Cancel")
+                            .font(CinemeltTheme.fontBody(24))
+                            .foregroundColor(.gray)
+                            .padding(.horizontal, 30)
+                            .padding(.vertical, 15)
+                    }
+                    .buttonStyle(CinemeltCardButtonStyle())
+                }
+            }
+        }
+        .onAppear {
+            isPlayNowFocused = true
+        }
     }
 }
 
@@ -355,32 +436,44 @@ struct MiniDetailsOverlay: View {
                         .foregroundColor(.gray)
                     
                     HStack(spacing: 20) {
-                        // Play From Beginning
-                        Button(action: { viewModel.restartPlayback() }) {
-                            VStack(spacing: 5) {
-                                Image(systemName: "arrow.counterclockwise")
-                                    .font(.headline) // Smaller icon per request
-                                Text("Restart")
-                                    .font(.caption)
-                            }
-                            .frame(width: 100, height: 70)
-                        }
-                        .buttonStyle(CinemeltCardButtonStyle())
-                        .focused($focusedButton, equals: "restart")
-                        
-                        // Play Next (if available)
+                        // Play Next (Logic: Replaces Restart if next episode exists)
                         if viewModel.canPlayNext {
                             Button(action: onPlayNext) {
-                                VStack(spacing: 5) {
+                                HStack {
                                     Image(systemName: "forward.end.fill")
-                                        .font(.headline) // Smaller icon per request
-                                    Text("Next Ep")
+                                        .font(.headline)
+                                    VStack(alignment: .leading) {
+                                        Text("Next Episode")
+                                            .font(CinemeltTheme.fontTitle(24))
+                                            .foregroundColor(.black)
+                                        if let next = viewModel.nextEpisode {
+                                            Text(next.title) // e.g. "S01 E02"
+                                                .font(.caption)
+                                                .foregroundColor(.black.opacity(0.7))
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 15)
+                                .background(CinemeltTheme.accent)
+                                .cornerRadius(12)
+                            }
+                            .buttonStyle(CinemeltCardButtonStyle())
+                            .focused($focusedButton, equals: "next")
+                        } else {
+                            // Standard Restart Button
+                            Button(action: { viewModel.restartPlayback() }) {
+                                VStack(spacing: 5) {
+                                    Image(systemName: "arrow.counterclockwise")
+                                        .font(.headline)
+                                    Text("Restart")
                                         .font(.caption)
                                 }
                                 .frame(width: 100, height: 70)
                             }
                             .buttonStyle(CinemeltCardButtonStyle())
-                            .focused($focusedButton, equals: "next")
+                            .focused($focusedButton, equals: "restart")
                         }
                     }
                     
@@ -398,14 +491,14 @@ struct MiniDetailsOverlay: View {
                                         .font(CinemeltTheme.fontBody(20))
                                         .frame(width: 60, height: 40)
                                         .foregroundColor(viewModel.playbackRate == Float(speed) ? .black : .white)
-                                        .background(viewModel.playbackRate == Float(speed) ? CinemeltTheme.accent : Color.clear)
+                                        .background(viewModel.playbackRate == Float(speed) ? CinemeltTheme.accent : Color.white.opacity(0.1))
                                         .cornerRadius(8)
                                 }
                                 .buttonStyle(CinemeltCardButtonStyle())
                                 .focused($focusedButton, equals: "speed_\(speed)")
                             }
                         }
-                        .padding(10) // Padding for focus growth
+                        .padding(10) // Padding for focus expansion
                     }
                     .frame(width: 500, height: 100)
                 }
@@ -430,9 +523,9 @@ struct MiniDetailsOverlay: View {
         }
         .onExitCommand { onClose() }
         .onAppear {
-            // Default focus to restart button when opened
+            // Default focus to next/restart button when opened
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                focusedButton = "restart"
+                focusedButton = viewModel.canPlayNext ? "next" : "restart"
             }
         }
     }

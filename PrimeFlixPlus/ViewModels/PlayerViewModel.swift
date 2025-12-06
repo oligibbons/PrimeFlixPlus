@@ -18,6 +18,11 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     @Published var showControls: Bool = false
     @Published var showMiniDetails: Bool = false
     
+    // MARK: - Auto-Play State
+    @Published var showAutoPlay: Bool = false
+    @Published var autoPlayCounter: Int = 20
+    private var autoPlayTimer: Timer?
+    
     // MARK: - Scrubbing State
     @Published var isScrubbing: Bool = false
     private var scrubbingOriginTime: Double?
@@ -62,6 +67,12 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         self.isFavorite = channel.isFavorite
         self.currentUrl = channel.url
         self.channelType = channel.type
+        
+        // Reset State
+        self.showAutoPlay = false
+        self.autoPlayCounter = 20
+        self.duration = 0
+        self.currentTime = 0
         
         // Load Default Speed from Settings
         let savedSpeed = UserDefaults.standard.double(forKey: "defaultPlaybackSpeed")
@@ -135,7 +146,10 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     // MARK: - Next Episode Logic
     
     func checkForNextEpisode() {
-        guard let repo = repository, let current = currentChannel, current.type == "series" else { return }
+        // Only valid for series/episodes
+        guard let repo = repository,
+              let current = currentChannel,
+              (current.type == "series" || current.type == "series_episode") else { return }
         
         Task.detached {
             let context = repo.container.newBackgroundContext()
@@ -158,30 +172,94 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     private nonisolated func findNextEpisodeInternal(context: NSManagedObjectContext, current: Channel) -> Channel? {
         let title = current.title
+        
+        // Regex to parse "S01 E01" or "1x01"
         guard let regex = try? NSRegularExpression(pattern: "(?i)(S)(\\d+)\\s*(E)(\\d+)") else { return nil }
         let nsString = title as NSString
         let results = regex.matches(in: title, range: NSRange(location: 0, length: nsString.length))
         
         guard let match = results.first, match.numberOfRanges >= 5 else { return nil }
+        
+        // Extract Season and Episode numbers
         guard let s = Int(nsString.substring(with: match.range(at: 2))),
               let e = Int(nsString.substring(with: match.range(at: 4))) else { return nil }
         
+        // 1. Try Next Episode in Same Season
         let nextE = e + 1
-        let prefix = String(title.prefix(5))
+        if let next = findSpecificEpisode(context: context, playlistUrl: current.playlistUrl, titlePrefix: String(title.prefix(5)), season: s, episode: nextE) {
+            return next
+        }
+        
+        // 2. Try First Episode of Next Season
+        let nextS = s + 1
+        if let nextSeason = findSpecificEpisode(context: context, playlistUrl: current.playlistUrl, titlePrefix: String(title.prefix(5)), season: nextS, episode: 1) {
+            return nextSeason
+        }
+        
+        return nil
+    }
+    
+    private nonisolated func findSpecificEpisode(context: NSManagedObjectContext, playlistUrl: String, titlePrefix: String, season: Int, episode: Int) -> Channel? {
         let req = NSFetchRequest<Channel>(entityName: "Channel")
+        
+        // Loose search first to get candidates
         req.predicate = NSPredicate(
-            format: "playlistUrl == %@ AND type == 'series' AND title BEGINSWITH[cd] %@",
-            current.playlistUrl, prefix
+            format: "playlistUrl == %@ AND (type == 'series' OR type == 'series_episode') AND title BEGINSWITH[cd] %@",
+            playlistUrl, titlePrefix
         )
         req.fetchLimit = 500
         
-        if let candidates = try? context.fetch(req) {
-             return candidates.first { ch in
-                 let t = ch.title.uppercased()
-                 return t.contains(String(format: "S%02dE%02d", s, nextE))
-             }
+        guard let candidates = try? context.fetch(req) else { return nil }
+        
+        let targetS = String(format: "S%02d", season)
+        let targetE = String(format: "E%02d", episode)
+        
+        // Strict in-memory check
+        return candidates.first { ch in
+            let t = ch.title.uppercased()
+            return t.contains(targetS) && t.contains(targetE)
         }
-        return nil
+    }
+    
+    // MARK: - Auto Play Logic
+    
+    func triggerAutoPlay() {
+        guard canPlayNext else {
+            // No next episode? Just exit controls.
+            triggerControls(forceShow: true)
+            return
+        }
+        
+        // Start countdown
+        self.showAutoPlay = true
+        self.autoPlayCounter = 20
+        self.showControls = false // Hide standard controls
+        
+        autoPlayTimer?.invalidate()
+        autoPlayTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            if self.autoPlayCounter > 0 {
+                self.autoPlayCounter -= 1
+            } else {
+                self.confirmAutoPlay()
+            }
+        }
+    }
+    
+    func cancelAutoPlay() {
+        autoPlayTimer?.invalidate()
+        showAutoPlay = false
+        triggerControls(forceShow: true)
+    }
+    
+    func confirmAutoPlay() {
+        autoPlayTimer?.invalidate()
+        showAutoPlay = false
+        if let next = nextEpisode {
+            // Signal view to switch
+            // We use a closure in View to handle the switch
+            NotificationCenter.default.post(name: NSNotification.Name("PlayNextEpisode"), object: next)
+        }
     }
     
     // MARK: - VLC Delegate Methods
@@ -198,23 +276,41 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 self.isBuffering = false
                 self.isPlaying = true
                 self.isError = false
+                
+                // Get Duration
                 if let len = player.media?.length, len.intValue > 0 {
                     self.duration = Double(len.intValue) / 1000.0
                 }
+                
+                // Ensure Rate is applied
                 if player.rate != self.playbackRate {
                     player.rate = self.playbackRate
                 }
                 self.triggerControls()
+                
             case .paused:
                 self.isPlaying = false
                 self.isBuffering = false
                 self.triggerControls(forceShow: true)
+                
             case .error:
                 self.reportError("Playback Error", reason: "Stream failed to load.")
-            case .ended, .stopped:
+                
+            case .ended:
+                self.isPlaying = false
+                self.isBuffering = false
+                // Check for auto-play instead of just showing controls
+                if self.canPlayNext {
+                    self.triggerAutoPlay()
+                } else {
+                    self.triggerControls(forceShow: true)
+                }
+                
+            case .stopped:
                 self.isPlaying = false
                 self.isBuffering = false
                 self.triggerControls(forceShow: true)
+                
             default:
                 break
             }
@@ -258,7 +354,8 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if vlcPlayer.isPlaying {
             vlcPlayer.pause()
             self.isPlaying = false
-            withAnimation { self.showMiniDetails = true }
+            // FIX: Do NOT auto-open mini details on pause.
+            // User requested explicit swipe only.
         } else {
             vlcPlayer.play()
             self.isPlaying = true
@@ -300,6 +397,9 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
     
     func startScrubbing(translation: CGFloat, screenWidth: CGFloat) {
+        // FIX: If duration is unknown (0), scrubbing will calculate 0 and reset the video.
+        guard duration > 0 else { return }
+        
         isScrubbing = true
         triggerControls(forceShow: true)
         
@@ -320,11 +420,15 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
     
     func endScrubbing() {
+        guard isScrubbing else { return }
         isScrubbing = false
         scrubbingOriginTime = nil
         
-        let ms = Int32(currentTime * 1000)
-        commitSeek(to: ms)
+        // Only commit if we have a valid time (and scrubbing didn't abort)
+        if currentTime > 0 {
+            let ms = Int32(currentTime * 1000)
+            commitSeek(to: ms)
+        }
     }
     
     private func commitSeek(to ms: Int32) {
@@ -337,10 +441,12 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         controlHideTimer?.invalidate()
         withAnimation { showControls = true }
         
-        if (vlcPlayer.isPlaying || forceShow == false) && !isError {
+        // Hide only if playing and not in a special state
+        // Added check for showAutoPlay to prevent controls from hiding while auto-play is counting down
+        if (vlcPlayer.isPlaying || forceShow == false) && !isError && !showAutoPlay {
             controlHideTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
                 guard let self = self else { return }
-                if self.vlcPlayer.isPlaying && !self.isScrubbing && !self.showMiniDetails {
+                if self.vlcPlayer.isPlaying && !self.isScrubbing && !self.showMiniDetails && !self.showAutoPlay {
                     withAnimation { self.showControls = false }
                 }
             }
@@ -354,16 +460,11 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         triggerControls(forceShow: true)
     }
     
-    func toggleMiniDetails() {
-        withAnimation {
-            showMiniDetails.toggle()
-        }
-    }
-    
     func cleanup() {
         print("🛑 Cleaning up VLC")
         progressTimer?.invalidate()
         controlHideTimer?.invalidate()
+        autoPlayTimer?.invalidate()
         if vlcPlayer.isPlaying { vlcPlayer.stop() }
         vlcPlayer.delegate = nil
         vlcPlayer.drawable = nil
@@ -382,6 +483,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 if !self.isPlaying { self.isPlaying = true }
             }
             
+            // Duration Check (Retrying if 0)
             if self.duration == 0, let len = self.vlcPlayer.media?.length, len.intValue > 0 {
                 self.duration = Double(len.intValue) / 1000.0
             }
