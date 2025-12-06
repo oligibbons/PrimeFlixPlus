@@ -43,24 +43,30 @@ struct PlayerView: View {
                         .background(
                             SiriRemoteSwipeHandler(
                                 onPan: { x, y in
+                                    // LOCK: Disable scrubbing if Mini Details is open
+                                    if viewModel.showMiniDetails { return }
+                                    
                                     // Priority: Scrubbing (Horizontal)
                                     if abs(x) > abs(y) {
                                         viewModel.startScrubbing(translation: x, screenWidth: geo.size.width)
                                     }
                                     // Priority: Overlay (Vertical Down)
                                     // Threshold > 50 ensures distinct intent
-                                    else if y > 50 && !viewModel.showMiniDetails {
+                                    else if y > 50 {
                                         viewModel.toggleMiniDetails()
                                         focusedField = .miniDetails
                                     }
                                 },
                                 onEnd: {
-                                    viewModel.endScrubbing()
+                                    if !viewModel.showMiniDetails {
+                                        viewModel.endScrubbing()
+                                    }
                                 }
                             )
                         )
                     
                         // Discrete Moves (D-Pad / Arrows)
+                        // Only active when focus is on the video surface (not the overlay)
                         .onMoveCommand { direction in
                             viewModel.triggerControls(forceShow: true)
                             
@@ -88,7 +94,10 @@ struct PlayerView: View {
                         }
                         
                         .onPlayPauseCommand {
-                            viewModel.togglePlayPause()
+                            // LOCK: Disable Play/Pause toggle if overlay is open
+                            if !viewModel.showMiniDetails {
+                                viewModel.togglePlayPause()
+                            }
                         }
                         .onExitCommand {
                             // Standard Back behavior when on the playhead
@@ -339,7 +348,7 @@ struct MiniDetailsOverlay: View {
                         Button(action: { viewModel.restartPlayback() }) {
                             VStack(spacing: 5) {
                                 Image(systemName: "arrow.counterclockwise")
-                                    .font(.title2)
+                                    .font(.headline) // FIX: Smaller icon per request
                                 Text("Restart")
                                     .font(.caption)
                             }

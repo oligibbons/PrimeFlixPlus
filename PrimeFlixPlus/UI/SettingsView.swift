@@ -208,31 +208,34 @@ struct SettingsView: View {
                                 
                                 Spacer()
                                 
-                                // NEW: Default Playback Speed
+                                // NEW: Default Playback Speed (Replaced Menu with ScrollView/Buttons for tvOS 15 support)
                                 VStack(alignment: .leading, spacing: 15) {
                                     Text("Default Speed")
                                         .font(CinemeltTheme.fontBody(22))
                                         .foregroundColor(CinemeltTheme.cream.opacity(0.8))
                                     
-                                    Menu {
-                                        ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
-                                            Button("\(String(format: "%g", speed))x") {
-                                                viewModel.defaultPlaybackSpeed = speed
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 15) {
+                                            ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
+                                                Button(action: { viewModel.defaultPlaybackSpeed = speed }) {
+                                                    Text("\(String(format: "%g", speed))x")
+                                                        .font(CinemeltTheme.fontBody(20))
+                                                        .fontWeight(viewModel.defaultPlaybackSpeed == speed ? .bold : .regular)
+                                                        .padding(.horizontal, 20)
+                                                        .padding(.vertical, 12)
+                                                        .background(
+                                                            viewModel.defaultPlaybackSpeed == speed ?
+                                                            CinemeltTheme.accent : Color.white.opacity(0.05)
+                                                        )
+                                                        .cornerRadius(12)
+                                                }
+                                                .buttonStyle(CinemeltCardButtonStyle())
+                                                .foregroundColor(viewModel.defaultPlaybackSpeed == speed ? .black : CinemeltTheme.cream)
                                             }
                                         }
-                                    } label: {
-                                        HStack {
-                                            Text("\(String(format: "%g", viewModel.defaultPlaybackSpeed))x")
-                                                .font(CinemeltTheme.fontBody(22))
-                                                .fontWeight(.bold)
-                                            Image(systemName: "chevron.down")
-                                        }
-                                        .padding(.horizontal, 20)
-                                        .padding(.vertical, 12)
-                                        .background(Color.white.opacity(0.05))
-                                        .cornerRadius(12)
+                                        .padding(10) // Padding for focus expansion
                                     }
-                                    .buttonStyle(CinemeltCardButtonStyle())
+                                    .frame(maxWidth: 600) // Constrain width
                                 }
                             }
                         }

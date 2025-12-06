@@ -278,7 +278,8 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
     
     // Helper to find next episode
-    private func findNextEpisodeInternal(context: NSManagedObjectContext, current: Channel) -> Channel? {
+    // MARK: - Concurrency Fix: nonisolated to run safely on background thread
+    private nonisolated func findNextEpisodeInternal(context: NSManagedObjectContext, current: Channel) -> Channel? {
         let title = current.title
         // Simple S01E01 parser
         guard let regex = try? NSRegularExpression(pattern: "(?i)(S)(\\d+)\\s*(E)(\\d+)") else { return nil }
