@@ -371,10 +371,11 @@ class ChannelRepository {
         
         // --- FALLBACK: Legacy regex logic ---
         let raw = currentChannel.title
-        if let (s, e) = extractSeasonEpisode(from: raw, pattern: "(?i)(S)(\\d+)\\s*(E)(\\d+)") {
-            return findNext(currentChannel: currentChannel, season: s, episode: e)
-        }
-        if let (s, e) = extractSeasonEpisode(from: raw, pattern: "(\\d+)x(\\d+)") {
+        // IMPORTANT: We now call the Centralized Season/Episode Parser in IntermediateModels
+        let (s, e) = ChannelStruct.parseSeasonEpisode(from: raw)
+        
+        // If we found any S/E using the robust logic, use it to find the next item
+        if s > 0 || e > 0 {
             return findNext(currentChannel: currentChannel, season: s, episode: e)
         }
         return nil
@@ -383,11 +384,12 @@ class ChannelRepository {
     /// NEW: Optimized lookup using Core Data's structured metadata (seriesId, season, episode)
     private func findSpecificEpisodeByMetadata(playlistUrl: String, seriesId: String, season: Int, episode: Int) -> Channel? {
         let req = NSFetchRequest<Channel>(entityName: "Channel")
-        req.predicate = NSPredicate(format: "playlistUrl == %@ AND type == 'series' AND seriesId == %@ AND season == %d AND episode == %d", playlistUrl, seriesId, season, episode)
+        req.predicate = NSPredicate(format: "playlistUrl == %@ AND seriesId == %@ AND season == %d AND episode == %d", playlistUrl, seriesId, season, episode)
         req.fetchLimit = 1
         return try? context.fetch(req).first
     }
     
+    // Legacy Regex lookup (kept for robustness, but should be secondary)
     private func extractSeasonEpisode(from title: String, pattern: String) -> (Int, Int)? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let nsString = title as NSString

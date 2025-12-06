@@ -148,13 +148,13 @@ struct ChannelStruct {
     /// Now public so M3UParser can use it, ensuring consistency.
     static func parseSeasonEpisode(from title: String) -> (Int, Int) {
         let patterns = [
-            // Standard: S01E01, S1E1
+            // 1. Standard: S01E01, S1E1
             "(?i)S(\\d{1,2})\\s*E(\\d{1,2})",
-            // X Notation: 1x01
+            // 2. X Notation: 1x01
             "(?i)(\\d{1,2})x(\\d{1,2})",
-            // Verbose: Season 1 Episode 1
+            // 3. Verbose: Season 1 Episode 1
             "(?i)Season\\s*(\\d{1,2}).*Episode\\s*(\\d{1,3})",
-            // Absolute: Episode 100 (Treats as Season 1, Ep 100)
+            // 4. Absolute: Episode 100 (Treats as Season 1, Ep 100)
             "(?i)(?:^|\\s)(?:Ep|Episode)[\\.]?\\s*(\\d{1,4})"
         ]
         
@@ -164,14 +164,13 @@ struct ChannelStruct {
                 
                 let nsString = title as NSString
                 
-                // Case A: S01E01 (2 groups) - Checks for standard S/E formats with 2 capture groups
+                // Case A, B, C (2 groups: Season/Episode)
                 if match.numberOfRanges >= 3 {
-                    // This logic assumes Season is always Group 1 and Episode is Group 2 (relative to base match range)
                     let s = Int(nsString.substring(with: match.range(at: 1))) ?? 0
                     let e = Int(nsString.substring(with: match.range(at: 2))) ?? 0
                     if s > 0 || e > 0 { return (s, e) }
                 }
-                // Case B: Absolute Ordering (1 group)
+                // Case D (1 group: Absolute Episode)
                 else if match.numberOfRanges == 2 {
                     let e = Int(nsString.substring(with: match.range(at: 1))) ?? 0
                     return (1, e) // Default to Season 1 for absolute episode numbers
@@ -180,10 +179,10 @@ struct ChannelStruct {
         }
         
         // Fallback: Check for loose number at end of string (Risky, but useful for Anime: "One Piece - 1050")
-        // Only if it doesn't look like a year (19xx or 20xx). This is a safe final check.
         if let looseRegex = try? NSRegularExpression(pattern: "\\s-\\s(\\d{1,4})(?:\\s|$|\\[|\\()"),
            let match = looseRegex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)) {
             let valStr = (title as NSString).substring(with: match.range(at: 1))
+            // Ensure it's not a year
             if let val = Int(valStr), (val < 1900 || val > 2100) {
                 return (1, val)
             }

@@ -131,21 +131,16 @@ class M3UParser {
             type = "live"
         }
         
-        // Extract Season/Episode info using the Centralized Logic
-        var s = 0
-        var e = 0
+        // Extract Season/Episode info using the **Centralized Logic** in IntermediateModels
+        let parsed = ChannelStruct.parseSeasonEpisode(from: rawTitle)
+        let s = parsed.0
+        let e = parsed.1
         
-        if type == "series" || type == "movie" {
-            let parsed = ChannelStruct.parseSeasonEpisode(from: rawTitle)
-            s = parsed.0
-            e = parsed.1
-            
-            // If we found S/E data, enforce "series" type even if URL looked like a movie
-            if s > 0 || e > 0 {
-                type = "series"
-            }
+        // If we found S/E data, enforce "series" type even if URL looked like a movie
+        if s > 0 || e > 0 {
+            type = "series"
         }
-        
+
         return ChannelStruct(
             url: streamUrl,
             playlistUrl: playlistUrl,

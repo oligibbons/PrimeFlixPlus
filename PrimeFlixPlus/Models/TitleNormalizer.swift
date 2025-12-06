@@ -49,62 +49,58 @@ enum TitleNormalizer {
         options: []
     )
     
-    // 2. Resolution: Catches 8K, 4K, UHD, 1080p/i, 720p/i, SD, etc.
+    // 2. Resolution Tags
     private static let resolutionRegex = try! NSRegularExpression(
         pattern: "\\b(8k|4k|uhd|2160p|1440p|1080p|1080i|720p|720i|576p|576i|480p|480i|sd|hd|fhd|qhd|hevc|hq|raw|4k\\+|uhd\\+)\\b",
         options: [.caseInsensitive]
     )
     
-    // 3. Video Codecs: Catches h264, h265, av1, 10bit, etc.
+    // 3. Video Codecs
     private static let codecRegex = try! NSRegularExpression(
         pattern: "\\b(h\\.?264|h\\.?265|x264|x265|av1|vp9|mpeg-?2|mpeg-?4|avc|hevc|xvid|divx|10bit|12bit)\\b",
         options: [.caseInsensitive]
     )
     
-    // 4. Audio: Catches AAC, AC3, Atmos, TrueHD, DTS, 5.1, etc.
+    // 4. Audio Tags
     private static let audioRegex = try! NSRegularExpression(
         pattern: "\\b(aac|ac3|eac3|dts|dts-?hd|truehd|atmos|dd5\\.1|dd\\+|5\\.1|7\\.1|mp3|flac|opus|pcm|lpcm|mono|stereo)\\b",
         options: [.caseInsensitive]
     )
     
-    // 5. Source & Quality Tags: Catches Bluray, Remux, Web-DL, HDR, etc.
+    // 5. Source & Quality Tags
     private static let sourceRegex = try! NSRegularExpression(
         pattern: "\\b(bluray|remux|bdrip|brrip|web-?dl|web-?rip|hdtv|pdtv|dvdrip|cam|ts|tc|scr|screener|r5|dv|hdr|hdr10|hdr10\\+|dolby|vision|imax|upscaled)\\b",
         options: [.caseInsensitive]
     )
     
-    // 6. Editions/Junk: Catches "Director's Cut", "Extended", "Unrated"
+    // 6. Editions/Junk
     private static let junkRegex = try! NSRegularExpression(
         pattern: "\\b(extended|uncut|unrated|remastered|director'?s? ?cut|theatrical|limited|complete|collection|anthology|trilogy|boxset|saga|special ?edition|final ?cut)\\b",
         options: [.caseInsensitive]
     )
     
-    // 7. Season/Episode: Catches S01E01, 1x01, Season 1, etc.
+    // 7. Season/Episode (Needs to be removed for clean base title)
     private static let seasonRegex = try! NSRegularExpression(
         pattern: "\\b(s\\d{1,2}e\\d{1,2}|\\d{1,2}x\\d{1,2}|s\\d{1,2}|season ?\\d{1,2}|ep ?\\d{1,2}|episode ?\\d{1,2})\\b",
         options: [.caseInsensitive]
     )
     
-    // 8. IPTV Specific Artifacts (The "Dirty" Stuff)
+    // 8. IPTV Specific Artifacts
     private static let iptvArtifactsRegex = try! NSRegularExpression(
         pattern: "(\\[/?(COLOR|B|I)[^\\]]*\\])|(\\|[A-Z]+\\|)|(\\*{2,})|(==>)|(\\(\\d+\\))|(\\[\\d+\\])|(C:\\s*)|(G:\\s*)",
         options: [.caseInsensitive]
     )
     
-    // 9. Prefixes: "UK :", "VOD |", "4K |"
+    // 9. Prefixes
     private static let prefixRegex = try! NSRegularExpression(
+        // Improved safe regex targeting "001 - " or "UK | " at the start
         pattern: "^(?:[A-Z0-9]{2,4}\\s*[|:-]\\s*)+",
         options: [.caseInsensitive]
     )
     
-    // 10. General Cleanup: Brackets, parentheses, dots, underscores
+    // 10. General Cleanup
     private static let cleanupRegex = try! NSRegularExpression(pattern: "[._\\-\\[\\]\\(\\)]", options: [])
     private static let multiSpaceRegex = try! NSRegularExpression(pattern: "\\s+", options: [])
-    
-    // MARK: - Roman Numeral Map
-    private static let romanNumerals = [
-        " IX": " 9", " VIII": " 8", " VII": " 7", " VI": " 6", " IV": " 4", " V": " 5", " III": " 3", " II": " 2"
-    ]
     
     // MARK: - Language Data
     private static let languageMap: [String: String] = [
@@ -123,6 +119,17 @@ enum TitleNormalizer {
         "MULTI": "Multi-Audio", "MULTISUB": "Multi-Audio", "MSUB": "Multi-Audio", "SUB": "Subbed"
     ]
     
+    // CRITICAL FIX: The missing 'langRegex' definition was causing the compilation error.
+    private static let langRegex: NSRegularExpression = {
+        let keys = languageMap.keys.joined(separator: "|")
+        return try! NSRegularExpression(pattern: "\\b(" + keys + ")\\b", options: [.caseInsensitive])
+    }()
+    
+    // MARK: - Roman Numeral Map
+    private static let romanNumerals = [
+        " IX": " 9", " VIII": " 8", " VII": " 7", " VI": " 6", " IV": " 4", " V": " 5", " III": " 3", " II": " 2"
+    ]
+    
     // MARK: - Main Parsing
     
     static func parse(rawTitle: String) -> ContentInfo {
@@ -135,7 +142,7 @@ enum TitleNormalizer {
         var processingTitle = rawTitle.replacingOccurrences(of: "_", with: " ")
                                       .replacingOccurrences(of: ".", with: " ")
         
-        // 2. Extract Year
+        // 2. Extract Year (Before cleaning)
         var year: String? = nil
         let range = NSRange(processingTitle.startIndex..<processingTitle.endIndex, in: processingTitle)
         if let match = yearRegex.firstMatch(in: processingTitle, options: [], range: range) {
@@ -188,9 +195,10 @@ enum TitleNormalizer {
         processingTitle = strip(processingTitle, regex: sourceRegex)
         processingTitle = strip(processingTitle, regex: junkRegex)
         processingTitle = strip(processingTitle, regex: seasonRegex)
-        processingTitle = strip(processingTitle, regex: langRegex)
+        processingTitle = strip(processingTitle, regex: langRegex) // <- Now correctly referenced
         
         // 7. Remove Prefixes (Country codes, numbers)
+        processingTitle = strip(processingTitle, regex: prefixRegex)
         processingTitle = strip(processingTitle, regex: prefixRegex)
         
         // 8. Final Cleanup
