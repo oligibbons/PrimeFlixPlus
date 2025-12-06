@@ -8,6 +8,62 @@ class ChannelRepository {
         self.context = context
     }
     
+    // MARK: - Missing Accessors (Fixed Build Errors)
+    
+    func getFavorites(type: String) -> [Channel] {
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
+        request.predicate = NSPredicate(format: "isFavorite == YES AND type == %@", type)
+        request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        return (try? context.fetch(request)) ?? []
+    }
+    
+    func getRecentlyAdded(type: String, limit: Int) -> [Channel] {
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
+        request.predicate = NSPredicate(format: "type == %@", type)
+        request.sortDescriptors = [
+            NSSortDescriptor(key: "addedAt", ascending: false),
+            NSSortDescriptor(key: "title", ascending: true)
+        ]
+        request.fetchLimit = limit
+        return (try? context.fetch(request)) ?? []
+    }
+    
+    func getRecentFallback(type: String, limit: Int) -> [Channel] {
+        // Re-uses the standard recent logic
+        return getRecentlyAdded(type: type, limit: limit)
+    }
+    
+    func getByGenre(type: String, groupName: String, limit: Int) -> [Channel] {
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
+        request.predicate = NSPredicate(format: "type == %@ AND group == %@", type, groupName)
+        request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        request.fetchLimit = limit
+        return deduplicateChannels((try? context.fetch(request)) ?? [])
+    }
+    
+    func getTrendingMatches(type: String, tmdbResults: [String]) -> [Channel] {
+        var matches: [Channel] = []
+        var seenTitles = Set<String>()
+        
+        for title in tmdbResults {
+            let req = NSFetchRequest<Channel>(entityName: "Channel")
+            // Loose matching to find local content matching the API title
+            req.predicate = NSPredicate(format: "type == %@ AND title CONTAINS[cd] %@", type, title)
+            req.fetchLimit = 1
+            
+            if let match = try? context.fetch(req).first {
+                let rawForDedup = match.canonicalTitle ?? match.title
+                let norm = TitleNormalizer.parse(rawTitle: rawForDedup).normalizedTitle
+                
+                if !seenTitles.contains(norm) {
+                    matches.append(match)
+                    seenTitles.insert(norm)
+                }
+            }
+        }
+        return matches
+    }
+
     // MARK: - "Your Fresh Content" (Killer Feature)
     
     /// Finds new content (Sequels, New Seasons) for franchises the user has interacted with.
@@ -231,7 +287,7 @@ class ChannelRepository {
                     
                     // STRICT LANGUAGE FILTER
                     // If the group suggests a language different from user preference, skip it.
-                    // This relies on the shared logic in CategoryPreferences (which you must ensure is accessible).
+                    // This relies on the shared logic in CategoryPreferences.
                     if CategoryPreferences.shared.isForeign(group: ch.group, language: userLang) {
                         continue
                     }

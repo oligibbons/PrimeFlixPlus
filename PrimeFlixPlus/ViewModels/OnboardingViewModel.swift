@@ -105,13 +105,27 @@ class OnboardingViewModel: ObservableObject {
         self.manualFavorites = items.filter { $0.status == "loved" || $0.status == "super_loved" }.compactMap { item in
             guard let title = item.title, let type = item.mediaType else { return nil }
             
+            // FIX: Smart Reconstruction of URL to handle legacy (broken) paths and new (clean) paths
+            let posterUrl: URL?
+            if let path = item.posterPath {
+                if path.hasPrefix("/t/p/") {
+                    // Legacy: Path stored as full path "/t/p/w200/..."
+                    posterUrl = URL(string: "https://image.tmdb.org\(path)")
+                } else {
+                    // Correct: Path stored as key "/abc.jpg"
+                    posterUrl = URL(string: "https://image.tmdb.org/t/p/w200\(path)")
+                }
+            } else {
+                posterUrl = nil
+            }
+            
             // Reconstruct TmdbSearchResult from Core Data
             let searchResult = TmdbSearchResult(
                 id: Int(item.tmdbId),
                 title: title,
                 type: type,
                 year: "", // Not persisted, but acceptable for this list
-                posterUrl: item.posterPath.map { URL(string: "https://image.tmdb.org/t/p/w200\($0)")! },
+                posterUrl: posterUrl,
                 overview: ""
             )
             
@@ -265,12 +279,16 @@ class OnboardingViewModel: ObservableObject {
             
             // 2. Save Manual Favorites
             for fav in manualFavorites {
+                // FIX: Ensure we only save the raw filename (e.g. "/abc.jpg"), NOT the full URL path.
+                // "https://image.tmdb.org/t/p/w200/abc.jpg" -> lastPathComponent = "abc.jpg"
+                let rawPath = fav.item.posterUrl.map { "/" + $0.lastPathComponent }
+                
                 preferencesRepo?.saveTasteItem(
                     tmdbId: fav.item.id,
                     title: fav.item.title,
                     type: fav.item.type,
                     status: fav.isSuper ? "super_loved" : "loved",
-                    posterPath: fav.item.posterUrl?.path // Save path for UI reload
+                    posterPath: rawPath
                 )
             }
             
