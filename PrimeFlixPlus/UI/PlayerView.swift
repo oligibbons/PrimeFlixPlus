@@ -26,16 +26,17 @@ struct PlayerView: View {
             GeometryReader { geo in
                 ZStack {
                     // 1. VLC Video Surface (The "Playhead")
-                    // Acts as the base layer and default focus.
+                    // Acts as the base layer.
                     VLCVideoSurface(viewModel: viewModel)
                         .ignoresSafeArea()
                     
                     // 2. Interaction Layer (Inputs)
                     // This sits on top of the video to capture all focus and gestures.
-                    // It is transparent but hit-testable.
+                    // CRITICAL FIX: .focusable(!showMiniDetails) disables this layer when overlay is open,
+                    // forcing focus to the Overlay instead of the Player.
                     Color.clear
                         .contentShape(Rectangle())
-                        .focusable()
+                        .focusable(!viewModel.showMiniDetails)
                         .focused($focusedField, equals: .videoSurface)
                         
                         // --- GESTURES ---
@@ -53,8 +54,10 @@ struct PlayerView: View {
                                     // Priority: Overlay (Vertical Down)
                                     // Threshold > 50 ensures distinct intent
                                     else if y > 50 {
-                                        viewModel.toggleMiniDetails()
-                                        focusedField = .miniDetails
+                                        withAnimation {
+                                            viewModel.showMiniDetails = true
+                                            focusedField = .miniDetails
+                                        }
                                     }
                                 },
                                 onEnd: {
@@ -66,8 +69,10 @@ struct PlayerView: View {
                         )
                     
                         // Discrete Moves (D-Pad / Arrows)
-                        // Only active when focus is on the video surface (not the overlay)
                         .onMoveCommand { direction in
+                            // LOCK: Do not allow player navigation if overlay is open
+                            if viewModel.showMiniDetails { return }
+                            
                             viewModel.triggerControls(forceShow: true)
                             
                             switch direction {
@@ -84,8 +89,8 @@ struct PlayerView: View {
                                 }
                             case .down:
                                 // Navigate "Down" to Mini Details
-                                if !viewModel.showMiniDetails {
-                                    viewModel.toggleMiniDetails()
+                                withAnimation {
+                                    viewModel.showMiniDetails = true
                                     focusedField = .miniDetails
                                 }
                             @unknown default:
@@ -94,7 +99,7 @@ struct PlayerView: View {
                         }
                         
                         .onPlayPauseCommand {
-                            // LOCK: Disable Play/Pause toggle if overlay is open
+                            // LOCK: Disable toggle if overlay is active
                             if !viewModel.showMiniDetails {
                                 viewModel.togglePlayPause()
                             }
@@ -173,13 +178,18 @@ struct PlayerView: View {
                         }
                     },
                     onClose: {
-                        viewModel.showMiniDetails = false
-                        focusedField = .videoSurface
+                        withAnimation {
+                            viewModel.showMiniDetails = false
+                        }
+                        // Delay focus return slightly to allow view to disappear
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            focusedField = .videoSurface
+                        }
                     }
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .focused($focusedField, equals: .miniDetails)
                 .zIndex(50)
+                .focusSection() // Ensures focus is trapped here
             }
             
             // 7. Controls Overlay
@@ -204,6 +214,7 @@ struct PlayerView: View {
         .onChange(of: viewModel.showControls) { show in
             // When controls appear (pause), default focus to playhead
             // When controls disappear (play), ensure focus stays on playhead
+            // ONLY if overlay is closed
             if show && !viewModel.showMiniDetails {
                 focusedField = .videoSurface
             }
@@ -348,7 +359,7 @@ struct MiniDetailsOverlay: View {
                         Button(action: { viewModel.restartPlayback() }) {
                             VStack(spacing: 5) {
                                 Image(systemName: "arrow.counterclockwise")
-                                    .font(.headline) // FIX: Smaller icon per request
+                                    .font(.headline) // Smaller icon per request
                                 Text("Restart")
                                     .font(.caption)
                             }
@@ -362,7 +373,7 @@ struct MiniDetailsOverlay: View {
                             Button(action: onPlayNext) {
                                 VStack(spacing: 5) {
                                     Image(systemName: "forward.end.fill")
-                                        .font(.title2)
+                                        .font(.headline) // Smaller icon per request
                                     Text("Next Ep")
                                         .font(.caption)
                                 }

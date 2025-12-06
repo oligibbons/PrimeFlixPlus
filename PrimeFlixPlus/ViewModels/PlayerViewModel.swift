@@ -7,50 +7,48 @@ import CoreData
 @MainActor
 class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
-    // VLC Engine
+    // MARK: - VLC Engine
     let vlcPlayer = VLCMediaPlayer()
     
-    // UI State
+    // MARK: - UI State
     @Published var isPlaying: Bool = false
     @Published var isBuffering: Bool = true
     @Published var isError: Bool = false
     @Published var errorMessage: String? = nil
     @Published var showControls: Bool = false
-    @Published var showMiniDetails: Bool = false // NEW: Mini Details Overlay
+    @Published var showMiniDetails: Bool = false
     
-    // Scrubbing State
+    // MARK: - Scrubbing State
     @Published var isScrubbing: Bool = false
     private var scrubbingOriginTime: Double?
     
-    // Seek Stabilization
-    // We ignore player updates until the player "catches up" to this time.
+    // MARK: - Seek Stabilization
+    // Locks time updates briefly after a seek to prevent "rubber-banding"
     private var targetSeekTime: Double?
     private var seekCommitTime: Date?
     
-    // Metadata
+    // MARK: - Playback Metadata
     @Published var videoTitle: String = ""
     @Published var duration: Double = 0.0
     @Published var currentTime: Double = 0.0
     @Published var currentUrl: String = ""
-    @Published var channelType: String = "movie" // To determine if we show "Next Episode"
+    @Published var channelType: String = "movie"
+    @Published var playbackRate: Float = 1.0
     
-    // NEW: Extended Metadata for Mini-Details Overlay
+    // MARK: - Extended Metadata (Overlay)
     @Published var videoOverview: String = ""
     @Published var videoYear: String = ""
     @Published var videoRating: String = ""
     
-    // Playback Speed
-    @Published var playbackRate: Float = 1.0
-    
-    // Next Episode Logic
+    // MARK: - Next Episode Logic
     @Published var nextEpisode: Channel? = nil
     @Published var canPlayNext: Bool = false
     
-    // Favorites
+    // MARK: - Favorites
     @Published var isFavorite: Bool = false
     private var currentChannel: Channel?
     
-    // Dependencies
+    // MARK: - Dependencies
     private var repository: PrimeFlixRepository?
     private var progressTimer: Timer?
     private var controlHideTimer: Timer?
@@ -71,7 +69,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         
         setupVLC(url: channel.url)
         checkForNextEpisode()
-        fetchExtendedMetadata() // Trigger metadata fetch
+        fetchExtendedMetadata()
     }
     
     // MARK: - VLC Setup
@@ -91,9 +89,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         
         vlcPlayer.media = media
         vlcPlayer.delegate = self
-        
-        // Apply Playback Rate
-        vlcPlayer.rate = self.playbackRate
+        vlcPlayer.rate = self.playbackRate // Apply saved speed
         
         vlcPlayer.play()
         self.isPlaying = true
@@ -105,14 +101,12 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     // MARK: - Metadata Fetching
     
-    /// Fetches Synopsis, Year, and Rating from Core Data (MediaMetadata) or parses title
     private func fetchExtendedMetadata() {
         guard let repo = repository, let channel = currentChannel else { return }
         let title = channel.canonicalTitle ?? channel.title
         
         Task.detached {
             let context = repo.container.newBackgroundContext()
-            // 1. Try to find cached metadata (populated by DetailsView)
             let req = NSFetchRequest<MediaMetadata>(entityName: "MediaMetadata")
             req.predicate = NSPredicate(format: "title == %@", title)
             req.fetchLimit = 1
@@ -120,8 +114,6 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             if let meta = try? context.fetch(req).first {
                 let overview = meta.overview ?? ""
                 let rating = meta.voteAverage > 0 ? String(format: "%.1f", meta.voteAverage) : ""
-                
-                // If metadata lacks year, parse it from the title
                 let info = TitleNormalizer.parse(rawTitle: title)
                 let year = info.year ?? ""
                 
@@ -131,7 +123,6 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                     self.videoYear = year
                 }
             } else {
-                // 2. Fallback: Parse basic info from the filename/title
                 let info = TitleNormalizer.parse(rawTitle: title)
                 await MainActor.run {
                     self.videoYear = info.year ?? ""
@@ -139,6 +130,58 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 }
             }
         }
+    }
+    
+    // MARK: - Next Episode Logic
+    
+    func checkForNextEpisode() {
+        guard let repo = repository, let current = currentChannel, current.type == "series" else { return }
+        
+        Task.detached {
+            let context = repo.container.newBackgroundContext()
+            
+            await context.perform {
+                if let bgChannel = try? context.existingObject(with: current.objectID) as? Channel {
+                    if let next = self.findNextEpisodeInternal(context: context, current: bgChannel) {
+                        let nextID = next.objectID
+                        Task { @MainActor in
+                            if let mainNext = try? repo.container.viewContext.existingObject(with: nextID) as? Channel {
+                                self.nextEpisode = mainNext
+                                self.canPlayNext = true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private nonisolated func findNextEpisodeInternal(context: NSManagedObjectContext, current: Channel) -> Channel? {
+        let title = current.title
+        guard let regex = try? NSRegularExpression(pattern: "(?i)(S)(\\d+)\\s*(E)(\\d+)") else { return nil }
+        let nsString = title as NSString
+        let results = regex.matches(in: title, range: NSRange(location: 0, length: nsString.length))
+        
+        guard let match = results.first, match.numberOfRanges >= 5 else { return nil }
+        guard let s = Int(nsString.substring(with: match.range(at: 2))),
+              let e = Int(nsString.substring(with: match.range(at: 4))) else { return nil }
+        
+        let nextE = e + 1
+        let prefix = String(title.prefix(5))
+        let req = NSFetchRequest<Channel>(entityName: "Channel")
+        req.predicate = NSPredicate(
+            format: "playlistUrl == %@ AND type == 'series' AND title BEGINSWITH[cd] %@",
+            current.playlistUrl, prefix
+        )
+        req.fetchLimit = 500
+        
+        if let candidates = try? context.fetch(req) {
+             return candidates.first { ch in
+                 let t = ch.title.uppercased()
+                 return t.contains(String(format: "S%02dE%02d", s, nextE))
+             }
+        }
+        return nil
     }
     
     // MARK: - VLC Delegate Methods
@@ -158,7 +201,6 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 if let len = player.media?.length, len.intValue > 0 {
                     self.duration = Double(len.intValue) / 1000.0
                 }
-                // Enforce rate on successful start
                 if player.rate != self.playbackRate {
                     player.rate = self.playbackRate
                 }
@@ -173,7 +215,6 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 self.isPlaying = false
                 self.isBuffering = false
                 self.triggerControls(forceShow: true)
-                // Auto-Play next logic could go here in v2
             default:
                 break
             }
@@ -182,7 +223,6 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     @objc nonisolated func mediaPlayerTimeChanged(_ aNotification: Notification) {
         Task { @MainActor in
-            // Use common logic for time updates
             self.updateTimeFromPlayer()
         }
     }
@@ -193,22 +233,15 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         
         let playerTime = Double(vlcPlayer.time.intValue) / 1000.0
         
-        // 2. Seek Stabilization Logic
-        // If we recently sought to a time, ignore "old" time reports from the player
-        // until it reports a time close to (or after) our target.
-        if let target = targetSeekTime, let commit = seekCommitTime {
-            // Safety timeout: After 3 seconds, accept whatever the player says to prevent getting stuck
-            if Date().timeIntervalSince(commit) > 3.0 {
-                self.targetSeekTime = nil
-                self.seekCommitTime = nil
+        // 2. SEEK STABILIZATION LOCK
+        if let commit = seekCommitTime {
+            if Date().timeIntervalSince(commit) < 2.0 {
+                // We are locked. Keep displaying the target seek time.
+                return
             } else {
-                // If player is still behind the target (by > 2 seconds), ignore it
-                if playerTime < (target - 2.0) {
-                    return
-                }
-                // Player has caught up
-                self.targetSeekTime = nil
+                // Lock expired. Player should be stable now.
                 self.seekCommitTime = nil
+                self.targetSeekTime = nil
             }
         }
         
@@ -225,7 +258,6 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if vlcPlayer.isPlaying {
             vlcPlayer.pause()
             self.isPlaying = false
-            // Show Mini Details on Pause
             withAnimation { self.showMiniDetails = true }
         } else {
             vlcPlayer.play()
@@ -234,8 +266,6 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
         triggerControls(forceShow: true)
     }
-    
-    // MARK: - Playback Logic Features (New)
     
     func setPlaybackSpeed(_ speed: Float) {
         self.playbackRate = speed
@@ -252,72 +282,8 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         triggerControls(forceShow: true)
     }
     
-    func checkForNextEpisode() {
-        guard let repo = repository, let current = currentChannel, current.type == "series" else { return }
-        
-        Task.detached {
-            let context = repo.container.newBackgroundContext()
-            // Using a detached task to perform background fetch
-            
-            await context.perform {
-                // Fetch the background context version of current channel
-                if let bgChannel = try? context.existingObject(with: current.objectID) as? Channel {
-                    if let next = self.findNextEpisodeInternal(context: context, current: bgChannel) {
-                        let nextID = next.objectID
-                        Task { @MainActor in
-                            // Re-fetch on main context to update UI safely
-                            if let mainNext = try? repo.container.viewContext.existingObject(with: nextID) as? Channel {
-                                self.nextEpisode = mainNext
-                                self.canPlayNext = true
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // Helper to find next episode
-    // MARK: - Concurrency Fix: nonisolated to run safely on background thread
-    private nonisolated func findNextEpisodeInternal(context: NSManagedObjectContext, current: Channel) -> Channel? {
-        let title = current.title
-        // Simple S01E01 parser
-        guard let regex = try? NSRegularExpression(pattern: "(?i)(S)(\\d+)\\s*(E)(\\d+)") else { return nil }
-        let nsString = title as NSString
-        let results = regex.matches(in: title, range: NSRange(location: 0, length: nsString.length))
-        
-        guard let match = results.first, match.numberOfRanges >= 5 else { return nil }
-        guard let s = Int(nsString.substring(with: match.range(at: 2))),
-              let e = Int(nsString.substring(with: match.range(at: 4))) else { return nil }
-        
-        // Try Next Episode
-        let nextE = e + 1
-        let prefix = String(title.prefix(5)) // Optimization
-        let req = NSFetchRequest<Channel>(entityName: "Channel")
-        req.predicate = NSPredicate(
-            format: "playlistUrl == %@ AND type == 'series' AND title BEGINSWITH[cd] %@",
-            current.playlistUrl, prefix
-        )
-        req.fetchLimit = 500
-        
-        if let candidates = try? context.fetch(req) {
-             return candidates.first { ch in
-                 let t = ch.title.uppercased()
-                 return t.contains(String(format: "S%02dE%02d", s, nextE))
-             }
-        }
-        return nil
-    }
-    
-    // MARK: - Discrete Seeking (Click)
-    
-    func seekForward(seconds: Int = 10) {
-        seek(by: seconds)
-    }
-    
-    func seekBackward(seconds: Int = 10) {
-        seek(by: -seconds)
-    }
+    func seekForward(seconds: Int = 10) { seek(by: seconds) }
+    func seekBackward(seconds: Int = 10) { seek(by: -seconds) }
     
     private func seek(by seconds: Int) {
         guard vlcPlayer.isSeekable else { return }
@@ -329,12 +295,9 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         let safeTimeMs = max(0, min(newTimeMs, maxTimeMs))
         
         self.currentTime = Double(safeTimeMs) / 1000.0
-        
         commitSeek(to: safeTimeMs)
         triggerControls(forceShow: true)
     }
-    
-    // MARK: - Continuous Scrubbing (Drag)
     
     func startScrubbing(translation: CGFloat, screenWidth: CGFloat) {
         isScrubbing = true
@@ -346,9 +309,6 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         
         guard let origin = scrubbingOriginTime else { return }
         
-        // Tuning: Full swipe width = 90 seconds (Fine scrubbing)
-        // or dynamic based on content length? Let's use a dynamic window.
-        // For a 2 hour movie, we want a swipe to move maybe 10 minutes.
         let baseSeekWindow = max(120.0, duration * 0.10)
         let percentage = Double(translation / screenWidth)
         let timeDelta = baseSeekWindow * percentage
@@ -369,13 +329,9 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     private func commitSeek(to ms: Int32) {
         vlcPlayer.time = VLCTime(int: ms)
-        
-        // Set lock
         targetSeekTime = Double(ms) / 1000.0
         seekCommitTime = Date()
     }
-    
-    // MARK: - UI Management
     
     func triggerControls(forceShow: Bool = false) {
         controlHideTimer?.invalidate()
@@ -418,23 +374,16 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private func startProgressTracking() {
         progressTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            
-            // Poll for time (Backup for delegate)
             self.updateTimeFromPlayer()
             
-            // Update Duration if needed
+            // Robust check: If VLC says it's playing, dismiss buffering immediately
+            if self.vlcPlayer.isPlaying {
+                if self.isBuffering { self.isBuffering = false }
+                if !self.isPlaying { self.isPlaying = true }
+            }
+            
             if self.duration == 0, let len = self.vlcPlayer.media?.length, len.intValue > 0 {
                 self.duration = Double(len.intValue) / 1000.0
-            }
-            
-            // Sync Play/Pause state
-            if self.vlcPlayer.isPlaying && !self.isPlaying {
-                self.isPlaying = true
-                self.isBuffering = false
-            }
-            
-            if self.currentTime > 0 && self.isBuffering {
-                Task { @MainActor in self.isBuffering = false }
             }
             
             // Save Progress
@@ -443,9 +392,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 let pos = Int64(self.currentTime * 1000)
                 let dur = Int64(self.duration * 1000)
                 
-                let isVLCPlaying = self.vlcPlayer.isPlaying || self.vlcPlayer.state == .playing
-                
-                if (pos > 10000 && dur > 0 && isVLCPlaying) || channel.type == "live" {
+                if (pos > 10000 && dur > 0) || channel.type == "live" {
                     Task { @MainActor in
                         repo.saveProgress(url: self.currentUrl, pos: pos, dur: dur)
                     }
