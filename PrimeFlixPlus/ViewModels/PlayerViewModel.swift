@@ -63,6 +63,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private var repository: PrimeFlixRepository?
     private var progressTimer: Timer?
     private var controlHideTimer: Timer?
+    private var timeoutTimer: Timer?
     private var lastSavedTime: Double = 0
     
     // MARK: - Configuration
@@ -81,6 +82,8 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         self.currentTime = 0
         self.audioTracks = []
         self.subtitleTracks = []
+        self.isError = false
+        self.errorMessage = nil
         
         let savedSpeed = UserDefaults.standard.double(forKey: "defaultPlaybackSpeed")
         self.playbackRate = savedSpeed > 0 ? Float(savedSpeed) : 1.0
@@ -93,8 +96,17 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     // MARK: - VLC Setup
     
     private func setupVLC(url: String, type: String) {
-        guard let mediaUrl = URL(string: url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? url) else {
-            reportError("Invalid URL", reason: url)
+        // Safe URL Creation: Prevents double-encoding if the URL is already valid
+        // but handles spaces/special chars if they are raw.
+        var urlObj = URL(string: url)
+        if urlObj == nil {
+            if let encoded = url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+                urlObj = URL(string: encoded)
+            }
+        }
+        
+        guard let mediaUrl = urlObj else {
+            reportError("Invalid URL", reason: "Could not parse stream link.")
             return
         }
         
@@ -103,18 +115,29 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // Smart Buffering Logic
         let cacheSize: Int
         if type == "live" {
-            cacheSize = 1500
+            cacheSize = 2000 // Increased slightly for stability
         } else if let q = currentChannel?.quality, q.contains("4K") {
-            cacheSize = 8000
+            cacheSize = 10000 // 10s buffer for 4K
         } else {
-            cacheSize = 3000
+            cacheSize = 5000 // 5s buffer standard
         }
         
-        media.addOptions([
+        // NUCLEAR OPTION: Robust Network Settings
+        // We use 'okhttp' user-agent as it's the standard for Android networking
+        // and often bypasses "Browser" or "Player" specific blocks.
+        let options: [String: Any] = [
             "network-caching": cacheSize,
             "clock-jitter": 0,
-            "clock-synchro": 0
-        ])
+            "clock-synchro": 0,
+            "http-continuous": true,      // Ignore stream discontinuities (Essential for throttling)
+            "http-reconnect": true,       // Aggressively reconnect on drop
+            ":http-continuous": true,     // Force apply to media
+            ":http-reconnect": true,      // Force apply to media
+            "http-user-agent": "okhttp/3.12.1",
+            ":http-user-agent": "okhttp/3.12.1"
+        ]
+        
+        media.addOptions(options)
         
         vlcPlayer.media = media
         vlcPlayer.delegate = self
@@ -125,7 +148,20 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         self.isBuffering = true
         
         startProgressTracking()
+        startTimeoutTimer()
         triggerControls()
+    }
+    
+    private func startTimeoutTimer() {
+        timeoutTimer?.invalidate()
+        // Allow 30 seconds for connection negotiation in hostile networks
+        timeoutTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            // If still buffering and no time elapsed, consider it a timeout
+            if self.isBuffering && self.currentTime < 1 {
+                self.reportError("Connection Timed Out", reason: "Stream failed to start. Check connection or VPN.")
+            }
+        }
     }
     
     // MARK: - Track Logic
@@ -343,6 +379,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 self.isBuffering = false
                 self.isPlaying = true
                 self.isError = false
+                self.timeoutTimer?.invalidate() // Connection success
                 
                 if let len = player.media?.length, len.intValue > 0 {
                     self.duration = Double(len.intValue) / 1000.0
@@ -502,6 +539,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         progressTimer?.invalidate()
         controlHideTimer?.invalidate()
         autoPlayTimer?.invalidate()
+        timeoutTimer?.invalidate() // Clean up timeout
         if vlcPlayer.isPlaying { vlcPlayer.stop() }
         vlcPlayer.delegate = nil
         vlcPlayer.drawable = nil

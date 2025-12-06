@@ -1,3 +1,5 @@
+// oligibbons/primeflixplus/PrimeFlixPlus-73fc471b3826ec01f10236d5c79ae256450974b4/PrimeFlixPlus/ContentView.swift
+
 import SwiftUI
 
 // Navigation State
@@ -48,8 +50,7 @@ enum NavigationDestination: Hashable {
 
 struct ContentView: View, Equatable {
     // MARK: - Equatable Conformance
-    // FIX: Returning 'false' ensures the view redraws when @State changes (like showVPNWarning).
-    // Returning 'true' was previously freezing the UI state.
+    // Strict false ensures the view redraws on @State changes like showVPNWarning
     static func == (lhs: ContentView, rhs: ContentView) -> Bool {
         return false
     }
@@ -164,12 +165,14 @@ struct ContentView: View, Equatable {
             if showVPNWarning {
                 VPNWarningView(
                     onProceed: {
+                        print("[VPN UI] User chose Proceed")
                         if let channel = pendingPlayable {
                             forcePlay(channel)
                         }
                         closeWarning()
                     },
                     onCancel: {
+                        print("[VPN UI] User chose Return")
                         closeWarning()
                     }
                 )
@@ -178,16 +181,16 @@ struct ContentView: View, Equatable {
             }
             
             // 5. DEBUG INDICATOR (Remove for production release)
-            // Useful to verify if VPN is detected even when popup doesn't trigger
             if !isPlayerMode && currentDestination != .speedTest {
                 VStack {
                     HStack {
                         Spacer()
                         HStack(spacing: 6) {
+                            let status = VPNDetector.checkVPNStatus()
                             Circle()
-                                .fill(VPNDetector.checkVPNStatus().isActive ? Color.green : Color.red)
+                                .fill(status.isActive ? Color.green : Color.red)
                                 .frame(width: 8, height: 8)
-                            Text(VPNDetector.checkVPNStatus().isActive ? "VPN: Safe" : "VPN: Unsafe")
+                            Text(status.isActive ? "VPN: Safe (\(status.interfaceName ?? "?"))" : "VPN: Unsafe")
                                 .font(.caption2)
                                 .foregroundColor(.white.opacity(0.5))
                         }
@@ -199,7 +202,7 @@ struct ContentView: View, Equatable {
                     }
                     Spacer()
                 }
-                .allowsHitTesting(false) // Pass touches through
+                .allowsHitTesting(false)
                 .zIndex(50)
             }
         }
@@ -218,16 +221,18 @@ struct ContentView: View, Equatable {
     
     private func attemptPlayback(_ channel: Channel, replaceCurrent: Bool = false) {
         let vpnStatus = VPNDetector.checkVPNStatus()
+        print("[VPN CHECK] Status: \(vpnStatus.isActive) Interface: \(vpnStatus.interfaceName ?? "None")")
         
         if vpnStatus.isActive {
-            // Safe
+            // Safe -> Play
             if replaceCurrent {
                 currentDestination = .player(channel)
             } else {
                 navigate(to: .player(channel))
             }
         } else {
-            // Unsafe
+            // Unsafe -> Show Warning
+            print("[VPN CHECK] Triggering Warning")
             self.pendingPlayable = channel
             withAnimation {
                 self.showVPNWarning = true

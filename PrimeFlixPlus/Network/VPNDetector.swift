@@ -9,24 +9,24 @@ struct VPNStatus {
 
 class VPNDetector {
     
-    /// Checks for the presence of ACTIVE VPN interfaces.
+    /// Checks for the presence of ACTIVE, ROUTABLE VPN interfaces.
     static func checkVPNStatus() -> VPNStatus {
-        // 1. Check System Proxy Settings (High Level - Best for App-based VPNs)
+        // 1. Check System Proxy Settings (Highest Confidence for App VPNs)
+        // VPN apps on tvOS usually register a scoped proxy configuration.
         if let dict = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any] {
             if let scoped = dict["__SCOPED__"] as? [String: Any] {
                 for (key, _) in scoped {
                     if key.contains("tap") || key.contains("tun") || key.contains("ppp") || key.contains("ipsec") {
-                        return VPNStatus(isActive: true, method: "System Tunnel", interfaceName: key)
+                        return VPNStatus(isActive: true, method: "System Tunnel (Proxy)", interfaceName: key)
                     }
-                    // Exclude utun0 (often system reserved) unless it's the only one
                     if key.contains("utun") && key != "utun0" {
-                         return VPNStatus(isActive: true, method: "System Tunnel", interfaceName: key)
+                         return VPNStatus(isActive: true, method: "System Tunnel (Proxy)", interfaceName: key)
                     }
                 }
             }
         }
         
-        // 2. Check Interface List directly (Low Level - Best for Network Extensions)
+        // 2. Interface Inspection (Fallback with IP Validation)
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&ifaddr) == 0 else {
             return VPNStatus(isActive: false, method: "Error", interfaceName: nil)
@@ -41,35 +41,43 @@ class VPNDetector {
             guard let interface = ptr?.pointee else { continue }
             let name = String(cString: interface.ifa_name)
             let flags = Int32(interface.ifa_flags)
+            let addr = interface.ifa_addr
             
-            // Flag constants (Standard BSD/Darwin)
+            // Standard Flags
             let IFF_UP: Int32 = 0x1
             let IFF_RUNNING: Int32 = 0x40
             
-            // Skip Loopback
-            if name == "lo0" { continue }
+            // Skip Loopback & Inactive Interfaces
+            if name == "lo0" || (flags & IFF_UP) != IFF_UP || (flags & IFF_RUNNING) != IFF_RUNNING {
+                continue
+            }
             
-            // Check if interface is UP and RUNNING
-            let isUp = (flags & IFF_UP) == IFF_UP
-            let isRunning = (flags & IFF_RUNNING) == IFF_RUNNING
-            
-            if isUp && isRunning {
-                // Check for VPN specific naming conventions
-                if name.hasPrefix("ppp") || name.hasPrefix("ipsec") {
-                    vpnInterface = name
-                    break
-                }
+            // Check for VPN candidates
+            if name.hasPrefix("ppp") || name.hasPrefix("ipsec") || name.hasPrefix("tap") || name.hasPrefix("tun") || (name.hasPrefix("utun") && name != "utun0") {
                 
-                if name.hasPrefix("utun") && name != "utun0" {
-                    vpnInterface = name
-                    break
-                }
-                
-                // On some tvOS versions, WireGuard might use utun0 if it's the first networking stack loaded
-                // We double check if it's NOT the primary wifi (en0/en1)
-                if name.hasPrefix("utun") && !name.hasPrefix("en") && !name.hasPrefix("awdl") && !name.hasPrefix("llw") {
-                     // Potential VPN, keep scanning for a better candidate or accept it
-                     vpnInterface = name
+                // IP ADDRESS CHECK (The Fix for False Positives)
+                // We check if the interface has a valid, non-local IP address.
+                if let sa = addr {
+                    // Filter by Family (IPv4 or IPv6)
+                    let family = sa.pointee.sa_family
+                    if family == UInt8(AF_INET) || family == UInt8(AF_INET6) {
+                        
+                        var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                        if getnameinfo(sa, socklen_t(sa.pointee.sa_len), &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
+                            let ipString = String(cString: hostname)
+                            
+                            // Ignore Link-Local (Auto-IP) addresses often assigned to idle system tunnels
+                            // IPv4 Link-Local: 169.254.x.x
+                            // IPv6 Link-Local: fe80::...
+                            if ipString.hasPrefix("169.254") || ipString.hasPrefix("fe80") {
+                                continue
+                            }
+                            
+                            // If we pass these checks, it's a real, active tunnel.
+                            vpnInterface = name
+                            break
+                        }
+                    }
                 }
             }
         }
