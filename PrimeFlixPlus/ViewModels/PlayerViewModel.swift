@@ -257,7 +257,6 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         showAutoPlay = false
         if let next = nextEpisode {
             // Signal view to switch
-            // We use a closure in View to handle the switch
             NotificationCenter.default.post(name: NSNotification.Name("PlayNextEpisode"), object: next)
         }
     }
@@ -329,6 +328,13 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         
         let playerTime = Double(vlcPlayer.time.intValue) / 1000.0
         
+        // Aggressive Duration Check: If duration is 0, keep trying to fetch it
+        if self.duration == 0 {
+            if let len = vlcPlayer.media?.length, len.intValue > 0 {
+                self.duration = Double(len.intValue) / 1000.0
+            }
+        }
+        
         // 2. SEEK STABILIZATION LOCK
         if let commit = seekCommitTime {
             if Date().timeIntervalSince(commit) < 2.0 {
@@ -354,8 +360,6 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if vlcPlayer.isPlaying {
             vlcPlayer.pause()
             self.isPlaying = false
-            // FIX: Do NOT auto-open mini details on pause.
-            // User requested explicit swipe only.
         } else {
             vlcPlayer.play()
             self.isPlaying = true
@@ -388,8 +392,18 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         let currentMs = Int32(self.currentTime * 1000)
         let deltaMs = Int32(seconds * 1000)
         let newTimeMs = currentMs + deltaMs
+        
+        // FIX: Handle unknown duration (0) to prevent resetting to start.
+        // If we don't know the duration, we don't clamp the upper bound.
         let maxTimeMs = Int32(duration * 1000)
-        let safeTimeMs = max(0, min(newTimeMs, maxTimeMs))
+        let safeTimeMs: Int32
+        
+        if maxTimeMs > 0 {
+            safeTimeMs = max(0, min(newTimeMs, maxTimeMs))
+        } else {
+            // Unknown duration: Allow seek, let VLC handle the bounds
+            safeTimeMs = max(0, newTimeMs)
+        }
         
         self.currentTime = Double(safeTimeMs) / 1000.0
         commitSeek(to: safeTimeMs)
@@ -397,7 +411,14 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
     
     func startScrubbing(translation: CGFloat, screenWidth: CGFloat) {
-        // FIX: If duration is unknown (0), scrubbing will calculate 0 and reset the video.
+        // Emergency Duration Update
+        if duration == 0 {
+            if let len = vlcPlayer.media?.length, len.intValue > 0 {
+                self.duration = Double(len.intValue) / 1000.0
+            }
+        }
+        
+        // If duration is still 0, we can't perform visual scrubbing
         guard duration > 0 else { return }
         
         isScrubbing = true
@@ -424,7 +445,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         isScrubbing = false
         scrubbingOriginTime = nil
         
-        // Only commit if we have a valid time (and scrubbing didn't abort)
+        // Only commit if we have a valid time
         if currentTime > 0 {
             let ms = Int32(currentTime * 1000)
             commitSeek(to: ms)
@@ -442,7 +463,6 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         withAnimation { showControls = true }
         
         // Hide only if playing and not in a special state
-        // Added check for showAutoPlay to prevent controls from hiding while auto-play is counting down
         if (vlcPlayer.isPlaying || forceShow == false) && !isError && !showAutoPlay {
             controlHideTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
                 guard let self = self else { return }
