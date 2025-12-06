@@ -35,7 +35,12 @@ struct PersistenceController {
             NSAttributeDescription(name: "canonicalTitle", type: .stringAttributeType),
             NSAttributeDescription(name: "quality", type: .stringAttributeType),
             NSAttributeDescription(name: "addedAt", type: .dateAttributeType),
-            NSAttributeDescription(name: "isFavorite", type: .booleanAttributeType)
+            NSAttributeDescription(name: "isFavorite", type: .booleanAttributeType),
+            
+            // NEW: Structured Series Metadata for "Next Episode" Logic
+            NSAttributeDescription(name: "seriesId", type: .stringAttributeType),
+            NSAttributeDescription(name: "season", type: .integer16AttributeType),
+            NSAttributeDescription(name: "episode", type: .integer16AttributeType)
         ]
         
         // --- Entity: WatchProgress ---

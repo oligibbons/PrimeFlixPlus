@@ -5,13 +5,12 @@ class M3UParser {
     /// Parses M3U content in parallel to handle large (20k+) playlists instantly.
     static func parse(content: String, playlistUrl: String) async -> [ChannelStruct] {
         // 1. Split content into lines to prepare for parallel processing
-        // omittingEmptySubsequences is crucial for cleanup
         let lines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
         
         if lines.isEmpty { return [] }
         
         // 2. Determine Chunk Size for Parallelism
-        // For 20k items, ~2000 lines per chunk gives us ~10 parallel tasks, keeping all cores busy.
+        // For 20k items, ~2500 lines per chunk gives us ~8 parallel tasks, keeping all cores busy without overhead.
         let totalLines = lines.count
         let chunkSize = 2500
         
@@ -132,6 +131,16 @@ class M3UParser {
             type = "live"
         }
         
+        // Extract Season/Episode info if it looks like a series episode hidden in a VOD/M3U list
+        var s = 0
+        var e = 0
+        
+        if type == "series" || type == "movie" {
+            let parsed = parseSeasonEpisode(from: rawTitle)
+            s = parsed.0
+            e = parsed.1
+        }
+        
         return ChannelStruct(
             url: streamUrl,
             playlistUrl: playlistUrl,
@@ -140,7 +149,37 @@ class M3UParser {
             cover: data.logo,
             type: type,
             canonicalTitle: rawTitle,
-            quality: info.quality
+            quality: info.quality,
+            // Updated to satisfy the new initializer from IntermediateModels.swift
+            seriesId: nil, // M3U files rarely provide a clean Series ID, so we leave it nil
+            season: s,
+            episode: e
         )
+    }
+    
+    // Regex helper for M3U titles (e.g. "The Office S01 E05")
+    // Replicated here to keep the Parser self-contained within the Task
+    private static func parseSeasonEpisode(from title: String) -> (Int, Int) {
+        let patterns = [
+            "(?i)(S)(\\d+)\\s*(E)(\\d+)", // S01E01
+            "(?i)(\\d+)x(\\d+)"           // 1x01
+        ]
+        
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern),
+               let match = regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)) {
+                
+                let nsString = title as NSString
+                // Adjust ranges based on pattern groups
+                let sIndex = match.numberOfRanges == 5 ? 2 : 1
+                let eIndex = match.numberOfRanges == 5 ? 4 : 2
+                
+                if let s = Int(nsString.substring(with: match.range(at: sIndex))),
+                   let e = Int(nsString.substring(with: match.range(at: eIndex))) {
+                    return (s, e)
+                }
+            }
+        }
+        return (0, 0)
     }
 }

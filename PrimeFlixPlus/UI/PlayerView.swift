@@ -17,6 +17,7 @@ struct PlayerView: View {
         case upperControls // The Heart Button / Top Bar
         case miniDetails // The Swipe-Down overlay
         case autoPlayOverlay // The Timer Overlay
+        case trackSelection // NEW: Focus for Audio/Subtitle selection
     }
     @FocusState private var focusedField: PlayerFocus?
     
@@ -36,7 +37,7 @@ struct PlayerView: View {
                     // CRITICAL FIX: Disable focus when ANY overlay is active
                     Color.clear
                         .contentShape(Rectangle())
-                        .focusable(!viewModel.showMiniDetails && !viewModel.showAutoPlay)
+                        .focusable(!viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection)
                         .focused($focusedField, equals: .videoSurface)
                         
                         // --- GESTURES ---
@@ -45,7 +46,7 @@ struct PlayerView: View {
                             SiriRemoteSwipeHandler(
                                 onPan: { x, y in
                                     // LOCK: Disable scrubbing if Overlays are open
-                                    if viewModel.showMiniDetails || viewModel.showAutoPlay { return }
+                                    if viewModel.showMiniDetails || viewModel.showAutoPlay || viewModel.showTrackSelection { return }
                                     
                                     // Priority: Scrubbing (Horizontal)
                                     if abs(x) > abs(y) {
@@ -61,7 +62,7 @@ struct PlayerView: View {
                                     }
                                 },
                                 onEnd: {
-                                    if !viewModel.showMiniDetails && !viewModel.showAutoPlay {
+                                    if !viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection {
                                         viewModel.endScrubbing()
                                     }
                                 }
@@ -71,7 +72,7 @@ struct PlayerView: View {
                         // Discrete Moves (D-Pad / Arrows)
                         .onMoveCommand { direction in
                             // LOCK: Do not allow player navigation if overlay is open
-                            if viewModel.showMiniDetails || viewModel.showAutoPlay { return }
+                            if viewModel.showMiniDetails || viewModel.showAutoPlay || viewModel.showTrackSelection { return }
                             
                             viewModel.triggerControls(forceShow: true)
                             
@@ -100,7 +101,7 @@ struct PlayerView: View {
                         
                         .onPlayPauseCommand {
                             // LOCK: Disable toggle if overlay is active
-                            if !viewModel.showMiniDetails && !viewModel.showAutoPlay {
+                            if !viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection {
                                 viewModel.togglePlayPause()
                             }
                         }
@@ -191,7 +192,24 @@ struct PlayerView: View {
                 .focusSection() // Ensures focus is trapped here
             }
             
-            // 7. Auto Play Overlay (Timer)
+            // 7. Track Selection Overlay (NEW)
+            if viewModel.showTrackSelection {
+                TrackSelectionOverlay(
+                    viewModel: viewModel,
+                    onClose: {
+                        withAnimation { viewModel.showTrackSelection = false }
+                        focusedField = .videoSurface
+                    }
+                )
+                .zIndex(55)
+                .focusSection()
+                .onAppear {
+                    // Trap focus
+                    focusedField = .trackSelection
+                }
+            }
+            
+            // 8. Auto Play Overlay (Timer)
             if viewModel.showAutoPlay {
                 AutoPlayOverlay(viewModel: viewModel)
                     .zIndex(60)
@@ -202,13 +220,17 @@ struct PlayerView: View {
                     }
             }
             
-            // 8. Controls Overlay
+            // 9. Controls Overlay
             // We pass the focus binding down so the overlay knows if it's active
-            if viewModel.showControls && !viewModel.showMiniDetails && !viewModel.showAutoPlay {
+            if viewModel.showControls && !viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection {
                 ControlsOverlayView(
                     viewModel: viewModel,
                     channel: channel,
-                    focusedField: $focusedField
+                    focusedField: $focusedField,
+                    onShowTracks: {
+                        withAnimation { viewModel.showTrackSelection = true }
+                        focusedField = .trackSelection
+                    }
                 )
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
             }
@@ -229,7 +251,7 @@ struct PlayerView: View {
         }
         // Auto-Focus logic for Play/Pause state
         .onChange(of: viewModel.showControls) { show in
-            if show && !viewModel.showMiniDetails && !viewModel.showAutoPlay {
+            if show && !viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection {
                 focusedField = .videoSurface
             }
         }
@@ -283,6 +305,101 @@ struct PlayerView: View {
         let m = (totalSeconds % 3600) / 60
         let s = totalSeconds % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
+    }
+}
+
+// MARK: - Track Selection Overlay (NEW)
+struct TrackSelectionOverlay: View {
+    @ObservedObject var viewModel: PlayerViewModel
+    var onClose: () -> Void
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.8).ignoresSafeArea()
+            
+            HStack(alignment: .top, spacing: 100) {
+                
+                // Audio Column
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Audio")
+                        .font(CinemeltTheme.fontTitle(32))
+                        .foregroundColor(CinemeltTheme.accent)
+                    
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if viewModel.audioTracks.isEmpty {
+                                Text("No audio tracks found")
+                                    .font(CinemeltTheme.fontBody(20))
+                                    .foregroundColor(.gray)
+                            } else {
+                                ForEach(Array(viewModel.audioTracks.enumerated()), id: \.offset) { index, track in
+                                    Button(action: { viewModel.setAudioTrack(index: index) }) {
+                                        HStack {
+                                            Text(track)
+                                                .font(CinemeltTheme.fontBody(22))
+                                                .foregroundColor(.white)
+                                            Spacer()
+                                            if index == viewModel.currentAudioIndex {
+                                                Image(systemName: "checkmark")
+                                                    .foregroundColor(CinemeltTheme.accent)
+                                            }
+                                        }
+                                        .padding()
+                                        .background(Color.white.opacity(0.1))
+                                        .cornerRadius(12)
+                                    }
+                                    .buttonStyle(CinemeltCardButtonStyle())
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(width: 400)
+                
+                // Subtitle Column
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Subtitles")
+                        .font(CinemeltTheme.fontTitle(32))
+                        .foregroundColor(CinemeltTheme.accent)
+                    
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if viewModel.subtitleTracks.isEmpty {
+                                Text("No subtitles found")
+                                    .font(CinemeltTheme.fontBody(20))
+                                    .foregroundColor(.gray)
+                            } else {
+                                ForEach(Array(viewModel.subtitleTracks.enumerated()), id: \.offset) { index, track in
+                                    Button(action: { viewModel.setSubtitleTrack(index: index) }) {
+                                        HStack {
+                                            Text(track)
+                                                .font(CinemeltTheme.fontBody(22))
+                                                .foregroundColor(.white)
+                                            Spacer()
+                                            if index == viewModel.currentSubtitleIndex {
+                                                Image(systemName: "checkmark")
+                                                    .foregroundColor(CinemeltTheme.accent)
+                                            }
+                                        }
+                                        .padding()
+                                        .background(Color.white.opacity(0.1))
+                                        .cornerRadius(12)
+                                    }
+                                    .buttonStyle(CinemeltCardButtonStyle())
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(width: 400)
+                
+            }
+            .frame(height: 600)
+        }
+        // Menu button to close overlay
+        .onExitCommand {
+            onClose()
+        }
     }
 }
 
@@ -536,6 +653,7 @@ struct ControlsOverlayView: View {
     @ObservedObject var viewModel: PlayerViewModel
     let channel: Channel
     var focusedField: FocusState<PlayerView.PlayerFocus?>.Binding
+    var onShowTracks: () -> Void // NEW Action
     
     var body: some View {
         ZStack {
@@ -565,7 +683,24 @@ struct ControlsOverlayView: View {
                     }
                     Spacer()
                     
-                    // Favorite Button (Focusable)
+                    // Tracks Button (NEW)
+                    Button(action: onShowTracks) {
+                        Image(systemName: "captions.bubble.fill")
+                            .font(.title)
+                            .padding(15)
+                            .background(Color.white.opacity(0.1))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain) // Custom look
+                    .focused(focusedField, equals: .upperControls)
+                    // Logic: Down Arrow -> Back to Playhead
+                    .onMoveCommand { direction in
+                        if direction == .down {
+                            focusedField.wrappedValue = .videoSurface
+                        }
+                    }
+                    
+                    // Favorite Button
                     Button(action: { viewModel.toggleFavorite() }) {
                         HStack(spacing: 10) {
                             Image(systemName: viewModel.isFavorite ? "heart.fill" : "heart")
@@ -582,15 +717,13 @@ struct ControlsOverlayView: View {
                                 .fill(focusedField.wrappedValue == .upperControls ? CinemeltTheme.accent : Color.white.opacity(0.1))
                         )
                     }
-                    .buttonStyle(.plain) // Custom look defined above
+                    .buttonStyle(.plain)
                     .focused(focusedField, equals: .upperControls)
-                    // Logic: Down Arrow -> Back to Playhead
                     .onMoveCommand { direction in
                         if direction == .down {
                             focusedField.wrappedValue = .videoSurface
                         }
                     }
-                    // Logic: Menu Button -> Back to Playhead (Layer 1 Back)
                     .onExitCommand {
                         print("🔙 Menu on Controls -> Down to Playhead")
                         focusedField.wrappedValue = .videoSurface
@@ -665,7 +798,7 @@ struct ControlsOverlayView: View {
                         HStack(spacing: 15) {
                             HintItem(icon: "arrow.left.and.right.circle.fill", text: "Scrub")
                             HintItem(icon: "arrow.down.circle.fill", text: "Info & Speed")
-                            HintItem(icon: "arrow.up.circle.fill", text: "Options")
+                            HintItem(icon: "arrow.up.circle.fill", text: "Tracks & Options")
                         }
                         .transition(.opacity)
                     }
