@@ -102,7 +102,14 @@ class HomeViewModel: ObservableObject {
         // Initial Load
         loadTab(selectedTab)
         
-        // Listener 1: Sync completion (Full Refresh)
+        // Setup live updates for content, preferences, and language
+        setupListeners()
+    }
+    
+    private func setupListeners() {
+        guard let repository = repository else { return }
+        
+        // 1. Sync completion (Full Refresh)
         repository.$isSyncing
             .removeDuplicates()
             .receive(on: RunLoop.main)
@@ -115,7 +122,7 @@ class HomeViewModel: ObservableObject {
             }
             .store(in: &cancellables)
         
-        // Listener 2: Repository Updates (e.g., Onboarding Completion, Favorites toggled)
+        // 2. Repository Updates (e.g., Onboarding Completion, Favorites toggled)
         // This connects the "Fresh Content" engine to the UI dynamically.
         repository.objectWillChange
             .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
@@ -123,16 +130,30 @@ class HomeViewModel: ObservableObject {
                 guard let self = self else { return }
                 // Only refresh if not syncing to avoid UI thrashing during heavy loads
                 if !self.repository!.isSyncing {
-                    print("🔄 HomeViewModel: Detected repository change, refreshing current tab...")
+                    print("🔄 HomeViewModel: Detected repository change (Content/Favorites), refreshing current tab...")
                     self.invalidateCache()
                 }
             }
             .store(in: &cancellables)
         
-        // Listener 3: Settings changes (Hidden Categories)
+        // 3. Settings changes (Hidden Categories)
         NotificationCenter.default.publisher(for: CategoryPreferences.didChangeNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
+                print("🔄 HomeViewModel: Category preferences changed, refreshing...")
+                self?.invalidateCache()
+            }
+            .store(in: &cancellables)
+        
+        // 4. Language Changes (UserDefaults)
+        // This ensures "Recommended" and "Fresh Content" refresh when language changes.
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .compactMap { _ in UserDefaults.standard.string(forKey: "preferredLanguage") }
+            .removeDuplicates()
+            .dropFirst() // Skip initial value on load
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+            .sink { [weak self] newLang in
+                print("🌍 HomeViewModel: Language changed to \(newLang), refreshing...")
                 self?.invalidateCache()
             }
             .store(in: &cancellables)
@@ -169,13 +190,13 @@ class HomeViewModel: ObservableObject {
     }
     
     private func invalidateCache() {
-        // Reset all caches
+        // Reset all caches to force a reload with new preferences/language/content
         tabCache = [
             .movie: HomeTabState(),
             .series: HomeTabState(),
             .live: HomeTabState()
         ]
-        // Reload current
+        // Reload current tab
         loadTab(selectedTab)
     }
     
@@ -220,7 +241,7 @@ class HomeViewModel: ObservableObject {
                     initialSections.append(HomeSection(title: "Continue Watching", type: .continueWatching, items: resume))
                 }
                 
-                // 2. Your Fresh Content (Priority #2 - NOW INCLUDES ONBOARDING PICKS)
+                // 2. Your Fresh Content (Priority #2 - NOW INCLUDES ONBOARDING PICKS & STRICT MATCHING)
                 if tab != .live {
                     let fresh = readRepo.getFreshFranchiseContent(type: tab.rawValue)
                     if !fresh.isEmpty {
@@ -272,7 +293,7 @@ class HomeViewModel: ObservableObject {
     
     // Helper to update state safely on MainActor
     private func finalizeInitialLoad(tab: StreamType, sections: [HomeSection], allGroups: [String], lang: String) {
-        // Apply sorting/filtering to groups
+        // Apply sorting/filtering to groups based on preferences
         let cleanGroups = allGroups.filter {
             CategoryPreferences.shared.shouldShow(group: $0, language: lang)
         }

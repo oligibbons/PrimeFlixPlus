@@ -88,21 +88,19 @@ struct PersistenceController {
             NSAttributeDescription(name: "lastUpdated", type: .dateAttributeType)
         ]
         
-        // --- NEW Entity: TasteProfile (Onboarding) ---
-        // Stores high-level preferences (Moods, Genres)
+        // --- Entity: TasteProfile (Onboarding) ---
         let tasteProfileEntity = NSEntityDescription()
         tasteProfileEntity.name = "TasteProfile"
         tasteProfileEntity.managedObjectClassName = "TasteProfile"
         
         tasteProfileEntity.properties = [
             NSAttributeDescription(name: "id", type: .stringAttributeType), // Singleton ID "user_main"
-            NSAttributeDescription(name: "selectedMoods", type: .stringAttributeType), // Comma-separated
-            NSAttributeDescription(name: "selectedGenres", type: .stringAttributeType), // Comma-separated
+            NSAttributeDescription(name: "selectedMoods", type: .stringAttributeType),
+            NSAttributeDescription(name: "selectedGenres", type: .stringAttributeType),
             NSAttributeDescription(name: "isOnboardingComplete", type: .booleanAttributeType)
         ]
         
-        // --- NEW Entity: TasteItem (Specific Shows) ---
-        // Stores specific shows the user has marked as Watched/Loved (Loose Mode)
+        // --- Entity: TasteItem (Specific Shows) ---
         let tasteItemEntity = NSEntityDescription()
         tasteItemEntity.name = "TasteItem"
         tasteItemEntity.managedObjectClassName = "TasteItem"
@@ -111,19 +109,15 @@ struct PersistenceController {
             NSAttributeDescription(name: "tmdbId", type: .integer64AttributeType),
             NSAttributeDescription(name: "title", type: .stringAttributeType),
             NSAttributeDescription(name: "mediaType", type: .stringAttributeType), // "movie" or "tv"
-            NSAttributeDescription(name: "status", type: .stringAttributeType), // "watched", "loved"
+            NSAttributeDescription(name: "status", type: .stringAttributeType), // "watched", "loved", "super_loved"
+            NSAttributeDescription(name: "posterPath", type: .stringAttributeType), // For UI persistence
             NSAttributeDescription(name: "createdAt", type: .dateAttributeType)
         ]
 
         // --- Finalize Model ---
         model.entities = [
-            playlistEntity,
-            channelEntity,
-            progEntity,
-            epgEntity,
-            metaEntity,
-            tasteProfileEntity,
-            tasteItemEntity
+            playlistEntity, channelEntity, progEntity, epgEntity, metaEntity,
+            tasteProfileEntity, tasteItemEntity
         ]
         
         // 2. Initialize Container
@@ -135,12 +129,10 @@ struct PersistenceController {
         
         container.loadPersistentStores { (storeDescription, error) in
             if let error = error as NSError? {
-                // In production, handle migration failures gracefully
                 print("Core Data Error: \(error), \(error.userInfo)")
             }
         }
         
-        // Handle migration automatically where possible
         container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
     }
 }
@@ -153,25 +145,4 @@ extension NSAttributeDescription {
         self.attributeType = type
         self.isOptional = true
     }
-}
-
-// MARK: - Generated Classes Stub
-// Core Data needs classes to map to these entities.
-// Since we defined them in code, we must provide the class definitions here or in separate files.
-
-@objc(TasteProfile)
-public class TasteProfile: NSManagedObject {
-    @NSManaged public var id: String
-    @NSManaged public var selectedMoods: String?
-    @NSManaged public var selectedGenres: String?
-    @NSManaged public var isOnboardingComplete: Bool
-}
-
-@objc(TasteItem)
-public class TasteItem: NSManagedObject {
-    @NSManaged public var tmdbId: Int64
-    @NSManaged public var title: String?
-    @NSManaged public var mediaType: String?
-    @NSManaged public var status: String?
-    @NSManaged public var createdAt: Date?
 }

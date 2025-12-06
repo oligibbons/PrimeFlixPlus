@@ -12,30 +12,22 @@ struct OnboardingView: View {
     
     var body: some View {
         ZStack {
-            // 1. Background
             CinemeltTheme.mainBackground.ignoresSafeArea()
             
-            // 2. Content Layer
             VStack {
                 switch viewModel.step {
                 case .intro:
-                    introStep
-                        .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading).combined(with: .opacity)))
+                    introStep.transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading).combined(with: .opacity)))
                 case .moods:
-                    moodsStep
-                        .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                    moodsStep.transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
                 case .genres:
-                    genresStep
-                        .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                    genresStep.transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
                 case .favorites:
-                    favoritesStep
-                        .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                    favoritesStep.transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
                 case .processing:
-                    processingStep
-                        .transition(.opacity)
+                    processingStep.transition(.opacity)
                 case .done:
-                    doneStep
-                        .transition(.scale.combined(with: .opacity))
+                    doneStep.transition(.scale.combined(with: .opacity))
                 }
             }
             .animation(.easeInOut(duration: 0.5), value: viewModel.step)
@@ -45,7 +37,7 @@ struct OnboardingView: View {
         }
     }
     
-    // MARK: - Step 1: Intro
+    // MARK: - Step 1-3 (Unchanged)
     
     var introStep: some View {
         VStack(spacing: 40) {
@@ -79,8 +71,6 @@ struct OnboardingView: View {
         }
     }
     
-    // MARK: - Step 2: Moods
-    
     var moodsStep: some View {
         StepContainer(
             title: "What's the vibe?",
@@ -103,8 +93,6 @@ struct OnboardingView: View {
             }
         }
     }
-    
-    // MARK: - Step 3: Genres
     
     var genresStep: some View {
         StepContainer(
@@ -129,7 +117,7 @@ struct OnboardingView: View {
         }
     }
     
-    // MARK: - Step 4: Favorites (Manual Input)
+    // MARK: - Step 4: Favorites (Refined)
     
     var favoritesStep: some View {
         StepContainer(
@@ -137,10 +125,10 @@ struct OnboardingView: View {
             subtitle: "Search and add shows you've watched. We'll find new seasons for you.",
             buttonText: "Finish Setup",
             onNext: { viewModel.nextStep() },
-            canProceed: true // Optional step
+            canProceed: true
         ) {
             HStack(alignment: .top, spacing: 60) {
-                // Left: Input
+                // Left: Input & Search Results
                 VStack(spacing: 20) {
                     GlassTextField(
                         title: "Search TMDB",
@@ -150,8 +138,7 @@ struct OnboardingView: View {
                     )
                     
                     if viewModel.isSearching {
-                        CinemeltLoadingIndicator()
-                            .scaleEffect(0.5)
+                        CinemeltLoadingIndicator().scaleEffect(0.5)
                     }
                     
                     ScrollView {
@@ -161,9 +148,7 @@ struct OnboardingView: View {
                                     HStack(spacing: 15) {
                                         AsyncImage(url: item.posterUrl) { img in
                                             img.resizable().aspectRatio(contentMode: .fill)
-                                        } placeholder: {
-                                            Color.gray.opacity(0.3)
-                                        }
+                                        } placeholder: { Color.gray.opacity(0.3) }
                                         .frame(width: 40, height: 60)
                                         .cornerRadius(4)
                                         
@@ -176,8 +161,15 @@ struct OnboardingView: View {
                                                 .foregroundColor(.gray)
                                         }
                                         Spacer()
-                                        Image(systemName: "plus.circle")
-                                            .foregroundColor(CinemeltTheme.accent)
+                                        
+                                        // Visual Check if already added
+                                        if viewModel.manualFavorites.contains(where: { $0.id == item.id }) {
+                                            Image(systemName: "checkmark")
+                                                .foregroundColor(.green)
+                                        } else {
+                                            Image(systemName: "plus.circle")
+                                                .foregroundColor(CinemeltTheme.accent)
+                                        }
                                     }
                                     .padding(12)
                                     .background(Color.white.opacity(0.05))
@@ -190,38 +182,48 @@ struct OnboardingView: View {
                 }
                 .frame(width: 500)
                 
-                // Right: Selected List
+                // Right: Selected List (Interactive)
                 VStack(alignment: .leading, spacing: 20) {
                     Text("Selected (\(viewModel.manualFavorites.count))")
                         .font(CinemeltTheme.fontTitle(24))
                         .foregroundColor(CinemeltTheme.cream)
                     
                     if viewModel.manualFavorites.isEmpty {
-                        Text("Added shows will appear here.")
+                        Text("Added shows will appear here.\nScroll here to manage your list.")
                             .font(CinemeltTheme.fontBody(20))
                             .foregroundColor(.gray)
                             .padding(.top, 20)
                     } else {
                         ScrollView {
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 20) {
-                                ForEach(viewModel.manualFavorites) { item in
-                                    Button(action: { viewModel.removeFavorite(item) }) {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 20)], spacing: 20) {
+                                ForEach(viewModel.manualFavorites) { fav in
+                                    Button(action: { viewModel.prepareEdit(fav) }) {
                                         ZStack(alignment: .topTrailing) {
-                                            AsyncImage(url: item.posterUrl) { img in
+                                            // Poster
+                                            AsyncImage(url: fav.item.posterUrl) { img in
                                                 img.resizable().aspectRatio(contentMode: .fill)
-                                            } placeholder: {
-                                                Color.gray
-                                            }
-                                            .frame(width: 120, height: 180)
-                                            .cornerRadius(8)
+                                            } placeholder: { Color.gray }
+                                            .frame(width: 140, height: 210)
+                                            .cornerRadius(12)
+                                            // Super Favourite Glow
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .stroke(fav.isSuper ? Color.yellow : Color.clear, lineWidth: 4)
+                                                    .shadow(color: fav.isSuper ? Color.yellow.opacity(0.8) : .clear, radius: 10)
+                                            )
                                             
-                                            Image(systemName: "xmark.circle.fill")
-                                                .foregroundColor(.red)
-                                                .background(Circle().fill(Color.white))
-                                                .offset(x: 5, y: -5)
+                                            // Super Icon
+                                            if fav.isSuper {
+                                                Image(systemName: "star.fill")
+                                                    .padding(6)
+                                                    .background(Circle().fill(Color.yellow))
+                                                    .foregroundColor(.black)
+                                                    .offset(x: 5, y: -5)
+                                                    .shadow(radius: 2)
+                                            }
                                         }
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(CinemeltCardButtonStyle())
                                 }
                             }
                         }
@@ -230,10 +232,26 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity)
             }
             .padding(40)
+            // POPUP MENU FOR FAVORITES
+            .confirmationDialog(
+                "Manage '\(viewModel.editingFavorite?.item.title ?? "Show")'",
+                isPresented: $viewModel.showEditDialog,
+                titleVisibility: .visible
+            ) {
+                if let fav = viewModel.editingFavorite {
+                    Button(fav.isSuper ? "Remove Super Status" : "Make Super Favourite") {
+                        viewModel.toggleSuperFavorite()
+                    }
+                    Button("Remove from list", role: .destructive) {
+                        viewModel.removeFavorite()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
+            }
         }
     }
     
-    // MARK: - Step 5: Processing
+    // MARK: - Steps 5-6 (Unchanged)
     
     var processingStep: some View {
         VStack(spacing: 30) {
@@ -245,8 +263,6 @@ struct OnboardingView: View {
                 .cinemeltGlow()
         }
     }
-    
-    // MARK: - Step 6: Done
     
     var doneStep: some View {
         VStack(spacing: 40) {

@@ -15,6 +15,17 @@ class OnboardingViewModel: ObservableObject {
         case done
     }
     
+    // --- Helper Model for Local State ---
+    struct UserFavorite: Identifiable, Equatable {
+        let item: TmdbSearchResult
+        var isSuper: Bool = false
+        var id: Int { item.id }
+        
+        static func == (lhs: UserFavorite, rhs: UserFavorite) -> Bool {
+            return lhs.id == rhs.id && lhs.isSuper == rhs.isSuper
+        }
+    }
+    
     // --- State ---
     @Published var step: OnboardingStep = .intro
     @Published var selectedMoods: Set<String> = []
@@ -23,8 +34,14 @@ class OnboardingViewModel: ObservableObject {
     // --- Search State ---
     @Published var searchQuery: String = ""
     @Published var searchResults: [TmdbSearchResult] = []
-    @Published var manualFavorites: [TmdbSearchResult] = []
     @Published var isSearching: Bool = false
+    
+    // --- Favorites State ---
+    @Published var manualFavorites: [UserFavorite] = []
+    
+    // UI Triggers
+    @Published var editingFavorite: UserFavorite? = nil
+    @Published var showEditDialog: Bool = false
     
     // --- Data Definition ---
     let availableMoods = [
@@ -63,10 +80,43 @@ class OnboardingViewModel: ObservableObject {
     
     func configure(repository: PrimeFlixRepository) {
         self.repository = repository
-        // Initialize the sub-repository using the same container
         self.preferencesRepo = UserPreferencesRepository(container: repository.container)
         
         setupSearchSubscription()
+        loadExistingPreferences()
+    }
+    
+    // NEW: Pre-fill data if user is revisiting settings
+    private func loadExistingPreferences() {
+        guard let repo = preferencesRepo else { return }
+        
+        // 1. Load Moods & Genres
+        let profile = repo.getProfile()
+        if let moods = profile.selectedMoods {
+            self.selectedMoods = Set(moods.components(separatedBy: ",").filter { !$0.isEmpty })
+        }
+        if let genres = profile.selectedGenres {
+            self.selectedGenres = Set(genres.components(separatedBy: ",").filter { !$0.isEmpty })
+        }
+        
+        // 2. Load Favorites
+        // We fetch 'loved' and 'super_loved' items to populate the list
+        let items = repo.getTasteItems()
+        self.manualFavorites = items.filter { $0.status == "loved" || $0.status == "super_loved" }.compactMap { item in
+            guard let title = item.title, let type = item.mediaType else { return nil }
+            
+            // Reconstruct TmdbSearchResult from Core Data
+            let searchResult = TmdbSearchResult(
+                id: Int(item.tmdbId),
+                title: title,
+                type: type,
+                year: "", // Not persisted, but acceptable for this list
+                posterUrl: item.posterPath.map { URL(string: "https://image.tmdb.org/t/p/w200\($0)")! },
+                overview: ""
+            )
+            
+            return UserFavorite(item: searchResult, isSuper: item.status == "super_loved")
+        }
     }
     
     private func setupSearchSubscription() {
@@ -74,11 +124,12 @@ class OnboardingViewModel: ObservableObject {
             .removeDuplicates()
             .debounce(for: .milliseconds(600), scheduler: RunLoop.main)
             .sink { [weak self] query in
-                guard let self = self, !query.isEmpty else {
-                    self?.searchResults = []
-                    return
+                guard let self = self else { return }
+                if query.isEmpty {
+                    self.searchResults = []
+                } else {
+                    Task { await self.performSearch(query) }
                 }
-                Task { await self.performSearch(query) }
             }
             .store(in: &cancellables)
     }
@@ -93,42 +144,61 @@ class OnboardingViewModel: ObservableObject {
             case .genres: step = .favorites
             case .favorites: startProcessing()
             case .processing: step = .done
-            case .done: break // Handled by View callback
+            case .done: break
             }
         }
     }
     
     func toggleMood(_ mood: String) {
-        if selectedMoods.contains(mood) {
-            selectedMoods.remove(mood)
-        } else {
-            selectedMoods.insert(mood)
-        }
+        if selectedMoods.contains(mood) { selectedMoods.remove(mood) }
+        else { selectedMoods.insert(mood) }
     }
     
     func toggleGenre(_ genre: String) {
-        if selectedGenres.contains(genre) {
-            selectedGenres.remove(genre)
-        } else {
-            selectedGenres.insert(genre)
-        }
+        if selectedGenres.contains(genre) { selectedGenres.remove(genre) }
+        else { selectedGenres.insert(genre) }
     }
+    
+    // MARK: - Favorites Logic
     
     func addFavorite(_ item: TmdbSearchResult) {
-        if !manualFavorites.contains(item) {
+        if !manualFavorites.contains(where: { $0.item.id == item.id }) {
             withAnimation {
-                manualFavorites.append(item)
+                manualFavorites.append(UserFavorite(item: item))
             }
-            // Clear search to allow adding another
-            searchQuery = ""
-            searchResults = []
         }
     }
     
-    func removeFavorite(_ item: TmdbSearchResult) {
+    func prepareEdit(_ fav: UserFavorite) {
+        self.editingFavorite = fav
+        self.showEditDialog = true
+    }
+    
+    func toggleSuperFavorite() {
+        guard let target = editingFavorite,
+              let index = manualFavorites.firstIndex(where: { $0.id == target.id }) else { return }
+        
         withAnimation {
-            manualFavorites.removeAll { $0 == item }
+            manualFavorites[index].isSuper.toggle()
         }
+        self.editingFavorite = nil
+    }
+    
+    func removeFavorite() {
+        guard let target = editingFavorite else { return }
+        
+        // Remove from UI
+        withAnimation {
+            manualFavorites.removeAll { $0.id == target.id }
+        }
+        
+        // Also explicitly remove from DB immediately to avoid sync issues if they cancel later?
+        // No, we wait for "Finish" to save state, but we should track deletions if we were strict.
+        // For now, simpler: The `startProcessing` overwrites/saves.
+        // To be safe, let's remove from DB immediately if it exists.
+        preferencesRepo?.removeTasteItem(tmdbId: target.id)
+        
+        self.editingFavorite = nil
     }
     
     // MARK: - Search Logic
@@ -136,7 +206,6 @@ class OnboardingViewModel: ObservableObject {
     private func performSearch(_ query: String) async {
         self.isSearching = true
         
-        // Parallel Fetch: Movies & TV
         async let movies = tmdbClient.searchMovie(query: query)
         async let shows = tmdbClient.searchTv(query: query)
         
@@ -165,7 +234,6 @@ class OnboardingViewModel: ObservableObject {
                 )
             }
             
-            // Interleave results for variety
             var combined: [TmdbSearchResult] = []
             let maxCount = max(mappedMovies.count, mappedShows.count)
             for i in 0..<maxCount {
@@ -183,7 +251,7 @@ class OnboardingViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Processing & Completion
+    // MARK: - Processing
     
     private func startProcessing() {
         step = .processing
@@ -195,24 +263,21 @@ class OnboardingViewModel: ObservableObject {
                 genres: Array(selectedGenres)
             )
             
-            // 2. Save Manual Favorites (Loose Mode)
-            // We treat these as "Loved" which implies "Watched" logic for sequels
-            for item in manualFavorites {
+            // 2. Save Manual Favorites
+            for fav in manualFavorites {
                 preferencesRepo?.saveTasteItem(
-                    tmdbId: item.id,
-                    title: item.title,
-                    type: item.type, // "movie" or "tv" maps correctly
-                    status: "loved"
+                    tmdbId: fav.item.id,
+                    title: fav.item.title,
+                    type: fav.item.type,
+                    status: fav.isSuper ? "super_loved" : "loved",
+                    posterPath: fav.item.posterUrl?.path // Save path for UI reload
                 )
             }
             
-            // 3. Artificial Delay for UX ("Personalizing...")
+            // 3. UX Delay
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             
-            // 4. Trigger "Fresh Content" Re-evaluation
-            // Since we just seeded "Watched" items, we want the app to look for sequels immediately.
-            // This requires the ChannelRepository logic update (next step).
-            // For now, we notify the main Repository that something changed.
+            // 4. Trigger Refresh
             await MainActor.run {
                 repository?.objectWillChange.send()
                 self.step = .done

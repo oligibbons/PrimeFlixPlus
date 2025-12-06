@@ -45,15 +45,10 @@ class UserPreferencesRepository: ObservableObject {
         save()
     }
     
-    // MARK: - Taste Items (Watched / Loved)
+    // MARK: - Taste Items (Watched / Loved / Super Loved)
     
-    /// Saves a show/movie as Watched or Loved.
-    /// - Parameters:
-    ///   - id: The TMDB ID
-    ///   - title: Display title
-    ///   - type: "movie" or "tv"
-    ///   - status: "watched" or "loved"
-    func saveTasteItem(tmdbId: Int, title: String, type: String, status: String) {
+    /// Saves a show/movie as Watched, Loved, or Super Loved.
+    func saveTasteItem(tmdbId: Int, title: String, type: String, status: String, posterPath: String? = nil) {
         let req = NSFetchRequest<TasteItem>(entityName: "TasteItem")
         req.predicate = NSPredicate(format: "tmdbId == %d", Int64(tmdbId))
         req.fetchLimit = 1
@@ -69,10 +64,10 @@ class UserPreferencesRepository: ObservableObject {
         
         item.title = title
         item.mediaType = type
-        
-        // "Loved" overrides "Watched" hierarchy-wise, but logic implies if you love it, you watched it.
-        // We just store the explicit status provided.
         item.status = status
+        if let path = posterPath {
+            item.posterPath = path
+        }
         
         save()
     }
@@ -86,25 +81,36 @@ class UserPreferencesRepository: ObservableObject {
         return (try? context.fetch(req)) ?? []
     }
     
-    /// Returns a set of TMDB IDs for items marked as "Watched" or "Loved".
+    /// Returns a set of TMDB IDs for items marked as "Watched", "Loved", or "Super Loved".
     /// Used by the "Fresh Content" engine to find sequels.
     func getAllWatchedTmdbIds() -> Set<Int> {
         let req = NSFetchRequest<TasteItem>(entityName: "TasteItem")
-        // Both loved and watched count as "Watched" logic for sequels
-        req.predicate = NSPredicate(format: "status == 'watched' OR status == 'loved'")
+        req.predicate = NSPredicate(format: "status IN {'watched', 'loved', 'super_loved'}")
         
         let items = (try? context.fetch(req)) ?? []
         return Set(items.map { Int($0.tmdbId) })
     }
     
-    /// Returns a set of TMDB IDs for items explicitly marked as "Loved".
+    /// Returns a set of TMDB IDs for items explicitly marked as "Loved" or "Super Loved".
     /// Used by the Recommendation engine to find similar shows.
     func getAllLovedTmdbIds() -> Set<Int> {
         let req = NSFetchRequest<TasteItem>(entityName: "TasteItem")
-        req.predicate = NSPredicate(format: "status == 'loved'")
+        req.predicate = NSPredicate(format: "status IN {'loved', 'super_loved'}")
         
         let items = (try? context.fetch(req)) ?? []
         return Set(items.map { Int($0.tmdbId) })
+    }
+    
+    func removeTasteItem(tmdbId: Int) {
+        let req = NSFetchRequest<TasteItem>(entityName: "TasteItem")
+        req.predicate = NSPredicate(format: "tmdbId == %d", Int64(tmdbId))
+        
+        if let items = try? context.fetch(req) {
+            for item in items {
+                context.delete(item)
+            }
+            save()
+        }
     }
     
     // MARK: - Helpers
