@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject var repository: PrimeFlixRepository
     
     var onBack: () -> Void
+    var onSpeedTest: () -> Void // <- NEW ACTION
     
     @FocusState private var focusedField: String?
     
@@ -249,6 +250,14 @@ struct SettingsView: View {
                                 .foregroundColor(CinemeltTheme.accent)
                                 .cinemeltGlow()
                             
+                            // NEW: Network Speed Test
+                            ActionCard(
+                                icon: "bolt.badge.a",
+                                title: "Network Speed Test",
+                                subtitle: "Check connection quality for streaming",
+                                action: onSpeedTest // <- NEW ACTION
+                            )
+                            
                             HStack(spacing: 30) {
                                 // 1. Update Library (Standard)
                                 ActionCard(
@@ -394,7 +403,7 @@ struct ActionCard: View {
     }
 }
 
-// Subview for Language Selection
+// Subview for Language Selection (included for completeness as it's defined in the original file)
 struct LanguageSelectionView: View {
     @ObservedObject var viewModel: SettingsViewModel
     @Environment(\.presentationMode) var presentationMode

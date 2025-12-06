@@ -67,6 +67,10 @@
 		D2AC8B272EE27D9600D440C3 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B262EE27D9600D440C3 /* AudioToolbox.framework */; };
 		D2AC8B292EE281E800D440C3 /* .gitignore in Resources */ = {isa = PBXBuildFile; fileRef = D2AC8B282EE281E800D440C3 /* .gitignore */; };
 		D2AC8B2B2EE382B700D440C3 /* SmartLoadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B2A2EE382B700D440C3 /* SmartLoadingView.swift */; };
+		D2AC8B2D2EE481D100D440C3 /* NetworkSpeedTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B2C2EE481D100D440C3 /* NetworkSpeedTestView.swift */; };
+		D2AC8B2F2EE4828C00D440C3 /* NetworkSpeedTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B2E2EE4828C00D440C3 /* NetworkSpeedTester.swift */; };
+		D2AC8B312EE486E700D440C3 /* VPNDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B302EE486E700D440C3 /* VPNDetector.swift */; };
+		D2AC8B332EE488ED00D440C3 /* VPNWarningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B322EE488ED00D440C3 /* VPNWarningView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -167,6 +171,10 @@
 		D2AC8B262EE27D9600D440C3 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		D2AC8B282EE281E800D440C3 /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
 		D2AC8B2A2EE382B700D440C3 /* SmartLoadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartLoadingView.swift; sourceTree = "<group>"; };
+		D2AC8B2C2EE481D100D440C3 /* NetworkSpeedTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkSpeedTestView.swift; sourceTree = "<group>"; };
+		D2AC8B2E2EE4828C00D440C3 /* NetworkSpeedTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkSpeedTester.swift; sourceTree = "<group>"; };
+		D2AC8B302EE486E700D440C3 /* VPNDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VPNDetector.swift; sourceTree = "<group>"; };
+		D2AC8B322EE488ED00D440C3 /* VPNWarningView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VPNWarningView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -301,6 +309,7 @@
 				D292D66B2EDF4B0500E8845A /* TmdbClient.swift */,
 				D292D6782EDF4C5800E8845A /* XtreamClient.swift */,
 				D228AD1A2EDF7952007C6114 /* UnsafeSession.swift */,
+				D2AC8B302EE486E700D440C3 /* VPNDetector.swift */,
 			);
 			path = Network;
 			sourceTree = "<group>";
@@ -324,6 +333,7 @@
 				D2AC8AF52EE0ADE900D440C3 /* SearchViewModel.swift */,
 				D2AC8B082EE1FAE000D440C3 /* ContinueWatchingViewModel.swift */,
 				D2AC8B0C2EE1FB2F00D440C3 /* FavoritesViewModel.swift */,
+				D2AC8B2E2EE4828C00D440C3 /* NetworkSpeedTester.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -357,6 +367,8 @@
 				D2AC8B0E2EE1FB4700D440C3 /* FavoritesView.swift */,
 				D2AC8B102EE22EAF00D440C3 /* ManageCategoriesView.swift */,
 				D2AC8B2A2EE382B700D440C3 /* SmartLoadingView.swift */,
+				D2AC8B2C2EE481D100D440C3 /* NetworkSpeedTestView.swift */,
+				D2AC8B322EE488ED00D440C3 /* VPNWarningView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -531,6 +543,7 @@
 				D292D6642EDF49C900E8845A /* Programme.swift in Sources */,
 				D292D6522EDF45C000E8845A /* DataSource.swift in Sources */,
 				D2AC8AFA2EE1419400D440C3 /* CinemeltStyle.swift in Sources */,
+				D2AC8B2F2EE4828C00D440C3 /* NetworkSpeedTester.swift in Sources */,
 				D292D6602EDF492100E8845A /* Channel.swift in Sources */,
 				D292D6292EDF458100E8845A /* ContentView.swift in Sources */,
 				D2AC8B072EE1B8F400D440C3 /* SplashView.swift in Sources */,
@@ -564,7 +577,10 @@
 				D292D6582EDF46CF00E8845A /* Playlist.swift in Sources */,
 				D292D65E2EDF47D500E8845A /* TitleNormalizer.swift in Sources */,
 				D228AD1D2EDFA8E3007C6114 /* DetailsViewModel.swift in Sources */,
+				D2AC8B332EE488ED00D440C3 /* VPNWarningView.swift in Sources */,
+				D2AC8B2D2EE481D100D440C3 /* NetworkSpeedTestView.swift in Sources */,
 				D292D67E2EDF568C00E8845A /* SettingsViewModel.swift in Sources */,
+				D2AC8B312EE486E700D440C3 /* VPNDetector.swift in Sources */,
 				D228AD1F2EDFA961007C6114 /* DetailsView.swift in Sources */,
 				D292D65C2EDF470300E8845A /* MediaMetadata.swift in Sources */,
 				D292D66C2EDF4B0500E8845A /* TmdbClient.swift in Sources */,
