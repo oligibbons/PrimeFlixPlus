@@ -180,10 +180,23 @@ class DetailsViewModel: ObservableObject {
                         let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
                         let streamUrl = "\(input.basicUrl)/series/\(input.username)/\(input.password)/\(ep.id).\(ep.containerExtension)"
                         
+                        // Fallback Label logic: If quality is "Source", try to guess from the variant title
+                        var label = variant.quality
+                        if label == "Source" || label.isEmpty {
+                            let norm = TitleNormalizer.parse(rawTitle: variant.title)
+                            if !norm.quality.isEmpty && norm.quality != "SD" {
+                                label = norm.quality
+                            } else if variant.title.lowercased().contains("4k") {
+                                label = "4K"
+                            } else if variant.title.lowercased().contains("1080") {
+                                label = "1080p"
+                            }
+                        }
+                        
                         let version = EpisodeVersion(
                             streamId: ep.id,
                             containerExtension: ep.containerExtension,
-                            qualityLabel: variant.quality,
+                            qualityLabel: label,
                             url: streamUrl,
                             playlistUrl: variant.playlistUrl
                         )
@@ -279,7 +292,6 @@ class DetailsViewModel: ObservableObject {
     // MARK: - Smart Actions
     
     func onPlayEpisodeClicked(_ episode: MergedEpisode) {
-        // FIXED: Always show picker to allow version selection, matching Chillio behavior
         self.episodeToPlay = episode
         self.showEpisodeVersionPicker = true
     }
@@ -287,7 +299,13 @@ class DetailsViewModel: ObservableObject {
     func getPlayableChannel(version: EpisodeVersion, metadata: MergedEpisode) -> Channel {
         let playable = Channel(context: repository!.container.viewContext)
         playable.url = version.url
-        playable.title = metadata.displayTitle
+        
+        // CRITICAL FIX: Prepend Series Title to Episode Title.
+        // This allows PlayerViewModel to extract "Series Name" via regex/parsing
+        // or just use the full string for TMDB search.
+        let seriesTitle = channel.title // This is the Series Name (e.g. "Severance")
+        playable.title = "\(seriesTitle) - \(metadata.displayTitle)" // "Severance - S1 • E1 - Good News"
+        
         playable.cover = metadata.stillPath?.absoluteString ?? channel.cover
         playable.type = "series_episode"
         playable.playlistUrl = version.playlistUrl
@@ -340,25 +358,15 @@ class DetailsViewModel: ObservableObject {
     private func fetchTmdbData(title: String, type: String) async {
         let info = TitleNormalizer.parse(rawTitle: title)
         
-        // FIXED: Expanded search strategy to fix missing metadata for series.
-        // 1. Normalized Title (Best case)
-        // 2. Stripped Suffix (Remove "UK | " or " | 4K")
-        // 3. Raw Title (Fallback)
         var queries = [info.normalizedTitle]
         
-        // Attempt to extract the "Meat" of the title if it contains pipes
         if title.contains("|") {
             let parts = title.split(separator: "|")
-            // Usually the show name is the longest part or the last part
-            if let last = parts.last {
-                queries.append(String(last).trimmingCharacters(in: .whitespaces))
-            }
+            if let last = parts.last { queries.append(String(last).trimmingCharacters(in: .whitespaces)) }
         }
         queries.append(title)
         
         for q in queries {
-            if q.count < 2 { continue } // Skip junk
-            
             do {
                 if type == "series" {
                     let results = try await tmdbClient.searchTv(query: q, year: info.year)
@@ -369,7 +377,7 @@ class DetailsViewModel: ObservableObject {
                             if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
                             if let cast = details.aggregateCredits?.cast { self.cast = cast }
                         }
-                        return // Success, stop searching
+                        return
                     }
                 } else {
                     let results = try await tmdbClient.searchMovie(query: q, year: info.year)
@@ -380,16 +388,15 @@ class DetailsViewModel: ObservableObject {
                             if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
                             if let cast = details.credits?.cast { self.cast = cast }
                         }
-                        return // Success
+                        return
                     }
                 }
             } catch {
-                print("TMDB Error for query '\(q)': \(error)")
+                print("TMDB Error: \(error)")
             }
         }
     }
     
-    // Fuzzy Matcher to ensure we don't miss metadata due to "4K" or "DE" suffixes
     private func findBestMatch<T: Identifiable>(results: [T], targetTitle: String, targetYear: String?) -> T? {
         let target = targetTitle.lowercased()
         
@@ -402,12 +409,10 @@ class DetailsViewModel: ObservableObject {
             
             let t = title.lowercased()
             
-            // Year Check (Strict)
             if let tYear = targetYear, let rYear = date?.prefix(4) {
                 if tYear != rYear { return false }
             }
             
-            // Title Check (Loose - Fuzzy enough to catch substring matches)
             return t == target || t.contains(target) || target.contains(t)
         }
     }

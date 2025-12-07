@@ -68,6 +68,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     // MARK: - Dependencies
     private var repository: PrimeFlixRepository?
     private let tmdbClient = TmdbClient()
+    private let xtreamClient = XtreamClient() // Added for direct API calls
     private var progressTimer: Timer?
     private var controlHideTimer: Timer?
     private var timeoutTimer: Timer?
@@ -85,12 +86,10 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         self.qualityBadge = channel.quality ?? "HD"
         
         // Load Alternatives (Versions)
-        if let repo = repository {
-            Task {
-                let versions = repo.getVersions(for: channel)
-                await MainActor.run {
-                    self.alternativeVersions = versions.filter { $0.url != channel.url }
-                }
+        Task {
+            let versions = repository.getVersions(for: channel)
+            await MainActor.run {
+                self.alternativeVersions = versions.filter { $0.url != channel.url }
             }
         }
         
@@ -107,7 +106,9 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         self.playbackRate = savedSpeed > 0 ? Float(savedSpeed) : 1.0
         
         setupVLC(url: channel.url, type: channel.type)
-        checkForNextEpisode()
+        
+        // FIXED: Next Episode logic now uses API if DB is empty
+        Task { await checkForNextEpisode() }
         fetchExtendedMetadata()
     }
     
@@ -128,14 +129,13 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         
         let media = VLCMedia(url: mediaUrl)
         
-        // Smart Buffering
         let cacheSize: Int
         if type == "live" {
             cacheSize = 3000
         } else if let q = currentChannel?.quality, q.contains("4K") {
-            cacheSize = 10000 // 10s for 4K
+            cacheSize = 10000
         } else {
-            cacheSize = 5000 // 5s standard
+            cacheSize = 5000
         }
         
         let options: [String: Any] = [
@@ -144,7 +144,7 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             "clock-synchro": 0,
             "http-reconnect": true,
             ":http-reconnect": true,
-            "http-user-agent": "okhttp/3.12.1", // Bypass blocks
+            "http-user-agent": "okhttp/3.12.1",
             ":http-user-agent": "okhttp/3.12.1"
         ]
         
@@ -164,20 +164,15 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
     
     func switchVersion(_ newChannel: Channel) {
-        // Save progress of current
         saveCurrentProgress()
-        
-        // Swap channel reference
         self.currentChannel = newChannel
         self.currentUrl = newChannel.url
         self.videoTitle = newChannel.title
         self.qualityBadge = newChannel.quality ?? "HD"
         
-        // Restart VLC with new URL
         vlcPlayer.stop()
         setupVLC(url: newChannel.url, type: newChannel.type)
         
-        // UI Feedback
         self.showVersionSelection = false
         triggerControls(forceShow: true)
     }
@@ -228,17 +223,27 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     private func fetchExtendedMetadata() {
         guard let channel = currentChannel else { return }
-        // 1. Prefer Cover from Channel (Pre-calculated)
         if let cover = channel.cover, let url = URL(string: cover) {
             self.posterImage = url
         }
         
         let title = channel.canonicalTitle ?? channel.title
         
-        Task.detached {
-            // 2. Fetch TMDB Data using Fuzzy Logic (Matches DetailsViewModel)
+        // CRITICAL FIX: Extract Series Name from composite title if present
+        // Format: "SeriesName - Sxx • Exx - EpTitle"
+        var query = title
+        if title.contains("- S") {
+            let parts = title.components(separatedBy: "- S")
+            if let seriesName = parts.first {
+                query = seriesName.trimmingCharacters(in: .whitespaces)
+            }
+        } else {
             let info = TitleNormalizer.parse(rawTitle: title)
-            let query = info.normalizedTitle
+            query = info.normalizedTitle
+        }
+        
+        Task.detached {
+            let info = TitleNormalizer.parse(rawTitle: title)
             
             do {
                 if channel.type == "series" || channel.type == "series_episode" {
@@ -267,13 +272,13 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private func updateMetadata(from details: TmdbDetails) {
         self.videoOverview = details.overview ?? ""
         self.videoRating = details.voteAverage.map { String(format: "%.1f", $0) } ?? ""
-        self.videoYear = details.displayDate?.prefix(4).map(String.init) ?? ""
+        self.videoYear = details.displayDate.map { String($0.prefix(4)) } ?? ""
+        
         if let path = details.posterPath {
             self.posterImage = URL(string: "https://image.tmdb.org/t/p/w500\(path)")
         }
     }
     
-    // Reused Fuzzy Matcher
     private nonisolated func findBestMatch<T: Identifiable>(results: [T], targetTitle: String) -> T? {
         let target = targetTitle.lowercased()
         return results.first { result in
@@ -285,59 +290,51 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
     }
     
-    // MARK: - Next Episode Logic
+    // MARK: - Next Episode Logic (Fixed via API)
     
-    func checkForNextEpisode() {
-        guard let repo = repository, let current = currentChannel,
-              (current.type == "series" || current.type == "series_episode") else { return }
+    func checkForNextEpisode() async {
+        guard let current = currentChannel,
+              (current.type == "series" || current.type == "series_episode"),
+              let seriesIdStr = current.seriesId,
+              let seriesId = Int(seriesIdStr) else { return }
         
-        // This now leverages the fixed ChannelRepository logic
-        Task.detached {
-            let context = repo.container.newBackgroundContext()
-            await context.perform {
-                if let bgChannel = try? context.existingObject(with: current.objectID) as? Channel {
-                    // Optimized repository lookup
-                    let bgRepo = ChannelRepository(context: context)
-                    // We can use a simplified internal finder or rely on the Series ID logic directly
-                    if let next = self.findNextInternal(context: context, current: bgChannel) {
-                        let nextID = next.objectID
-                        Task { @MainActor in
-                            if let mainNext = try? repo.container.viewContext.existingObject(with: nextID) as? Channel {
-                                self.nextEpisode = mainNext
-                                self.canPlayNext = true
-                            }
-                        }
+        // 1. Fetch ALL Episodes from Xtream API (Since they aren't in DB)
+        // We reuse the playlist URL to derive credentials
+        let input = XtreamInput.decodeFromPlaylistUrl(current.playlistUrl)
+        
+        do {
+            let episodes = try await xtreamClient.getSeriesEpisodes(input: input, seriesId: seriesId)
+            
+            // 2. Find Current Episode Index
+            // Match based on Season & Episode Number
+            if let currentIndex = episodes.firstIndex(where: { $0.season == current.season && $0.episodeNum == current.episode }) {
+                // 3. Get Next Episode
+                if currentIndex + 1 < episodes.count {
+                    let nextEp = episodes[currentIndex + 1]
+                    
+                    await MainActor.run {
+                        // Create transient channel for Next Episode
+                        let nextChannel = Channel(context: self.repository!.container.viewContext)
+                        let seriesTitle = self.videoTitle.components(separatedBy: " - S").first ?? "Next Episode"
+                        let epTitle = nextEp.title ?? "Episode \(nextEp.episodeNum)"
+                        
+                        nextChannel.title = "\(seriesTitle) - S\(nextEp.season) • E\(nextEp.episodeNum) - \(epTitle)"
+                        nextChannel.url = "\(input.basicUrl)/series/\(input.username)/\(input.password)/\(nextEp.id).\(nextEp.containerExtension)"
+                        nextChannel.cover = current.cover
+                        nextChannel.type = "series_episode"
+                        nextChannel.playlistUrl = current.playlistUrl
+                        nextChannel.seriesId = seriesIdStr
+                        nextChannel.season = Int16(nextEp.season)
+                        nextChannel.episode = Int16(nextEp.episodeNum)
+                        
+                        self.nextEpisode = nextChannel
+                        self.canPlayNext = true
                     }
                 }
             }
+        } catch {
+            print("Failed to find next episode: \(error)")
         }
-    }
-    
-    private nonisolated func findNextInternal(context: NSManagedObjectContext, current: Channel) -> Channel? {
-        // 1. Strict Series ID (Best)
-        if let sid = current.seriesId, sid != "0" {
-            let req = NSFetchRequest<Channel>(entityName: "Channel")
-            req.predicate = NSPredicate(format: "seriesId == %@ AND season == %d AND episode == %d", sid, current.season, current.episode + 1)
-            req.fetchLimit = 1
-            if let next = try? context.fetch(req).first { return next }
-        }
-        
-        // 2. Fallback: Title Regex
-        let raw = current.title
-        let (s, e) = ChannelStruct.parseSeasonEpisode(from: raw)
-        if s > 0 || e > 0 {
-            let req = NSFetchRequest<Channel>(entityName: "Channel")
-            // Try to find same playlist, same series title prefix, next episode
-            let info = TitleNormalizer.parse(rawTitle: raw)
-            let prefix = String(info.normalizedTitle.prefix(5))
-            let sStr = String(format: "%02d", s)
-            let eStr = String(format: "%02d", e + 1)
-            
-            req.predicate = NSPredicate(format: "playlistUrl == %@ AND title BEGINSWITH[cd] %@ AND (title CONTAINS 'S\(sStr)' OR title CONTAINS 'S\(s)') AND (title CONTAINS 'E\(eStr)' OR title CONTAINS 'E\(e+1)')", current.playlistUrl, prefix)
-            req.fetchLimit = 1
-            return try? context.fetch(req).first
-        }
-        return nil
     }
     
     // MARK: - Auto Play Logic
