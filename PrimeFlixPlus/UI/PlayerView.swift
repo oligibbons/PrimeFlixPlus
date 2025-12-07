@@ -17,7 +17,8 @@ struct PlayerView: View {
         case upperControls // The Heart Button / Top Bar
         case miniDetails // The Swipe-Down overlay
         case autoPlayOverlay // The Timer Overlay
-        case trackSelection // NEW: Focus for Audio/Subtitle selection
+        case trackSelection // Focus for Audio/Subtitle selection
+        case versionSelection // NEW: Focus for Version selection
     }
     @FocusState private var focusedField: PlayerFocus?
     
@@ -37,7 +38,7 @@ struct PlayerView: View {
                     // CRITICAL FIX: Disable focus when ANY overlay is active
                     Color.clear
                         .contentShape(Rectangle())
-                        .focusable(!viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection)
+                        .focusable(!viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection && !viewModel.showVersionSelection)
                         .focused($focusedField, equals: .videoSurface)
                         
                         // --- GESTURES ---
@@ -46,7 +47,7 @@ struct PlayerView: View {
                             SiriRemoteSwipeHandler(
                                 onPan: { x, y in
                                     // LOCK: Disable scrubbing if Overlays are open
-                                    if viewModel.showMiniDetails || viewModel.showAutoPlay || viewModel.showTrackSelection { return }
+                                    if viewModel.showMiniDetails || viewModel.showAutoPlay || viewModel.showTrackSelection || viewModel.showVersionSelection { return }
                                     
                                     // Priority: Scrubbing (Horizontal)
                                     if abs(x) > abs(y) {
@@ -62,7 +63,7 @@ struct PlayerView: View {
                                     }
                                 },
                                 onEnd: {
-                                    if !viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection {
+                                    if !viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection && !viewModel.showVersionSelection {
                                         viewModel.endScrubbing()
                                     }
                                 }
@@ -72,7 +73,7 @@ struct PlayerView: View {
                         // Discrete Moves (D-Pad / Arrows)
                         .onMoveCommand { direction in
                             // LOCK: Do not allow player navigation if overlay is open
-                            if viewModel.showMiniDetails || viewModel.showAutoPlay || viewModel.showTrackSelection { return }
+                            if viewModel.showMiniDetails || viewModel.showAutoPlay || viewModel.showTrackSelection || viewModel.showVersionSelection { return }
                             
                             viewModel.triggerControls(forceShow: true)
                             
@@ -101,7 +102,7 @@ struct PlayerView: View {
                         
                         .onPlayPauseCommand {
                             // LOCK: Disable toggle if overlay is active
-                            if !viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection {
+                            if !viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection && !viewModel.showVersionSelection {
                                 viewModel.togglePlayPause()
                             }
                         }
@@ -192,7 +193,7 @@ struct PlayerView: View {
                 .focusSection() // Ensures focus is trapped here
             }
             
-            // 7. Track Selection Overlay (NEW)
+            // 7. Track Selection Overlay
             if viewModel.showTrackSelection {
                 TrackSelectionOverlay(
                     viewModel: viewModel,
@@ -209,7 +210,23 @@ struct PlayerView: View {
                 }
             }
             
-            // 8. Auto Play Overlay (Timer)
+            // 8. Version Selection Overlay (NEW)
+            if viewModel.showVersionSelection {
+                VersionSelectionOverlay(
+                    viewModel: viewModel,
+                    onClose: {
+                        withAnimation { viewModel.showVersionSelection = false }
+                        focusedField = .videoSurface
+                    }
+                )
+                .zIndex(56)
+                .focusSection()
+                .onAppear {
+                    focusedField = .versionSelection
+                }
+            }
+            
+            // 9. Auto Play Overlay (Timer)
             if viewModel.showAutoPlay {
                 AutoPlayOverlay(viewModel: viewModel)
                     .zIndex(60)
@@ -220,9 +237,9 @@ struct PlayerView: View {
                     }
             }
             
-            // 9. Controls Overlay
+            // 10. Controls Overlay
             // We pass the focus binding down so the overlay knows if it's active
-            if viewModel.showControls && !viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection {
+            if viewModel.showControls && !viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection && !viewModel.showVersionSelection {
                 ControlsOverlayView(
                     viewModel: viewModel,
                     channel: channel,
@@ -230,6 +247,10 @@ struct PlayerView: View {
                     onShowTracks: {
                         withAnimation { viewModel.showTrackSelection = true }
                         focusedField = .trackSelection
+                    },
+                    onShowVersions: { // NEW Callback
+                        withAnimation { viewModel.showVersionSelection = true }
+                        focusedField = .versionSelection
                     }
                 )
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
@@ -251,7 +272,7 @@ struct PlayerView: View {
         }
         // Auto-Focus logic for Play/Pause state
         .onChange(of: viewModel.showControls) { show in
-            if show && !viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection {
+            if show && !viewModel.showMiniDetails && !viewModel.showAutoPlay && !viewModel.showTrackSelection && !viewModel.showVersionSelection {
                 focusedField = .videoSurface
             }
         }
@@ -308,7 +329,54 @@ struct PlayerView: View {
     }
 }
 
-// MARK: - Track Selection Overlay (NEW)
+// MARK: - Version Selection Overlay (NEW)
+struct VersionSelectionOverlay: View {
+    @ObservedObject var viewModel: PlayerViewModel
+    var onClose: () -> Void
+    @FocusState private var focusedVersion: String?
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.85).ignoresSafeArea()
+            
+            VStack(spacing: 30) {
+                Text("Select Version")
+                    .font(CinemeltTheme.fontTitle(40))
+                    .foregroundColor(CinemeltTheme.cream)
+                    .cinemeltGlow()
+                
+                ScrollView {
+                    VStack(spacing: 15) {
+                        ForEach(viewModel.alternativeVersions, id: \.url) { channel in
+                            Button(action: { viewModel.switchVersion(channel) }) {
+                                HStack {
+                                    Text(channel.quality ?? "Unknown Quality")
+                                        .font(CinemeltTheme.fontTitle(24))
+                                        .foregroundColor(.white)
+                                    Spacer()
+                                    if channel.url == viewModel.currentUrl {
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(CinemeltTheme.accent)
+                                    }
+                                }
+                                .padding()
+                                .background(Color.white.opacity(0.1))
+                                .cornerRadius(12)
+                            }
+                            .buttonStyle(CinemeltCardButtonStyle())
+                            .focused($focusedVersion, equals: channel.url)
+                        }
+                    }
+                    .padding(40)
+                }
+                .frame(width: 500, height: 600)
+            }
+        }
+        .onExitCommand { onClose() }
+    }
+}
+
+// MARK: - Track Selection Overlay
 struct TrackSelectionOverlay: View {
     @ObservedObject var viewModel: PlayerViewModel
     var onClose: () -> Void
@@ -320,78 +388,14 @@ struct TrackSelectionOverlay: View {
             HStack(alignment: .top, spacing: 100) {
                 
                 // Audio Column
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("Audio")
-                        .font(CinemeltTheme.fontTitle(32))
-                        .foregroundColor(CinemeltTheme.accent)
-                    
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 10) {
-                            if viewModel.audioTracks.isEmpty {
-                                Text("No audio tracks found")
-                                    .font(CinemeltTheme.fontBody(20))
-                                    .foregroundColor(.gray)
-                            } else {
-                                ForEach(Array(viewModel.audioTracks.enumerated()), id: \.offset) { index, track in
-                                    Button(action: { viewModel.setAudioTrack(index: index) }) {
-                                        HStack {
-                                            Text(track)
-                                                .font(CinemeltTheme.fontBody(22))
-                                                .foregroundColor(.white)
-                                            Spacer()
-                                            if index == viewModel.currentAudioIndex {
-                                                Image(systemName: "checkmark")
-                                                    .foregroundColor(CinemeltTheme.accent)
-                                            }
-                                        }
-                                        .padding()
-                                        .background(Color.white.opacity(0.1))
-                                        .cornerRadius(12)
-                                    }
-                                    .buttonStyle(CinemeltCardButtonStyle())
-                                }
-                            }
-                        }
-                    }
+                trackColumn(title: "Audio", tracks: viewModel.audioTracks, currentIndex: viewModel.currentAudioIndex) { i in
+                    viewModel.setAudioTrack(index: i)
                 }
-                .frame(width: 400)
                 
                 // Subtitle Column
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("Subtitles")
-                        .font(CinemeltTheme.fontTitle(32))
-                        .foregroundColor(CinemeltTheme.accent)
-                    
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 10) {
-                            if viewModel.subtitleTracks.isEmpty {
-                                Text("No subtitles found")
-                                    .font(CinemeltTheme.fontBody(20))
-                                    .foregroundColor(.gray)
-                            } else {
-                                ForEach(Array(viewModel.subtitleTracks.enumerated()), id: \.offset) { index, track in
-                                    Button(action: { viewModel.setSubtitleTrack(index: index) }) {
-                                        HStack {
-                                            Text(track)
-                                                .font(CinemeltTheme.fontBody(22))
-                                                .foregroundColor(.white)
-                                            Spacer()
-                                            if index == viewModel.currentSubtitleIndex {
-                                                Image(systemName: "checkmark")
-                                                    .foregroundColor(CinemeltTheme.accent)
-                                            }
-                                        }
-                                        .padding()
-                                        .background(Color.white.opacity(0.1))
-                                        .cornerRadius(12)
-                                    }
-                                    .buttonStyle(CinemeltCardButtonStyle())
-                                }
-                            }
-                        }
-                    }
+                trackColumn(title: "Subtitles", tracks: viewModel.subtitleTracks, currentIndex: viewModel.currentSubtitleIndex) { i in
+                    viewModel.setSubtitleTrack(index: i)
                 }
-                .frame(width: 400)
                 
             }
             .frame(height: 600)
@@ -400,6 +404,44 @@ struct TrackSelectionOverlay: View {
         .onExitCommand {
             onClose()
         }
+    }
+    
+    private func trackColumn(title: String, tracks: [String], currentIndex: Int, action: @escaping (Int) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(title)
+                .font(CinemeltTheme.fontTitle(32))
+                .foregroundColor(CinemeltTheme.accent)
+            
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    if tracks.isEmpty {
+                        Text("No tracks found")
+                            .font(CinemeltTheme.fontBody(20))
+                            .foregroundColor(.gray)
+                    } else {
+                        ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
+                            Button(action: { action(index) }) {
+                                HStack {
+                                    Text(track)
+                                        .font(CinemeltTheme.fontBody(22))
+                                        .foregroundColor(.white)
+                                    Spacer()
+                                    if index == currentIndex {
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(CinemeltTheme.accent)
+                                    }
+                                }
+                                .padding()
+                                .background(Color.white.opacity(0.1))
+                                .cornerRadius(12)
+                            }
+                            .buttonStyle(CinemeltCardButtonStyle())
+                        }
+                    }
+                }
+            }
+        }
+        .frame(width: 400)
     }
 }
 
@@ -653,7 +695,8 @@ struct ControlsOverlayView: View {
     @ObservedObject var viewModel: PlayerViewModel
     let channel: Channel
     var focusedField: FocusState<PlayerView.PlayerFocus?>.Binding
-    var onShowTracks: () -> Void // NEW Action
+    var onShowTracks: () -> Void
+    var onShowVersions: () -> Void // NEW Action
     
     var body: some View {
         ZStack {
@@ -675,15 +718,44 @@ struct ControlsOverlayView: View {
                             .foregroundColor(CinemeltTheme.cream)
                             .shadow(color: .black, radius: 2)
                         
-                        if let q = channel.quality {
-                            Text(q)
-                                .font(CinemeltTheme.fontBody(20))
-                                .foregroundColor(CinemeltTheme.accent)
+                        HStack(spacing: 12) {
+                            Badge(text: viewModel.qualityBadge)
+                            if !viewModel.videoRating.isEmpty {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "star.fill")
+                                        .foregroundColor(CinemeltTheme.accent)
+                                        .font(.caption)
+                                    Text(viewModel.videoRating)
+                                        .font(CinemeltTheme.fontBody(20))
+                                        .foregroundColor(CinemeltTheme.cream)
+                                }
+                            }
+                            if !viewModel.videoYear.isEmpty {
+                                Text(viewModel.videoYear)
+                                    .font(CinemeltTheme.fontBody(20))
+                                    .foregroundColor(.gray)
+                            }
                         }
                     }
                     Spacer()
                     
-                    // Tracks Button (NEW)
+                    // Versions Button (Only if alternatives exist)
+                    if !viewModel.alternativeVersions.isEmpty {
+                        Button(action: onShowVersions) {
+                            Image(systemName: "square.stack.3d.up.fill")
+                                .font(.title)
+                                .padding(15)
+                                .background(Color.white.opacity(0.1))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .focused(focusedField, equals: .upperControls)
+                        .onMoveCommand { direction in
+                            if direction == .down { focusedField.wrappedValue = .videoSurface }
+                        }
+                    }
+                    
+                    // Tracks Button
                     Button(action: onShowTracks) {
                         Image(systemName: "captions.bubble.fill")
                             .font(.title)

@@ -8,7 +8,7 @@ struct ChannelStruct {
     let group: String
     let cover: String?
     let type: String
-    let canonicalTitle: String?
+    let canonicalTitle: String? // The RAW original title (Crucial for version matching)
     let quality: String?
     
     // NEW: Structured Series Metadata
@@ -16,14 +16,15 @@ struct ChannelStruct {
     let season: Int
     let episode: Int
     
+    // Generates a stable hash to detect if an item has CHANGED content (not just a duplicate)
     var contentHash: Int {
         var hasher = Hasher()
         hasher.combine(title)
         hasher.combine(group)
-        // Include metadata in hash so changes (e.g. corrected S/E) trigger an update
         hasher.combine(seriesId)
         hasher.combine(season)
         hasher.combine(episode)
+        // We do NOT include the URL here, because URL changes (e.g. token rotation) shouldn't reset the metadata
         return hasher.finalize()
     }
     
@@ -50,10 +51,11 @@ struct ChannelStruct {
         return dict
     }
     
-    // MARK: - Factory Methods
+    // MARK: - Factory Methods (Aggressive Cleaning)
     
     static func from(_ item: XtreamChannelInfo.LiveStream, playlistUrl: String, input: XtreamInput, categoryMap: [String: String]) -> ChannelStruct {
         let rawName = item.name ?? ""
+        // Critical: Parse raw name immediately to get clean title + quality tags
         let info = TitleNormalizer.parse(rawTitle: rawName)
         let catId = item.categoryId ?? ""
         let groupName = categoryMap[catId] ?? "Uncategorized"
@@ -63,12 +65,12 @@ struct ChannelStruct {
         return ChannelStruct(
             url: url,
             playlistUrl: playlistUrl,
-            title: info.normalizedTitle,
+            title: info.normalizedTitle, // Clean: "BBC One"
             group: groupName,
             cover: item.streamIcon,
             type: "live",
-            canonicalTitle: rawName,
-            quality: "SD",
+            canonicalTitle: rawName,     // Raw: "UK | BBC One FHD"
+            quality: info.quality,       // Parsed: "FHD"
             seriesId: nil,
             season: 0,
             episode: 0
@@ -84,8 +86,10 @@ struct ChannelStruct {
         let ext = item.containerExtension
         let cleanUrl = "\(input.basicUrl)/movie/\(input.username)/\(input.password)/\(item.streamId).\(ext)"
         
-        // Attempt to extract S/E from title if this VOD is actually an episode
+        // Attempt to extract S/E from title if this VOD is accidentally an episode placed in Movies
         let (s, e) = parseSeasonEpisode(from: rawName)
+        // If we found S/E, we force type to 'series_episode' to help aggregation later, or keep 'movie'
+        let type = (s > 0 || e > 0) ? "series_episode" : "movie"
         
         return ChannelStruct(
             url: cleanUrl,
@@ -93,10 +97,10 @@ struct ChannelStruct {
             title: info.normalizedTitle,
             group: groupName,
             cover: item.streamIcon,
-            type: "movie",
+            type: type,
             canonicalTitle: rawName,
             quality: info.quality,
-            seriesId: nil,
+            seriesId: nil, // VODs usually lack series_id in Xtream
             season: s,
             episode: e
         )
@@ -109,7 +113,7 @@ struct ChannelStruct {
         let groupName = categoryMap[catId] ?? "Series"
         
         return ChannelStruct(
-            url: "series://\(item.seriesId)",
+            url: "series://\(item.seriesId)", // Virtual URL for the show container
             playlistUrl: playlistUrl,
             title: info.normalizedTitle,
             group: groupName,
@@ -124,18 +128,25 @@ struct ChannelStruct {
     }
     
     static func from(_ item: XtreamChannelInfo.Episode, seriesId: String, playlistUrl: String, input: XtreamInput, cover: String?) -> ChannelStruct {
+        // Fallback: If title is null, construct one.
         let rawName = item.title ?? "Episode \(item.episodeNum)"
+        
+        // CLEANUP: Xtream often sends "S01 E01 - Title". We want just "Title" if possible, or clean "Episode X".
+        // TitleNormalizer handles this, but we pass the raw string into canonicalTitle for matching.
+        let info = TitleNormalizer.parse(rawTitle: rawName)
+        
+        // Construct Stream URL
         let streamUrl = "\(input.basicUrl)/series/\(input.username)/\(input.password)/\(item.id).\(item.containerExtension)"
         
         return ChannelStruct(
             url: streamUrl,
             playlistUrl: playlistUrl,
-            title: rawName,
-            group: "Episodes",
-            cover: cover,
+            title: info.normalizedTitle,
+            group: "Episodes", // Episodes don't usually have their own group in Xtream
+            cover: cover, // Inherit cover from Series
             type: "series_episode",
             canonicalTitle: rawName,
-            quality: nil,
+            quality: info.quality,
             seriesId: seriesId,
             season: item.season,
             episode: item.episodeNum
@@ -145,10 +156,9 @@ struct ChannelStruct {
     // MARK: - Centralized Metadata Extraction (Public)
     
     /// Extracts S01E01 or Absolute Ordering (Episode 100) info from a string.
-    /// Now public so M3UParser can use it, ensuring consistency.
     static func parseSeasonEpisode(from title: String) -> (Int, Int) {
         let patterns = [
-            // 1. Standard: S01E01, S1E1
+            // 1. Standard: S01E01, S1E1, s01 e01
             "(?i)S(\\d{1,2})\\s*E(\\d{1,2})",
             // 2. X Notation: 1x01
             "(?i)(\\d{1,2})x(\\d{1,2})",
@@ -179,10 +189,11 @@ struct ChannelStruct {
         }
         
         // Fallback: Check for loose number at end of string (Risky, but useful for Anime: "One Piece - 1050")
-        if let looseRegex = try? NSRegularExpression(pattern: "\\s-\\s(\\d{1,4})(?:\\s|$|\\[|\\()"),
+        // Refined Regex: " - 1050" or " [1050]"
+        if let looseRegex = try? NSRegularExpression(pattern: "\\s[-\\[(]\\s*(\\d{1,4})(?:\\s|$|\\]|\\))"),
            let match = looseRegex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)) {
             let valStr = (title as NSString).substring(with: match.range(at: 1))
-            // Ensure it's not a year
+            // Ensure it's not a year (19xx or 20xx)
             if let val = Int(valStr), (val < 1900 || val > 2100) {
                 return (1, val)
             }

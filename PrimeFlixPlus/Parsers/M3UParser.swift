@@ -57,8 +57,6 @@ class M3UParser {
                 currentData = parseExtInf(line: l)
             } else if !l.hasPrefix("#") && currentData != nil {
                 // Parse URL & Create Struct
-                // This triggers TitleNormalizer (Regex) which is CPU intensive,
-                // so running this in parallel chunks is a huge win.
                 let channel = mapToStruct(data: currentData!, streamUrl: l, playlistUrl: playlistUrl)
                 channels.append(channel)
                 currentData = nil
@@ -131,14 +129,14 @@ class M3UParser {
             type = "live"
         }
         
-        // Extract Season/Episode info using the **Centralized Logic** in IntermediateModels
+        // Use the centralized parser logic to ensure "M3U" files are treated same as Xtream
         let parsed = ChannelStruct.parseSeasonEpisode(from: rawTitle)
         let s = parsed.0
         let e = parsed.1
         
-        // If we found S/E data, enforce "series" type even if URL looked like a movie
+        // If we found S/E data, enforce "series_episode" type to ensure grouping
         if s > 0 || e > 0 {
-            type = "series"
+            type = "series_episode"
         }
 
         return ChannelStruct(
@@ -150,7 +148,7 @@ class M3UParser {
             type: type,
             canonicalTitle: rawTitle,
             quality: info.quality,
-            seriesId: nil, // M3U files rarely provide a clean Series ID
+            seriesId: nil, // M3U files rarely provide a clean Series ID, relies on Title Grouping
             season: s,
             episode: e
         )

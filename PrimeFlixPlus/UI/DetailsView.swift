@@ -58,7 +58,7 @@ struct DetailsView: View {
         ) {
             if let ep = viewModel.episodeToPlay {
                 ForEach(ep.versions) { v in
-                    Button(v.qualityLabel) {
+                    Button(v.qualityLabel.isEmpty ? "Default" : v.qualityLabel) {
                         onPlay(viewModel.getPlayableChannel(version: v, metadata: ep))
                     }
                 }
@@ -223,12 +223,16 @@ struct DetailsView: View {
         HStack(spacing: 30) {
             // Play Button (Smart Logic)
             Button(action: {
-                if let target = viewModel.smartPlayTarget, let v = target.versions.first {
-                    // Series: Play Smart Target
-                    onPlay(viewModel.getPlayableChannel(version: v, metadata: target))
+                if let target = viewModel.smartPlayTarget {
+                    // Series: Play Smart Target (Triggers Version Picker)
+                    viewModel.onPlayEpisodeClicked(target)
                 } else {
                     // Movie: Play Selected Version
-                    onPlay(viewModel.selectedVersion ?? viewModel.channel)
+                    if viewModel.availableVersions.count > 1 {
+                        viewModel.showVersionSelector = true
+                    } else {
+                        onPlay(viewModel.selectedVersion ?? viewModel.channel)
+                    }
                 }
             }) {
                 HStack(spacing: 15) {
@@ -346,7 +350,7 @@ struct DetailsView: View {
                 LazyHStack(spacing: 50) {
                     ForEach(viewModel.displayedEpisodes) { ep in
                         Button(action: {
-                            // Smart Action: Direct Play if 1 version, Picker if multiple
+                            // Smart Action: Trigger Version Picker via ViewModel
                             viewModel.onPlayEpisodeClicked(ep)
                         }) {
                             EpisodeCard(episode: ep)

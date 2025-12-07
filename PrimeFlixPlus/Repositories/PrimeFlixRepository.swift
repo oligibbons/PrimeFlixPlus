@@ -215,7 +215,7 @@ class PrimeFlixRepository: ObservableObject {
             let req = NSFetchRequest<NSDictionary>(entityName: "Channel")
             req.resultType = .dictionaryResultType
             req.predicate = NSPredicate(format: "playlistUrl == %@", playlistUrl)
-            req.propertiesToFetch = ["url", "title", "group", "objectID"]
+            req.propertiesToFetch = ["url", "title", "group", "objectID", "seriesId", "season", "episode"]
             
             if let results = try? context.fetch(req) {
                 for dict in results {
@@ -224,12 +224,18 @@ class PrimeFlixRepository: ObservableObject {
                        let group = dict["group"] as? String,
                        let oid = dict["objectID"] as? NSManagedObjectID {
                         
+                        let sid = dict["seriesId"] as? String
+                        let s = dict["season"] as? Int ?? 0
+                        let e = dict["episode"] as? Int ?? 0
+                        
                         var hasher = Hasher()
                         hasher.combine(title)
                         hasher.combine(group)
-                        // Note: If you want changes in Season/Episode to trigger updates,
-                        // you might need to include them in the hash here in the future.
-                        // For now, IntermediateModels.swift contentHash handles the incoming side.
+                        // Include metadata in hash so S/E corrections trigger an update
+                        hasher.combine(sid)
+                        hasher.combine(s)
+                        hasher.combine(e)
+                        
                         existingSnapshots[url] = ChannelSnapshot(objectID: oid, contentHash: hasher.finalize())
                     }
                 }
@@ -294,8 +300,6 @@ class PrimeFlixRepository: ObservableObject {
                 processedUrls.insert(item.url)
                 
                 if let existing = existingSnapshots[item.url] {
-                    // contentHash in ChannelStruct now includes series metadata,
-                    // so if S/E changes, it will trigger an update here.
                     if existing.contentHash != item.contentHash {
                         toUpdate.append(item)
                     }
@@ -394,7 +398,7 @@ class PrimeFlixRepository: ObservableObject {
         }
         await context.perform {
             for chunk in chunks {
-                // toDictionary() already includes season/episode/seriesId now
+                // Dictionary creation handles all fields, including new Metadata
                 let objects = chunk.map { $0.toDictionary() }
                 let batchInsert = NSBatchInsertRequest(entity: Channel.entity(), objects: objects)
                 batchInsert.resultType = .statusOnly
@@ -410,17 +414,20 @@ class PrimeFlixRepository: ObservableObject {
                 guard let snapshot = existingSnapshots[item.url] else { continue }
                 let obj = context.object(with: snapshot.objectID) as? Channel
                 
-                // Existing fields
+                // Update standard fields
                 obj?.title = item.title
                 obj?.group = item.group
                 obj?.cover = item.cover
                 if obj?.canonicalTitle == nil { obj?.canonicalTitle = item.canonicalTitle }
                 if obj?.quality == nil { obj?.quality = item.quality }
                 
-                // NEW: Update metadata
+                // Update Metadata
                 obj?.seriesId = item.seriesId
                 obj?.season = Int16(item.season)
                 obj?.episode = Int16(item.episode)
+                
+                // If type changed (e.g. from movie to series_episode), update it
+                if obj?.type != item.type { obj?.type = item.type }
             }
             try? context.save()
         }

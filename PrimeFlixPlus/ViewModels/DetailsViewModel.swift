@@ -279,13 +279,9 @@ class DetailsViewModel: ObservableObject {
     // MARK: - Smart Actions
     
     func onPlayEpisodeClicked(_ episode: MergedEpisode) {
-        if episode.versions.count == 1 {
-            self.episodeToPlay = episode
-            // Trigger playback handled by view via binding to episodeToPlay
-        } else {
-            self.episodeToPlay = episode
-            self.showEpisodeVersionPicker = true
-        }
+        // FIXED: Always show picker to allow version selection, matching Chillio behavior
+        self.episodeToPlay = episode
+        self.showEpisodeVersionPicker = true
     }
     
     func getPlayableChannel(version: EpisodeVersion, metadata: MergedEpisode) -> Channel {
@@ -344,10 +340,25 @@ class DetailsViewModel: ObservableObject {
     private func fetchTmdbData(title: String, type: String) async {
         let info = TitleNormalizer.parse(rawTitle: title)
         
-        // Try strict normalized title first, then raw title if that fails
-        let queries = [info.normalizedTitle, title]
+        // FIXED: Expanded search strategy to fix missing metadata for series.
+        // 1. Normalized Title (Best case)
+        // 2. Stripped Suffix (Remove "UK | " or " | 4K")
+        // 3. Raw Title (Fallback)
+        var queries = [info.normalizedTitle]
+        
+        // Attempt to extract the "Meat" of the title if it contains pipes
+        if title.contains("|") {
+            let parts = title.split(separator: "|")
+            // Usually the show name is the longest part or the last part
+            if let last = parts.last {
+                queries.append(String(last).trimmingCharacters(in: .whitespaces))
+            }
+        }
+        queries.append(title)
         
         for q in queries {
+            if q.count < 2 { continue } // Skip junk
+            
             do {
                 if type == "series" {
                     let results = try await tmdbClient.searchTv(query: q, year: info.year)
@@ -373,7 +384,7 @@ class DetailsViewModel: ObservableObject {
                     }
                 }
             } catch {
-                print("TMDB Error: \(error)")
+                print("TMDB Error for query '\(q)': \(error)")
             }
         }
     }
