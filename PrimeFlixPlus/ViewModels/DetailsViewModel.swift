@@ -18,38 +18,61 @@ class DetailsViewModel: ObservableObject {
     @Published var posterUrl: URL?
     @Published var backdropOpacity: Double = 0.0
     
-    // --- Versioning ---
+    // --- Versioning (Movies & Series Roots) ---
     @Published var availableVersions: [Channel] = []
     @Published var selectedVersion: Channel?
     @Published var showVersionSelector: Bool = false
     
-    // --- Resume Logic ---
-    @Published var resumePosition: Double = 0
-    @Published var resumeDuration: Double = 0
+    // --- Smart Play State ---
+    @Published var smartPlayTarget: MergedEpisode? = nil
+    @Published var playButtonLabel: String = "Play Now"
+    @Published var playButtonIcon: String = "play.fill"
     @Published var hasWatchHistory: Bool = false
     
-    // --- Series State ---
-    @Published var xtreamEpisodes: [XtreamChannelInfo.Episode] = []
-    @Published var tmdbEpisodes: [Int: [TmdbEpisode]] = [:]
+    // --- Series/Episode State ---
     @Published var seasons: [Int] = []
     @Published var selectedSeason: Int = 1
     @Published var displayedEpisodes: [MergedEpisode] = []
     
-    private var episodeSourceMap: [String: String] = [:]
+    // --- Interaction Triggers ---
+    @Published var episodeToPlay: MergedEpisode? = nil
+    @Published var showEpisodeVersionPicker: Bool = false
+    
+    // --- Dependencies ---
     private let tmdbClient = TmdbClient()
     private let xtreamClient = XtreamClient()
     private var repository: PrimeFlixRepository?
-    private let settings = SettingsViewModel()
+    
+    // --- Internal Storage ---
+    private var tmdbEpisodes: [Int: [TmdbEpisode]] = [:]
+    private var aggregatedEpisodes: [String: [EpisodeVersion]] = [:]
+    
+    // MARK: - Models
+    
+    struct EpisodeVersion: Identifiable {
+        let id = UUID()
+        let streamId: String
+        let containerExtension: String
+        let qualityLabel: String
+        let url: String
+        let playlistUrl: String
+    }
     
     struct MergedEpisode: Identifiable {
-        let id: String
+        let id: String // Key: "S01E01"
+        let season: Int
         let number: Int
         let title: String
         let overview: String
-        let imageUrl: URL?
-        let streamInfo: XtreamChannelInfo.Episode
-        let sourcePlaylistUrl: String
-        let isWatched: Bool
+        let stillPath: URL?
+        var versions: [EpisodeVersion]
+        
+        var isWatched: Bool = false
+        var progress: Double = 0.0
+        
+        var displayTitle: String {
+            return "S\(season) • E\(number) - \(title)"
+        }
     }
     
     init(channel: Channel) {
@@ -71,295 +94,274 @@ class DetailsViewModel: ObservableObject {
         withAnimation { self.isLoading = false }
         withAnimation(.easeIn(duration: 0.5)) { self.backdropOpacity = 1.0 }
         
+        let title = channel.canonicalTitle ?? channel.title
+        let type = channel.type
+        
+        // 1. Fetch Versions (Background)
+        await fetchVersions()
+        
+        // 2. Fetch TMDB Data
+        await fetchTmdbData(title: title, type: type)
+        
+        // 3. Fetch Series Data (if applicable)
+        if type == "series" {
+            await fetchAndAggregateEpisodes()
+        }
+        
+        // 4. Calculate "Up Next"
+        await recalculateSmartPlay()
+    }
+    
+    // MARK: - Core Data Versions (Fixed for Concurrency)
+    private func fetchVersions() async {
         guard let repo = repository else { return }
-        let channelObjectID = channel.objectID
-        let channelRawTitle = channel.canonicalTitle ?? channel.title
-        let channelType = channel.type
+        let oid = channel.objectID
         
-        // 1. Load Versions in Background
-        Task.detached(priority: .userInitiated) {
+        // FIX: Use Task.detached + performAndWait to avoid compiler ambiguity and ensure Void inference issues are gone.
+        let versionIDs: [NSManagedObjectID] = await Task.detached(priority: .userInitiated) {
             let context = repo.container.newBackgroundContext()
-            var versionIDs: [NSManagedObjectID] = []
-            context.performAndWait {
-                let bgRepo = ChannelRepository(context: context)
-                if let bgChannel = try? context.existingObject(with: channelObjectID) as? Channel {
-                    versionIDs = bgRepo.getVersions(for: bgChannel).map { $0.objectID }
+            return context.performAndWait {
+                if let bgChannel = try? context.existingObject(with: oid) as? Channel {
+                    let bgRepo = ChannelRepository(context: context)
+                    return bgRepo.getVersions(for: bgChannel).map { $0.objectID }
                 }
+                return []
             }
-            let safeIDs = versionIDs
-            await MainActor.run { self.processVersions(versionIDs: safeIDs) }
-        }
-        
-        // 2. Parallel Fetch: TMDB Metadata & Xtream Series Data
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.fetchTmdbData(title: channelRawTitle, type: channelType) }
-            if channelType == "series" { group.addTask { await self.fetchAggregatedSeriesData() } }
-        }
-    }
-    
-    // MARK: - Smart Matching Algorithm (Levenshtein + Year Validation)
-    
-    private func fetchTmdbData(title: String, type: String) async {
-        let info = TitleNormalizer.parse(rawTitle: title)
-        let cleanTitle = info.normalizedTitle
-        let fileYear = info.year
-        
-        // STRATEGY: Define multiple attempts to maximize match rate using Fuzzy Logic.
-        // 1. Strict: Search using Normalized Title + Year (High precision)
-        // 2. Loose: Search using Normalized Title ONLY (Fixes wrong year in filename)
-        let searchStrategies: [(query: String, year: String?)] = [
-            (cleanTitle, fileYear),
-            (cleanTitle, nil)
-        ]
-        
-        for (query, year) in searchStrategies {
-            if query.isEmpty { continue }
-            
-            do {
-                if type == "series" {
-                    let results = try await tmdbClient.searchTv(query: query, year: year)
-                    // Fuzzy Match to find the BEST result, not just the first one
-                    if let best = findBestMatch(results: results, targetTitle: cleanTitle, targetYear: fileYear) {
-                        let details = try await tmdbClient.getTvDetails(id: best.id)
-                        await MainActor.run { self.handleDetailsLoaded(details) }
-                        return // Success!
-                    }
-                } else {
-                    let results = try await tmdbClient.searchMovie(query: query, year: year)
-                    if let best = findBestMatch(results: results, targetTitle: cleanTitle, targetYear: fileYear) {
-                        let details = try await tmdbClient.getMovieDetails(id: best.id)
-                        await MainActor.run { self.handleDetailsLoaded(details) }
-                        return // Success!
-                    }
-                }
-            } catch {
-                print("⚠️ TMDB Search Attempt Failed for '\(query)' (Year: \(year ?? "None")): \(error.localizedDescription)")
-            }
-        }
-        
-        print("❌ TMDB: No match found for '\(title)' after all strategies.")
-    }
-    
-    /// Filters TMDB results using Levenshtein distance + Year validation
-    private func findBestMatch<T: Identifiable>(results: [T], targetTitle: String, targetYear: String?) -> T? {
-        let minScore: Double = 0.6 // Minimum 60% similarity required to accept a match
-        var bestCandidate: T? = nil
-        var bestScore: Double = 0.0
-        
-        for result in results {
-            var candidateTitle = ""
-            var candidateDate: String? = nil
-            
-            // Extract data based on Type (Movie vs TV)
-            if let m = result as? TmdbMovieResult {
-                candidateTitle = m.title
-                candidateDate = m.releaseDate
-            } else if let s = result as? TmdbTvResult {
-                candidateTitle = s.name
-                candidateDate = s.firstAirDate
-            }
-            
-            // 1. Calculate Title Score (Levenshtein)
-            let score = TitleNormalizer.similarity(between: targetTitle, and: candidateTitle)
-            
-            // 2. Check Year (Boost score if year matches exactly or within 1 year)
-            var yearBonus = 0.0
-            if let tYear = targetYear, let cDate = candidateDate, cDate.count >= 4 {
-                let cYear = String(cDate.prefix(4))
-                if tYear == cYear {
-                    yearBonus = 0.15 // Exact year match is a huge indicator
-                } else if let tInt = Int(tYear), let cInt = Int(cYear), abs(tInt - cInt) <= 1 {
-                    yearBonus = 0.05 // +/- 1 year tolerance (Release date vs Production date)
-                }
-            }
-            
-            let totalScore = score + yearBonus
-            
-            if totalScore > bestScore && totalScore >= minScore {
-                bestScore = totalScore
-                bestCandidate = result
-            }
-        }
-        
-        return bestCandidate
-    }
-    
-    private func handleDetailsLoaded(_ details: TmdbDetails) {
-        self.tmdbDetails = details
-        if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
-        if let cast = details.aggregateCredits?.cast ?? details.credits?.cast { self.cast = cast.prefix(12).map { $0 } }
-        
-        // REFRESH EPISODES: If series data loaded *after* Xtream data, we need to re-merge to get metadata.
-        if channel.type == "series" {
-            Task { await self.selectSeason(self.selectedSeason) }
-        }
-    }
-    
-    private func fetchAggregatedSeriesData() async {
-        let versionsSnapshot = availableVersions.isEmpty ? [channel] : availableVersions
-        let versionData = versionsSnapshot.map { (url: $0.url, playlistUrl: $0.playlistUrl) }
-        let client = self.xtreamClient
-        
-        let result = await Task.detached(priority: .userInitiated) { () -> ([XtreamChannelInfo.Episode], [String: String], [Int]) in
-            var allEpisodes: [(XtreamChannelInfo.Episode, String)] = []
-            
-            await withTaskGroup(of: [(XtreamChannelInfo.Episode, String)].self) { group in
-                for vData in versionData {
-                    let vDataCopy = vData
-                    group.addTask {
-                        let input = XtreamInput.decodeFromPlaylistUrl(vDataCopy.playlistUrl)
-                        let seriesIdString = vDataCopy.url.replacingOccurrences(of: "series://", with: "")
-                        guard let seriesId = Int(seriesIdString) else { return [] }
-                        return (try? await client.getSeriesEpisodes(input: input, seriesId: seriesId))?.map { ($0, vDataCopy.playlistUrl) } ?? []
-                    }
-                }
-                for await res in group { allEpisodes.append(contentsOf: res) }
-            }
-            
-            var uniqueEpisodes: [String: (XtreamChannelInfo.Episode, String)] = [:]
-            for (ep, source) in allEpisodes {
-                let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
-                if uniqueEpisodes[key] == nil { uniqueEpisodes[key] = (ep, source) }
-            }
-            let finalEpisodes = uniqueEpisodes.values.map { $0.0 }
-            let finalMap = uniqueEpisodes.mapValues { $0.1 }
-            let finalSeasons = Set(finalEpisodes.map { $0.season }).sorted()
-            
-            return (finalEpisodes, finalMap, finalSeasons)
         }.value
         
-        self.xtreamEpisodes = result.0
-        self.episodeSourceMap = result.1
-        self.seasons = result.2.isEmpty ? [1] : result.2
+        // Re-fetch on main thread for UI usage
+        self.availableVersions = versionIDs.compactMap { try? repo.container.viewContext.existingObject(with: $0) as? Channel }
         
-        await MainActor.run {
-            if let first = self.seasons.first {
-                Task { await self.selectSeason(first) }
+        // Default selection logic
+        if self.selectedVersion == nil {
+            self.selectedVersion = self.availableVersions.first ?? self.channel
+        }
+    }
+    
+    func userSelectedVersion(_ channel: Channel) {
+        self.selectedVersion = channel
+        self.showVersionSelector = false
+    }
+    
+    // MARK: - Series Aggregation Engine (Chillio Logic)
+    
+    private func fetchAndAggregateEpisodes() async {
+        // Use availableVersions (populated above) to get all sources
+        let sources = availableVersions.isEmpty ? [channel] : availableVersions
+        
+        // Struct to hold data we need to pass into the TaskGroup, to avoid passing NSManagedObjects
+        struct SourceVariant {
+            let seriesId: String
+            let playlistUrl: String
+            let quality: String
+        }
+        
+        let variants = sources.compactMap {
+            SourceVariant(
+                seriesId: $0.seriesId ?? "",
+                playlistUrl: $0.playlistUrl,
+                quality: $0.quality ?? "Source"
+            )
+        }
+        
+        var rawEpisodes: [(String, EpisodeVersion)] = []
+        
+        await withTaskGroup(of: [(String, EpisodeVersion)].self) { group in
+            for variant in variants {
+                guard let seriesIdInt = Int(variant.seriesId) else { continue }
+                
+                group.addTask {
+                    let input = XtreamInput.decodeFromPlaylistUrl(variant.playlistUrl)
+                    guard let episodes = try? await self.xtreamClient.getSeriesEpisodes(input: input, seriesId: seriesIdInt) else { return [] }
+                    
+                    return episodes.map { ep in
+                        let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
+                        let streamUrl = "\(input.basicUrl)/series/\(input.username)/\(input.password)/\(ep.id).\(ep.containerExtension)"
+                        
+                        let version = EpisodeVersion(
+                            streamId: ep.id,
+                            containerExtension: ep.containerExtension,
+                            qualityLabel: variant.quality,
+                            url: streamUrl,
+                            playlistUrl: variant.playlistUrl
+                        )
+                        return (key, version)
+                    }
+                }
             }
+            
+            for await batch in group {
+                rawEpisodes.append(contentsOf: batch)
+            }
+        }
+        
+        // Group & Sort
+        var newAggregation: [String: [EpisodeVersion]] = [:]
+        var discoveredSeasons = Set<Int>()
+        
+        for (key, version) in rawEpisodes {
+            newAggregation[key, default: []].append(version)
+            if let s = Int(key.prefix(3).dropFirst()) {
+                discoveredSeasons.insert(s)
+            }
+        }
+        
+        // Heuristic Sort: 4K > 1080p > 720p
+        for (key, _) in newAggregation {
+            newAggregation[key]?.sort { v1, v2 in
+                let q1 = v1.qualityLabel.lowercased()
+                let q2 = v2.qualityLabel.lowercased()
+                if q1.contains("4k") && !q2.contains("4k") { return true }
+                if q1.contains("1080") && !q2.contains("1080") && !q2.contains("4k") { return true }
+                return false
+            }
+        }
+        
+        self.aggregatedEpisodes = newAggregation
+        self.seasons = discoveredSeasons.sorted()
+        
+        if let first = self.seasons.first {
+            await selectSeason(first)
         }
     }
     
     func selectSeason(_ season: Int) async {
         self.selectedSeason = season
         
-        // Metadata Fetch: Ensure we have TMDB data for this season
+        // Fetch Metadata if missing
         if tmdbEpisodes[season] == nil, let tmdbId = tmdbDetails?.id {
             if let seasonDetails = try? await tmdbClient.getTvSeason(tvId: tmdbId, seasonNumber: season) {
                 tmdbEpisodes[season] = seasonDetails.episodes
             }
         }
         
-        // Merge Logic: Combine Xtream (File) with TMDB (Metadata)
-        let merged = xtreamEpisodes.filter { $0.season == season }.sorted { $0.episodeNum < $1.episodeNum }.map { xEp -> MergedEpisode in
-            let tEp = tmdbEpisodes[season]?.first(where: { $0.episodeNumber == xEp.episodeNum })
-            let key = String(format: "S%02dE%02d", xEp.season, xEp.episodeNum)
+        var merged: [MergedEpisode] = []
+        let seasonPrefix = String(format: "S%02d", season)
+        let keys = aggregatedEpisodes.keys.filter { $0.hasPrefix(seasonPrefix) }.sorted()
+        
+        for key in keys {
+            guard let versions = aggregatedEpisodes[key] else { continue }
+            let epNum = Int(key.suffix(2)) ?? 0
+            let tEp = tmdbEpisodes[season]?.first(where: { $0.episodeNumber == epNum })
             
-            return MergedEpisode(
-                id: xEp.id,
-                number: xEp.episodeNum,
-                title: tEp?.name ?? xEp.title ?? "Episode \(xEp.episodeNum)",
+            let item = MergedEpisode(
+                id: key,
+                season: season,
+                number: epNum,
+                title: tEp?.name ?? "Episode \(epNum)",
                 overview: tEp?.overview ?? "",
-                imageUrl: tEp?.stillPath.map { URL(string: "https://image.tmdb.org/t/p/w500\($0)")! },
-                streamInfo: xEp,
-                sourcePlaylistUrl: episodeSourceMap[key] ?? channel.playlistUrl,
-                isWatched: false
+                stillPath: tEp?.stillPath.map { URL(string: "https://image.tmdb.org/t/p/w500\($0)")! },
+                versions: versions
             )
+            merged.append(item)
         }
         
         withAnimation {
             self.displayedEpisodes = merged
         }
+        
+        await updateProgressForDisplayedEpisodes()
     }
     
-    // MARK: - Playback Logic
+    // MARK: - Smart Actions
     
-    func getSmartPlayTarget() -> Channel? {
-        if channel.type == "movie" { return selectedVersion }
-        if channel.type == "series" {
-            let sorted = xtreamEpisodes.sorted {
-                if $0.season != $1.season { return $0.season < $1.season }
-                return $0.episodeNum < $1.episodeNum
+    func onPlayEpisodeClicked(_ episode: MergedEpisode) {
+        if episode.versions.count == 1 {
+            self.episodeToPlay = episode
+        } else {
+            self.episodeToPlay = episode
+            self.showEpisodeVersionPicker = true
+        }
+    }
+    
+    func getPlayableChannel(version: EpisodeVersion, metadata: MergedEpisode) -> Channel {
+        let playable = Channel(context: repository!.container.viewContext)
+        playable.url = version.url
+        playable.title = metadata.displayTitle
+        playable.cover = metadata.stillPath?.absoluteString ?? channel.cover
+        playable.type = "series_episode"
+        playable.playlistUrl = version.playlistUrl
+        playable.seriesId = channel.seriesId
+        playable.season = Int16(metadata.season)
+        playable.episode = Int16(metadata.number)
+        return playable
+    }
+    
+    private func updateProgressForDisplayedEpisodes() async {
+        guard let repo = repository else { return }
+        let allUrls = displayedEpisodes.flatMap { $0.versions.map { $0.url } }
+        
+        // FIX: Use Task.detached + performAndWait
+        let progressMap: [String: Double] = await Task.detached(priority: .background) {
+            let context = repo.container.newBackgroundContext()
+            return context.performAndWait {
+                var map: [String: Double] = [:]
+                let req = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
+                req.predicate = NSPredicate(format: "channelUrl IN %@", allUrls)
+                if let results = try? context.fetch(req) {
+                    for p in results {
+                        if p.duration > 0 { map[p.channelUrl] = Double(p.position) / Double(p.duration) }
+                    }
+                }
+                return map
             }
-            if let firstEp = sorted.first { return constructChannelForEpisode(firstEp) }
+        }.value
+        
+        var updated = displayedEpisodes
+        for i in 0..<updated.count {
+            var maxProg = 0.0
+            for v in updated[i].versions {
+                if let p = progressMap[v.url], p > maxProg { maxProg = p }
+            }
+            updated[i].progress = maxProg
+            updated[i].isWatched = maxProg > 0.95
         }
-        return nil
+        self.displayedEpisodes = updated
     }
     
-    private func constructChannelForEpisode(_ ep: XtreamChannelInfo.Episode) -> Channel? {
-        let key = String(format: "S%02dE%02d", ep.season, ep.episodeNum)
-        guard let sourceUrl = episodeSourceMap[key] else { return nil }
-        
-        let input = XtreamInput.decodeFromPlaylistUrl(sourceUrl)
-        
-        // Ensure series uses correct endpoint
-        let streamUrl = "\(input.basicUrl)/series/\(input.username)/\(input.password)/\(ep.id).\(ep.containerExtension)"
-        
-        guard let context = channel.managedObjectContext else { return nil }
-        let ch = Channel(context: context)
-        ch.url = streamUrl
-        ch.title = "\(channel.title) - S\(ep.season)E\(ep.episodeNum)"
-        ch.type = "series_episode"
-        ch.playlistUrl = sourceUrl
-        ch.cover = channel.cover
-        
-        return ch
-    }
-    
-    func createPlayableChannel(for episode: MergedEpisode) -> Channel {
-        return constructChannelForEpisode(episode.streamInfo) ?? channel
-    }
-    
-    // MARK: - Versioning
-    private func processVersions(versionIDs: [NSManagedObjectID]) {
-        guard let context = channel.managedObjectContext else { return }
-        let versions = versionIDs.compactMap { try? context.existingObject(with: $0) as? Channel }
-        self.availableVersions = versions
-        resolveBestVersion()
-        if channel.type == "series" && !versions.isEmpty { Task { await fetchAggregatedSeriesData() } }
-    }
-    
-    private func resolveBestVersion() {
-        guard !availableVersions.isEmpty else { return }
-        let prefLang = settings.preferredLanguage.lowercased()
-        let prefRes = settings.preferredResolution
-        let sorted = availableVersions.sorted { c1, c2 in
-            let i1 = TitleNormalizer.parse(rawTitle: c1.title)
-            let i2 = TitleNormalizer.parse(rawTitle: c2.title)
-            var s1 = 0; var s2 = 0
-            if let l1 = i1.language?.lowercased(), l1.contains(prefLang) { s1 += 1000 }
-            if let l2 = i2.language?.lowercased(), l2.contains(prefLang) { s2 += 1000 }
-            if i1.quality == prefRes { s1 += 500 }
-            if i2.quality == prefRes { s2 += 500 }
-            s1 += i1.qualityScore / 100
-            s2 += i2.qualityScore / 100
-            return s1 > s2
+    private func recalculateSmartPlay() async {
+        if let first = displayedEpisodes.first, self.smartPlayTarget == nil {
+            self.smartPlayTarget = first
+            self.playButtonLabel = "Start Series"
         }
-        self.selectedVersion = sorted.first
     }
     
-    func userSelectedVersion(_ channel: Channel) {
-        self.selectedVersion = channel
-        self.showVersionSelector = false
-        if channel.type == "series" { Task { await fetchAggregatedSeriesData() } }
+    // MARK: - TMDB & Helpers
+    
+    private func fetchTmdbData(title: String, type: String) async {
+        let info = TitleNormalizer.parse(rawTitle: title)
+        do {
+            if type == "series" {
+                let results = try await tmdbClient.searchTv(query: info.normalizedTitle, year: info.year)
+                if let best = results.first {
+                    let details = try await tmdbClient.getTvDetails(id: best.id)
+                    self.tmdbDetails = details
+                    if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
+                    if let cast = details.aggregateCredits?.cast { self.cast = cast }
+                }
+            } else {
+                let results = try await tmdbClient.searchMovie(query: info.normalizedTitle, year: info.year)
+                if let best = results.first {
+                    let details = try await tmdbClient.getMovieDetails(id: best.id)
+                    self.tmdbDetails = details
+                    if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
+                    if let cast = details.credits?.cast { self.cast = cast }
+                }
+            }
+        } catch { print("Meta Error: \(error)") }
     }
     
-    // MARK: - Helper Logic
     private func checkWatchHistory() {
-        guard let repo = repository, let target = selectedVersion else { return }
-        let targetUrl = target.url
+        guard let repo = repository, channel.type == "movie" else { return }
+        let url = channel.url
         Task.detached {
             let context = repo.container.newBackgroundContext()
-            let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
-            request.predicate = NSPredicate(format: "channelUrl == %@", targetUrl)
-            request.fetchLimit = 1
-            if let result = (try? context.fetch(request))?.first {
-                let pos = Double(result.position) / 1000.0
-                let dur = Double(result.duration) / 1000.0
+            let req = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
+            req.predicate = NSPredicate(format: "channelUrl == %@", url)
+            if let p = try? context.fetch(req).first, p.duration > 0 {
+                let progress = Double(p.position) / Double(p.duration)
                 await MainActor.run {
-                    self.resumePosition = pos
-                    self.resumeDuration = dur
-                    let pct = dur > 0 ? pos / dur : 0
-                    self.hasWatchHistory = pct > 0.02 && pct < 0.95
+                    self.hasWatchHistory = progress > 0.05 && progress < 0.95
                 }
             }
         }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct EpisodeCard: View {
-    // Linked to your ViewModel
+    // Linked to the new DetailsViewModel.MergedEpisode struct
     let episode: DetailsViewModel.MergedEpisode
     
     @Environment(\.isFocused) var isFocused
@@ -9,9 +9,10 @@ struct EpisodeCard: View {
     var body: some View {
         HStack(spacing: 0) {
             
-            // 1. Thumbnail with Blend Mask
-            ZStack {
-                if let url = episode.imageUrl {
+            // 1. Thumbnail Area
+            ZStack(alignment: .bottomLeading) {
+                // Image
+                if let url = episode.stillPath {
                     AsyncImage(url: url) { image in
                         image.resizable().aspectRatio(contentMode: .fill)
                     } placeholder: {
@@ -23,6 +24,7 @@ struct EpisodeCard: View {
                         }
                     }
                 } else {
+                    // Fallback
                     ZStack {
                         CinemeltTheme.charcoal
                         Image(systemName: "play.slash.fill")
@@ -30,22 +32,54 @@ struct EpisodeCard: View {
                             .foregroundColor(.white.opacity(0.1))
                     }
                 }
+                
+                // --- OVERLAYS ---
+                
+                // A. Gradient Shade (Always visible for text readability if needed, but mainly for style)
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.6)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+                
+                // B. Progress Bar (If in progress and not finished)
+                if episode.progress > 0 && !episode.isWatched {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            // Track
+                            Rectangle()
+                                .fill(Color.black.opacity(0.6))
+                                .frame(height: 6)
+                            
+                            // Fill
+                            Rectangle()
+                                .fill(CinemeltTheme.accent)
+                                .frame(width: geo.size.width * episode.progress, height: 6)
+                        }
+                    }
+                    .frame(height: 6)
+                    .padding(.bottom, 0) // Align to very bottom
+                }
+                
+                // C. "Watched" Overlay (Dim + Icon)
+                if episode.isWatched {
+                    ZStack {
+                        Color.black.opacity(0.7)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 40, weight: .bold))
+                            .foregroundColor(CinemeltTheme.accent)
+                            .shadow(color: CinemeltTheme.accent.opacity(0.8), radius: 10)
+                    }
+                }
             }
             .frame(width: 280, height: 160)
-            .overlay(
-                // Gradient to fade image into the glass background
-                LinearGradient(
-                    colors: [.clear, CinemeltTheme.charcoal.opacity(0.5)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
             .clipped()
             
-            // 2. Info Content
+            // 2. Metadata Content
             VStack(alignment: .leading, spacing: 6) {
+                
+                // Row 1: Episode Number & Title
                 HStack(alignment: .firstTextBaseline) {
-                    // Large "01" styling
                     Text(String(format: "%02d", episode.number))
                         .font(CinemeltTheme.fontTitle(44))
                         .foregroundColor(isFocused ? CinemeltTheme.accent : CinemeltTheme.accent.opacity(0.7))
@@ -57,34 +91,51 @@ struct EpisodeCard: View {
                         .lineLimit(1)
                 }
                 
-                // Divider line
+                // Row 2: Divider
                 Rectangle()
                     .fill(Color.white.opacity(isFocused ? 0.3 : 0.1))
                     .frame(height: 1)
                     .padding(.vertical, 4)
                 
+                // Row 3: Overview
                 Text(episode.overview.isEmpty ? "No details available." : episode.overview)
                     .font(CinemeltTheme.fontBody(20))
                     .foregroundColor(isFocused ? .white.opacity(0.9) : .gray)
                     .lineLimit(3)
                     .lineSpacing(4)
+                
+                Spacer()
+                
+                // Row 4: Versions Tag (Chillio Feature)
+                if episode.versions.count > 1 {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.stack.3d.up.fill")
+                            .font(.caption)
+                        Text("\(episode.versions.count) Versions")
+                            .font(CinemeltTheme.fontBody(16))
+                            .fontWeight(.bold)
+                    }
+                    .foregroundColor(isFocused ? CinemeltTheme.accent : .gray)
+                    .padding(.bottom, 8)
+                    .transition(.opacity)
+                }
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Card Container Styling
         .background(
-            // Glassmorphic backing
             ZStack {
                 if isFocused {
-                    Color.white.opacity(0.1) // Brighter on focus
+                    Color.white.opacity(0.1) // Highlight
                 } else {
-                    Color.black.opacity(0.2) // Darker at rest
+                    Color.black.opacity(0.2) // Default state
                 }
             }
             .background(.ultraThinMaterial)
         )
         .cornerRadius(12)
-        // Outer Glow on Focus
+        // Focus Effects
         .shadow(
             color: isFocused ? CinemeltTheme.accent.opacity(0.3) : .clear,
             radius: 20,

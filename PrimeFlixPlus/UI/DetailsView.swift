@@ -50,6 +50,34 @@ struct DetailsView: View {
             }
         }
         .onExitCommand { onBack() }
+        // --- SHEET 1: Episode Version Picker (Chillio Feature) ---
+        .confirmationDialog(
+            "Select Version",
+            isPresented: $viewModel.showEpisodeVersionPicker,
+            titleVisibility: .visible
+        ) {
+            if let ep = viewModel.episodeToPlay {
+                ForEach(ep.versions) { v in
+                    Button(v.qualityLabel) {
+                        onPlay(viewModel.getPlayableChannel(version: v, metadata: ep))
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        // --- SHEET 2: Top-Level Version Selector (For Movies) ---
+        .confirmationDialog(
+            "Select Quality",
+            isPresented: $viewModel.showVersionSelector,
+            titleVisibility: .visible
+        ) {
+            ForEach(viewModel.availableVersions, id: \.url) { version in
+                Button(version.title) {
+                    viewModel.userSelectedVersion(version)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
     
     // MARK: - Subviews
@@ -88,7 +116,6 @@ struct DetailsView: View {
     
     private var loadingState: some View {
         VStack(spacing: 30) {
-            // Updated: Premium Spinner implementation
             CinemeltLoadingIndicator()
             
             Text("Loading Details...")
@@ -113,6 +140,7 @@ struct DetailsView: View {
                         .lineLimit(2)
                         .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 5)
                     
+                    // Restored: Metadata Row (Quality, Rating, Year)
                     metadataRow
                     
                     Text(viewModel.tmdbDetails?.overview ?? "No synopsis available.")
@@ -131,14 +159,14 @@ struct DetailsView: View {
                     .padding(.horizontal, 80)
                     .focusSection()
                 
-                // --- Version Selector ---
+                // --- Top-Level Version Selector (Restored for Movies) ---
                 if viewModel.availableVersions.count > 1 {
                     versionSelector
                         .padding(.horizontal, 80)
                         .focusSection()
                 }
                 
-                // --- Cast ---
+                // --- Cast Rail (Restored) ---
                 if !viewModel.cast.isEmpty {
                     castRail
                         .focusSection()
@@ -193,13 +221,19 @@ struct DetailsView: View {
     
     private var actionButtons: some View {
         HStack(spacing: 30) {
-            // Play Button
+            // Play Button (Smart Logic)
             Button(action: {
-                if let playable = viewModel.getSmartPlayTarget() { onPlay(playable) }
+                if let target = viewModel.smartPlayTarget, let v = target.versions.first {
+                    // Series: Play Smart Target
+                    onPlay(viewModel.getPlayableChannel(version: v, metadata: target))
+                } else {
+                    // Movie: Play Selected Version
+                    onPlay(viewModel.selectedVersion ?? viewModel.channel)
+                }
             }) {
                 HStack(spacing: 15) {
-                    Image(systemName: viewModel.hasWatchHistory ? "play.circle.fill" : "play.fill")
-                    Text(viewModel.hasWatchHistory ? "Resume" : "Play Now")
+                    Image(systemName: viewModel.playButtonIcon)
+                    Text(viewModel.playButtonLabel)
                 }
                 .font(CinemeltTheme.fontTitle(28))
                 .foregroundColor(.black)
@@ -243,14 +277,6 @@ struct DetailsView: View {
         }
         .buttonStyle(CinemeltCardButtonStyle())
         .focused($focusedField, equals: .version)
-        .confirmationDialog("Select Version", isPresented: $viewModel.showVersionSelector, titleVisibility: .visible) {
-            ForEach(viewModel.availableVersions, id: \.url) { version in
-                Button(version.title) {
-                    viewModel.userSelectedVersion(version)
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        }
     }
     
     private var castRail: some View {
@@ -290,6 +316,7 @@ struct DetailsView: View {
     
     private var seriesContent: some View {
         VStack(alignment: .leading, spacing: 25) {
+            // Season Selector
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 20) {
                     ForEach(viewModel.seasons, id: \.self) { season in
@@ -314,10 +341,14 @@ struct DetailsView: View {
             }
             .focusSection()
             
+            // Episode List
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 50) {
                     ForEach(viewModel.displayedEpisodes) { ep in
-                        Button(action: { onPlay(viewModel.createPlayableChannel(for: ep)) }) {
+                        Button(action: {
+                            // Smart Action: Direct Play if 1 version, Picker if multiple
+                            viewModel.onPlayEpisodeClicked(ep)
+                        }) {
                             EpisodeCard(episode: ep)
                         }
                         .buttonStyle(CinemeltCardButtonStyle())

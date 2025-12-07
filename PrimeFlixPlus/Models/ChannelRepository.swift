@@ -8,7 +8,7 @@ class ChannelRepository {
         self.context = context
     }
     
-    // MARK: - Missing Accessors (Fixed Build Errors)
+    // MARK: - Core Accessors
     
     func getFavorites(type: String) -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
@@ -62,6 +62,47 @@ class ChannelRepository {
             }
         }
         return matches
+    }
+
+    // MARK: - Versioning Logic (UPGRADED for Chillio Experience)
+    
+    /// Finds all channels that represent the same content as the target channel.
+    /// Used to group "Severance 4K", "Severance 1080p", etc.
+    func getVersions(for channel: Channel) -> [Channel] {
+        // Strategy 1: Series ID Match (High Confidence)
+        // If the provider assigns a Series ID (from Xtream), rely on that to find duplicates.
+        if let seriesId = channel.seriesId, !seriesId.isEmpty, seriesId != "0" {
+            let request = NSFetchRequest<Channel>(entityName: "Channel")
+            // We only want versions of the same TYPE (Series matches Series)
+            request.predicate = NSPredicate(format: "seriesId == %@ AND type == %@", seriesId, channel.type)
+            if let matches = try? context.fetch(request), !matches.isEmpty {
+                return matches
+            }
+        }
+        
+        // Strategy 2: Normalized Title Match (Medium Confidence)
+        // Fallback for Movies or Series without IDs.
+        let rawSource = channel.canonicalTitle ?? channel.title
+        let info = TitleNormalizer.parse(rawTitle: rawSource)
+        let targetTitle = info.normalizedTitle.lowercased()
+        
+        // Optimization: Use prefix to narrow down SQL search, then filter in memory
+        // This avoids fetching the entire database.
+        let prefix = String(targetTitle.prefix(4))
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
+        request.predicate = NSPredicate(format: "type == %@ AND title BEGINSWITH[cd] %@", channel.type, prefix)
+        request.fetchLimit = 200 // Cap to prevent memory issues
+        
+        guard let candidates = try? context.fetch(request) else { return [channel] }
+        
+        // Strict In-Memory Filter using TitleNormalizer logic
+        let variants = candidates.filter { candidate in
+            let candRaw = candidate.canonicalTitle ?? candidate.title
+            let candidateInfo = TitleNormalizer.parse(rawTitle: candRaw)
+            return candidateInfo.normalizedTitle.lowercased() == targetTitle
+        }
+        
+        return variants.isEmpty ? [channel] : variants
     }
 
     // MARK: - "Your Fresh Content" (Killer Feature)
@@ -568,31 +609,6 @@ class ChannelRepository {
     func toggleFavorite(channel: Channel) {
         channel.isFavorite.toggle()
         saveContext()
-    }
-    
-    func getVersions(for channel: Channel) -> [Channel] {
-        let rawSource = channel.canonicalTitle ?? channel.title
-        let info = TitleNormalizer.parse(rawTitle: rawSource)
-        let targetTitle = info.normalizedTitle.lowercased()
-        
-        let prefix = String(targetTitle.prefix(4))
-        
-        let request = NSFetchRequest<Channel>(entityName: "Channel")
-        request.predicate = NSPredicate(
-            format: "type == %@ AND title BEGINSWITH[cd] %@",
-            channel.type, prefix
-        )
-        request.fetchLimit = 100
-        
-        guard let candidates = try? context.fetch(request) else { return [channel] }
-        
-        let variants = candidates.filter { candidate in
-            let candRaw = candidate.canonicalTitle ?? candidate.title
-            let candidateInfo = TitleNormalizer.parse(rawTitle: candRaw)
-            return candidateInfo.normalizedTitle.lowercased() == targetTitle
-        }
-        
-        return variants.isEmpty ? [channel] : variants
     }
     
     func getBrowsingContent(playlistUrl: String, type: String, group: String) -> [Channel] {
