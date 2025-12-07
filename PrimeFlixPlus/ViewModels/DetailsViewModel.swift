@@ -1,3 +1,5 @@
+// oligibbons/primeflixplus/PrimeFlixPlus-87ed36e89476dd94828b2fb759896cdbd9a22d84/PrimeFlixPlus/ViewModels/DetailsViewModel.swift
+
 import Foundation
 import Combine
 import SwiftUI
@@ -47,6 +49,17 @@ class DetailsViewModel: ObservableObject {
     // --- Internal Storage ---
     private var tmdbEpisodes: [Int: [TmdbEpisode]] = [:]
     private var aggregatedEpisodes: [String: [EpisodeVersion]] = [:]
+    
+    // MARK: - API Features (Phase 3)
+    
+    var trailerUrl: URL? {
+        guard let video = tmdbDetails?.videos?.results.first(where: { $0.isTrailer }) else { return nil }
+        return URL(string: "https://www.youtube.com/watch?v=\(video.key)")
+    }
+    
+    var similarContent: [TmdbMovieResult] {
+        return tmdbDetails?.similar?.results.prefix(10).filter { $0.posterPath != nil } ?? []
+    }
     
     // MARK: - Models
     
@@ -353,7 +366,7 @@ class DetailsViewModel: ObservableObject {
         }
     }
     
-    // MARK: - TMDB Logic (RESTORED SMART MATCH)
+    // MARK: - TMDB Logic (Enhanced with Persistence)
     
     private func fetchTmdbData(title: String, type: String) async {
         let info = TitleNormalizer.parse(rawTitle: title)
@@ -373,9 +386,7 @@ class DetailsViewModel: ObservableObject {
                     if let best = findBestMatch(results: results, targetTitle: info.normalizedTitle, targetYear: info.year) {
                         let details = try await tmdbClient.getTvDetails(id: best.id)
                         await MainActor.run {
-                            self.tmdbDetails = details
-                            if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
-                            if let cast = details.aggregateCredits?.cast { self.cast = cast }
+                            self.applyTmdbData(details)
                         }
                         return
                     }
@@ -384,15 +395,42 @@ class DetailsViewModel: ObservableObject {
                     if let best = findBestMatch(results: results, targetTitle: info.normalizedTitle, targetYear: info.year) {
                         let details = try await tmdbClient.getMovieDetails(id: best.id)
                         await MainActor.run {
-                            self.tmdbDetails = details
-                            if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
-                            if let cast = details.credits?.cast { self.cast = cast }
+                            self.applyTmdbData(details)
                         }
                         return
                     }
                 }
             } catch {
                 print("TMDB Error: \(error)")
+            }
+        }
+    }
+    
+    // NEW: Centralized method to apply and persist TMDB data
+    private func applyTmdbData(_ details: TmdbDetails) {
+        self.tmdbDetails = details
+        
+        // 1. Update UI
+        if let bg = details.backdropPath {
+            self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)")
+        }
+        if let castData = details.aggregateCredits?.cast ?? details.credits?.cast {
+            self.cast = castData
+        }
+        
+        // 2. Persist Poster to Core Data (Phase 1 Fix)
+        if let path = details.posterPath {
+            let fullPosterUrl = "https://image.tmdb.org/t/p/w500\(path)"
+            
+            // Only write if different to minimize Core Data thrashing
+            if self.channel.cover != fullPosterUrl {
+                print("✅ [Details] Updating Persistent Cover for: \(self.channel.title)")
+                self.channel.cover = fullPosterUrl
+                
+                // Save context (Channel lives on ViewContext since it's an @ObservedObject in View)
+                if self.channel.managedObjectContext?.hasChanges == true {
+                    try? self.channel.managedObjectContext?.save()
+                }
             }
         }
     }

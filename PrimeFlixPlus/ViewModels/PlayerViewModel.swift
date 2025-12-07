@@ -242,21 +242,27 @@ class PlayerViewModel: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             query = info.normalizedTitle
         }
         
+        // FIX FOR CONCURRENCY: Create an immutable copy of the query string.
+        // A 'var' cannot be captured in a concurrent closure safely.
+        let finalQuery = query
+        
         Task.detached {
             let info = TitleNormalizer.parse(rawTitle: title)
             
             do {
                 if channel.type == "series" || channel.type == "series_episode" {
-                    let results = try await self.tmdbClient.searchTv(query: query, year: info.year)
-                    if let best = self.findBestMatch(results: results, targetTitle: query) {
+                    // Use finalQuery here
+                    let results = try await self.tmdbClient.searchTv(query: finalQuery, year: info.year)
+                    if let best = self.findBestMatch(results: results, targetTitle: finalQuery) {
                         let details = try await self.tmdbClient.getTvDetails(id: best.id)
                         await MainActor.run {
                             self.updateMetadata(from: details)
                         }
                     }
                 } else {
-                    let results = try await self.tmdbClient.searchMovie(query: query, year: info.year)
-                    if let best = self.findBestMatch(results: results, targetTitle: query) {
+                    // Use finalQuery here
+                    let results = try await self.tmdbClient.searchMovie(query: finalQuery, year: info.year)
+                    if let best = self.findBestMatch(results: results, targetTitle: finalQuery) {
                         let details = try await self.tmdbClient.getMovieDetails(id: best.id)
                         await MainActor.run {
                             self.updateMetadata(from: details)

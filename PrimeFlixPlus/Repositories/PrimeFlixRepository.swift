@@ -328,6 +328,12 @@ class PrimeFlixRepository: ObservableObject {
                 try await performBatchDelete(urls: Array(orphans), playlistUrl: playlistUrl, context: context)
             }
             
+            // MARK: - Movie Poster Enrichment Step (NEW)
+            // Only run if we actually added/updated movies or if it's the very first sync
+            if isFirstTime || !toInsert.isEmpty {
+                await enrichMovies(context: context, playlistUrl: playlistUrl)
+            }
+            
             markCacheAsFresh(for: playlistUrl)
             
         } catch {
@@ -374,6 +380,101 @@ class PrimeFlixRepository: ObservableObject {
                 }
             }
         }.value
+    }
+    
+    // MARK: - Enrichment Logic (NEW)
+    
+    private nonisolated func enrichMovies(context: NSManagedObjectContext, playlistUrl: String) async {
+        await MainActor.run {
+            self.syncStatusMessage = "Enriching Movie Posters..."
+            self.syncStats.currentStage = "Fetching missing covers..."
+        }
+        
+        // 1. Identify candidates (Movies with missing/generic covers)
+        var fetchedCandidates: [NSManagedObjectID] = []
+        
+        await context.perform {
+            let req = NSFetchRequest<Channel>(entityName: "Channel")
+            // Target movies from this playlist
+            // Check for nil cover OR empty string OR if it looks like a generic icon
+            req.predicate = NSPredicate(format: "playlistUrl == %@ AND type == 'movie'", playlistUrl)
+            // Limit to reasonable batch to avoid timeout
+            req.fetchLimit = 2000
+            
+            if let results = try? context.fetch(req) {
+                // Heuristic: If cover is nil, empty, or just a generic Xtream icon ID
+                fetchedCandidates = results.filter { ch in
+                    guard let c = ch.cover, !c.isEmpty else { return true }
+                    return false
+                }.map { $0.objectID }
+            }
+        }
+        
+        // FIX: Freeze mutable array to immutable constant for safe concurrent access
+        let candidates = fetchedCandidates
+        
+        if candidates.isEmpty { return }
+        
+        // 2. Process in batches to respect API limits
+        let batchSize = 10
+        let chunks = stride(from: 0, to: candidates.count, by: batchSize).map {
+            Array(candidates[$0..<min($0 + batchSize, candidates.count)])
+        }
+        
+        for (index, chunk) in chunks.enumerated() {
+            // Update UI occasionally
+            if index % 5 == 0 {
+                let progressMsg = "Enriching Movies (\(index * batchSize)/\(candidates.count))..."
+                await MainActor.run {
+                    self.syncStatusMessage = progressMsg
+                }
+            }
+            
+            await withTaskGroup(of: (NSManagedObjectID, String?).self) { group in
+                for oid in chunk {
+                    group.addTask {
+                        var rawTitle: String = ""
+                        
+                        // Perform on context just to get strings, then release lock
+                        await context.perform {
+                            if let ch = try? context.existingObject(with: oid) as? Channel {
+                                rawTitle = ch.canonicalTitle ?? ch.title
+                            }
+                        }
+                        
+                        if rawTitle.isEmpty { return (oid, nil) }
+                        
+                        // Parse & Search
+                        let info = TitleNormalizer.parse(rawTitle: rawTitle)
+                        if let results = try? await self.tmdbClient.searchMovie(query: info.normalizedTitle, year: info.year) {
+                            if let best = results.first, let path = best.posterPath {
+                                return (oid, "https://image.tmdb.org/t/p/w500\(path)")
+                            }
+                        }
+                        return (oid, nil)
+                    }
+                }
+                
+                // Collect results and save
+                var updates: [(NSManagedObjectID, String)] = []
+                for await (oid, newCover) in group {
+                    if let cover = newCover {
+                        updates.append((oid, cover))
+                    }
+                }
+                
+                if !updates.isEmpty {
+                    await context.perform {
+                        for (oid, cover) in updates {
+                            if let ch = try? context.existingObject(with: oid) as? Channel {
+                                ch.cover = cover
+                            }
+                        }
+                        try? context.save()
+                    }
+                }
+            }
+        }
     }
     
     // MARK: - Helpers

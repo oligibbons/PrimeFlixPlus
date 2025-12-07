@@ -1,3 +1,5 @@
+// oligibbons/primeflixplus/PrimeFlixPlus-87ed36e89476dd94828b2fb759896cdbd9a22d84/PrimeFlixPlus/UI/DetailsView.swift
+
 import SwiftUI
 
 struct DetailsView: View {
@@ -16,7 +18,7 @@ struct DetailsView: View {
     @FocusState private var focusedField: FocusField?
     
     enum FocusField: Hashable {
-        case play, favorite, version, season(Int), episode(String)
+        case play, favorite, version, season(Int), episode(String), cast, similar
     }
     
     var body: some View {
@@ -50,7 +52,7 @@ struct DetailsView: View {
             }
         }
         .onExitCommand { onBack() }
-        // --- SHEET 1: Episode Version Picker (Chillio Feature) ---
+        // --- SHEET 1: Episode Version Picker ---
         .confirmationDialog(
             "Select Version",
             isPresented: $viewModel.showEpisodeVersionPicker,
@@ -140,7 +142,6 @@ struct DetailsView: View {
                         .lineLimit(2)
                         .shadow(color: .black.opacity(0.8), radius: 10, x: 0, y: 5)
                     
-                    // Restored: Metadata Row (Quality, Rating, Year)
                     metadataRow
                     
                     Text(viewModel.tmdbDetails?.overview ?? "No synopsis available.")
@@ -159,16 +160,22 @@ struct DetailsView: View {
                     .padding(.horizontal, 80)
                     .focusSection()
                 
-                // --- Top-Level Version Selector (Restored for Movies) ---
+                // --- Top-Level Version Selector ---
                 if viewModel.availableVersions.count > 1 {
                     versionSelector
                         .padding(.horizontal, 80)
                         .focusSection()
                 }
                 
-                // --- Cast Rail (Restored) ---
+                // --- Cast Rail ---
                 if !viewModel.cast.isEmpty {
                     castRail
+                        .focusSection()
+                }
+                
+                // --- Similar Content Rail (NEW) ---
+                if !viewModel.similarContent.isEmpty {
+                    similarContentRail
                         .focusSection()
                 }
                 
@@ -221,13 +228,11 @@ struct DetailsView: View {
     
     private var actionButtons: some View {
         HStack(spacing: 30) {
-            // Play Button (Smart Logic)
+            // Play Button
             Button(action: {
                 if let target = viewModel.smartPlayTarget {
-                    // Series: Play Smart Target (Triggers Version Picker)
                     viewModel.onPlayEpisodeClicked(target)
                 } else {
-                    // Movie: Play Selected Version
                     if viewModel.availableVersions.count > 1 {
                         viewModel.showVersionSelector = true
                     } else {
@@ -318,6 +323,31 @@ struct DetailsView: View {
         }
     }
     
+    // NEW: "You Might Also Like" Rail
+    private var similarContentRail: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("You Might Also Like")
+                .font(CinemeltTheme.fontTitle(32))
+                .foregroundColor(CinemeltTheme.cream)
+                .padding(.leading, 80)
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 40) {
+                    ForEach(viewModel.similarContent) { item in
+                        SimplePosterCard(
+                            title: item.title,
+                            posterPath: item.posterPath
+                        )
+                        // In future updates, this could trigger a search or navigation
+                        .focusable(true)
+                    }
+                }
+                .padding(.horizontal, 80)
+                .padding(.bottom, 20)
+            }
+        }
+    }
+    
     private var seriesContent: some View {
         VStack(alignment: .leading, spacing: 25) {
             // Season Selector
@@ -350,7 +380,6 @@ struct DetailsView: View {
                 LazyHStack(spacing: 50) {
                     ForEach(viewModel.displayedEpisodes) { ep in
                         Button(action: {
-                            // Smart Action: Trigger Version Picker via ViewModel
                             viewModel.onPlayEpisodeClicked(ep)
                         }) {
                             EpisodeCard(episode: ep)
@@ -370,5 +399,65 @@ struct DetailsView: View {
         let h = minutes / 60
         let m = minutes % 60
         return h > 0 ? "\(h)h \(m)m" : "\(m)m"
+    }
+}
+
+// MARK: - Helper Views
+
+// A lightweight card for "Similar Content" items (No Channel entity required)
+struct SimplePosterCard: View {
+    let title: String
+    let posterPath: String?
+    
+    @FocusState private var isFocused: Bool
+    
+    private let width: CGFloat = 160
+    private let height: CGFloat = 240
+    
+    var body: some View {
+        Button(action: {
+            // Placeholder action for now
+            print("Selected similar content: \(title)")
+        }) {
+            ZStack(alignment: .bottom) {
+                // Image
+                if let path = posterPath {
+                    AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w300\(path)")) { img in
+                        img.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Rectangle().fill(Color.white.opacity(0.1))
+                    }
+                    .frame(width: width, height: height)
+                    .clipped()
+                } else {
+                    Rectangle().fill(Color.gray.opacity(0.3))
+                        .frame(width: width, height: height)
+                }
+                
+                // Focus Overlay
+                if isFocused {
+                    LinearGradient(
+                        colors: [.clear, CinemeltTheme.accent.opacity(0.8)],
+                        startPoint: .center,
+                        endPoint: .bottom
+                    )
+                    .transition(.opacity)
+                    
+                    Text(title)
+                        .font(CinemeltTheme.fontBody(18))
+                        .foregroundColor(.black)
+                        .lineLimit(2)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .cornerRadius(12)
+            .frame(width: width, height: height)
+        }
+        .buttonStyle(.card)
+        .focused($isFocused)
+        .scaleEffect(isFocused ? 1.1 : 1.0)
+        .shadow(color: isFocused ? CinemeltTheme.accent.opacity(0.5) : .black.opacity(0.3), radius: isFocused ? 20 : 5)
+        .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isFocused)
     }
 }
