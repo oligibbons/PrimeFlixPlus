@@ -42,6 +42,7 @@ class DetailsViewModel: ObservableObject {
     private let tmdbClient = TmdbClient()
     private let xtreamClient = XtreamClient()
     private var repository: PrimeFlixRepository?
+    private let settings = SettingsViewModel()
     
     // --- Internal Storage ---
     private var tmdbEpisodes: [Int: [TmdbEpisode]] = [:]
@@ -100,7 +101,7 @@ class DetailsViewModel: ObservableObject {
         // 1. Fetch Versions (Background)
         await fetchVersions()
         
-        // 2. Fetch TMDB Data
+        // 2. Fetch TMDB Data (With Fuzzy Fallback)
         await fetchTmdbData(title: title, type: type)
         
         // 3. Fetch Series Data (if applicable)
@@ -117,7 +118,7 @@ class DetailsViewModel: ObservableObject {
         guard let repo = repository else { return }
         let oid = channel.objectID
         
-        // FIX: Use Task.detached + performAndWait to avoid compiler ambiguity and ensure Void inference issues are gone.
+        // Explicitly typed Task to avoid compiler ambiguity
         let versionIDs: [NSManagedObjectID] = await Task.detached(priority: .userInitiated) {
             let context = repo.container.newBackgroundContext()
             return context.performAndWait {
@@ -129,10 +130,9 @@ class DetailsViewModel: ObservableObject {
             }
         }.value
         
-        // Re-fetch on main thread for UI usage
         self.availableVersions = versionIDs.compactMap { try? repo.container.viewContext.existingObject(with: $0) as? Channel }
         
-        // Default selection logic
+        // Pick best version logic can go here if needed, default to first for now
         if self.selectedVersion == nil {
             self.selectedVersion = self.availableVersions.first ?? self.channel
         }
@@ -143,24 +143,26 @@ class DetailsViewModel: ObservableObject {
         self.showVersionSelector = false
     }
     
-    // MARK: - Series Aggregation Engine (Chillio Logic)
+    // MARK: - Series Aggregation Engine (Fixed Sorting)
     
     private func fetchAndAggregateEpisodes() async {
-        // Use availableVersions (populated above) to get all sources
         let sources = availableVersions.isEmpty ? [channel] : availableVersions
+        let preferredLang = settings.preferredLanguage.lowercased()
         
-        // Struct to hold data we need to pass into the TaskGroup, to avoid passing NSManagedObjects
+        // Helper struct for TaskGroup
         struct SourceVariant {
             let seriesId: String
             let playlistUrl: String
             let quality: String
+            let title: String
         }
         
         let variants = sources.compactMap {
             SourceVariant(
                 seriesId: $0.seriesId ?? "",
                 playlistUrl: $0.playlistUrl,
-                quality: $0.quality ?? "Source"
+                quality: $0.quality ?? "Source",
+                title: $0.canonicalTitle ?? $0.title
             )
         }
         
@@ -195,7 +197,6 @@ class DetailsViewModel: ObservableObject {
             }
         }
         
-        // Group & Sort
         var newAggregation: [String: [EpisodeVersion]] = [:]
         var discoveredSeasons = Set<Int>()
         
@@ -206,13 +207,26 @@ class DetailsViewModel: ObservableObject {
             }
         }
         
-        // Heuristic Sort: 4K > 1080p > 720p
+        // FIX: Sort versions by LANGUAGE Priority first, then QUALITY
         for (key, _) in newAggregation {
             newAggregation[key]?.sort { v1, v2 in
+                // 1. Language Check
                 let q1 = v1.qualityLabel.lowercased()
                 let q2 = v2.qualityLabel.lowercased()
+                
+                let v1MatchesLang = q1.contains(preferredLang)
+                let v2MatchesLang = q2.contains(preferredLang)
+                
+                if v1MatchesLang && !v2MatchesLang { return true }
+                if !v1MatchesLang && v2MatchesLang { return false }
+                
+                // 2. Quality Check (4K > 1080p > 720p)
                 if q1.contains("4k") && !q2.contains("4k") { return true }
-                if q1.contains("1080") && !q2.contains("1080") && !q2.contains("4k") { return true }
+                if q2.contains("4k") && !q1.contains("4k") { return false }
+                
+                if q1.contains("1080") && !q2.contains("1080") { return true }
+                if q2.contains("1080") && !q1.contains("1080") { return false }
+                
                 return false
             }
         }
@@ -228,7 +242,6 @@ class DetailsViewModel: ObservableObject {
     func selectSeason(_ season: Int) async {
         self.selectedSeason = season
         
-        // Fetch Metadata if missing
         if tmdbEpisodes[season] == nil, let tmdbId = tmdbDetails?.id {
             if let seasonDetails = try? await tmdbClient.getTvSeason(tvId: tmdbId, seasonNumber: season) {
                 tmdbEpisodes[season] = seasonDetails.episodes
@@ -268,6 +281,7 @@ class DetailsViewModel: ObservableObject {
     func onPlayEpisodeClicked(_ episode: MergedEpisode) {
         if episode.versions.count == 1 {
             self.episodeToPlay = episode
+            // Trigger playback handled by view via binding to episodeToPlay
         } else {
             self.episodeToPlay = episode
             self.showEpisodeVersionPicker = true
@@ -291,7 +305,6 @@ class DetailsViewModel: ObservableObject {
         guard let repo = repository else { return }
         let allUrls = displayedEpisodes.flatMap { $0.versions.map { $0.url } }
         
-        // FIX: Use Task.detached + performAndWait
         let progressMap: [String: Double] = await Task.detached(priority: .background) {
             let context = repo.container.newBackgroundContext()
             return context.performAndWait {
@@ -326,29 +339,66 @@ class DetailsViewModel: ObservableObject {
         }
     }
     
-    // MARK: - TMDB & Helpers
+    // MARK: - TMDB Logic (RESTORED SMART MATCH)
     
     private func fetchTmdbData(title: String, type: String) async {
         let info = TitleNormalizer.parse(rawTitle: title)
-        do {
-            if type == "series" {
-                let results = try await tmdbClient.searchTv(query: info.normalizedTitle, year: info.year)
-                if let best = results.first {
-                    let details = try await tmdbClient.getTvDetails(id: best.id)
-                    self.tmdbDetails = details
-                    if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
-                    if let cast = details.aggregateCredits?.cast { self.cast = cast }
+        
+        // Try strict normalized title first, then raw title if that fails
+        let queries = [info.normalizedTitle, title]
+        
+        for q in queries {
+            do {
+                if type == "series" {
+                    let results = try await tmdbClient.searchTv(query: q, year: info.year)
+                    if let best = findBestMatch(results: results, targetTitle: info.normalizedTitle, targetYear: info.year) {
+                        let details = try await tmdbClient.getTvDetails(id: best.id)
+                        await MainActor.run {
+                            self.tmdbDetails = details
+                            if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
+                            if let cast = details.aggregateCredits?.cast { self.cast = cast }
+                        }
+                        return // Success, stop searching
+                    }
+                } else {
+                    let results = try await tmdbClient.searchMovie(query: q, year: info.year)
+                    if let best = findBestMatch(results: results, targetTitle: info.normalizedTitle, targetYear: info.year) {
+                        let details = try await tmdbClient.getMovieDetails(id: best.id)
+                        await MainActor.run {
+                            self.tmdbDetails = details
+                            if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
+                            if let cast = details.credits?.cast { self.cast = cast }
+                        }
+                        return // Success
+                    }
                 }
-            } else {
-                let results = try await tmdbClient.searchMovie(query: info.normalizedTitle, year: info.year)
-                if let best = results.first {
-                    let details = try await tmdbClient.getMovieDetails(id: best.id)
-                    self.tmdbDetails = details
-                    if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
-                    if let cast = details.credits?.cast { self.cast = cast }
-                }
+            } catch {
+                print("TMDB Error: \(error)")
             }
-        } catch { print("Meta Error: \(error)") }
+        }
+    }
+    
+    // Fuzzy Matcher to ensure we don't miss metadata due to "4K" or "DE" suffixes
+    private func findBestMatch<T: Identifiable>(results: [T], targetTitle: String, targetYear: String?) -> T? {
+        let target = targetTitle.lowercased()
+        
+        return results.first { result in
+            var title = ""
+            var date: String? = nil
+            
+            if let m = result as? TmdbMovieResult { title = m.title; date = m.releaseDate }
+            if let s = result as? TmdbTvResult { title = s.name; date = s.firstAirDate }
+            
+            let t = title.lowercased()
+            
+            // Year Check (Strict)
+            if let tYear = targetYear, let rYear = date?.prefix(4) {
+                if tYear != rYear { return false }
+            }
+            
+            // Title Check (Loose - Fuzzy enough to catch substring matches)
+            return t == target || t.contains(target) || target.contains(t)
+        }
     }
     
     private func checkWatchHistory() {

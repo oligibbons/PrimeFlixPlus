@@ -64,42 +64,49 @@ class ChannelRepository {
         return matches
     }
 
-    // MARK: - Versioning Logic (UPGRADED for Chillio Experience)
+    // MARK: - Versioning Logic (UPGRADED: Fuzzy Matching)
     
-    /// Finds all channels that represent the same content as the target channel.
-    /// Used to group "Severance 4K", "Severance 1080p", etc.
+    /// Finds all channels that represent the same content.
+    /// FIX: Now uses Fuzzy Matching to group "Severance", "Severance DE", "Severance 4K".
     func getVersions(for channel: Channel) -> [Channel] {
         // Strategy 1: Series ID Match (High Confidence)
-        // If the provider assigns a Series ID (from Xtream), rely on that to find duplicates.
         if let seriesId = channel.seriesId, !seriesId.isEmpty, seriesId != "0" {
             let request = NSFetchRequest<Channel>(entityName: "Channel")
-            // We only want versions of the same TYPE (Series matches Series)
             request.predicate = NSPredicate(format: "seriesId == %@ AND type == %@", seriesId, channel.type)
             if let matches = try? context.fetch(request), !matches.isEmpty {
                 return matches
             }
         }
         
-        // Strategy 2: Normalized Title Match (Medium Confidence)
-        // Fallback for Movies or Series without IDs.
+        // Strategy 2: Fuzzy Title Match (Medium Confidence)
         let rawSource = channel.canonicalTitle ?? channel.title
         let info = TitleNormalizer.parse(rawTitle: rawSource)
         let targetTitle = info.normalizedTitle.lowercased()
         
-        // Optimization: Use prefix to narrow down SQL search, then filter in memory
-        // This avoids fetching the entire database.
-        let prefix = String(targetTitle.prefix(4))
+        // Optimization: Fetch candidates with same starting letter to avoid full DB scan
+        let prefix = String(targetTitle.prefix(1))
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "type == %@ AND title BEGINSWITH[cd] %@", channel.type, prefix)
-        request.fetchLimit = 200 // Cap to prevent memory issues
+        request.fetchLimit = 500
         
         guard let candidates = try? context.fetch(request) else { return [channel] }
         
-        // Strict In-Memory Filter using TitleNormalizer logic
+        // Filter using Levenshtein Distance (Similarity > 0.5)
+        // We relaxed the threshold to catch "Severance" vs "Severance [DE]"
         let variants = candidates.filter { candidate in
             let candRaw = candidate.canonicalTitle ?? candidate.title
-            let candidateInfo = TitleNormalizer.parse(rawTitle: candRaw)
-            return candidateInfo.normalizedTitle.lowercased() == targetTitle
+            let candInfo = TitleNormalizer.parse(rawTitle: candRaw)
+            let candTitle = candInfo.normalizedTitle.lowercased()
+            
+            // Exact match
+            if candTitle == targetTitle { return true }
+            
+            // Contains match (e.g. "Severance" inside "Severance 4K")
+            if candTitle.contains(targetTitle) || targetTitle.contains(candTitle) { return true }
+            
+            // Fuzzy match (handle typos or minor differences)
+            let score = TitleNormalizer.similarity(between: targetTitle, and: candTitle)
+            return score > 0.5
         }
         
         return variants.isEmpty ? [channel] : variants
