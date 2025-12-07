@@ -76,6 +76,12 @@
 		D2AC8B392EE49D7B00D440C3 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B382EE49D7B00D440C3 /* OnboardingView.swift */; };
 		D2AC8B3B2EE4A03100D440C3 /* TasteProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B3A2EE4A03100D440C3 /* TasteProfile.swift */; };
 		D2AC8B3D2EE4A05000D440C3 /* TasteItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B3C2EE4A05000D440C3 /* TasteItem.swift */; };
+		D2AC8B402EE6253800D440C3 /* RecommendationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B3F2EE6253800D440C3 /* RecommendationService.swift */; };
+		D2AC8B422EE6255700D440C3 /* VersioningService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B412EE6255700D440C3 /* VersioningService.swift */; };
+		D2AC8B442EE625AF00D440C3 /* NextEpisodeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B432EE625AF00D440C3 /* NextEpisodeService.swift */; };
+		D2AC8B462EE625D000D440C3 /* SyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B452EE625D000D440C3 /* SyncEngine.swift */; };
+		D2AC8B482EE6265700D440C3 /* EnrichmentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B472EE6265700D440C3 /* EnrichmentService.swift */; };
+		D2AC8B4A2EE6267900D440C3 /* VLCPlayerEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B492EE6267900D440C3 /* VLCPlayerEngine.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -185,6 +191,12 @@
 		D2AC8B382EE49D7B00D440C3 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		D2AC8B3A2EE4A03100D440C3 /* TasteProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasteProfile.swift; sourceTree = "<group>"; };
 		D2AC8B3C2EE4A05000D440C3 /* TasteItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasteItem.swift; sourceTree = "<group>"; };
+		D2AC8B3F2EE6253800D440C3 /* RecommendationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecommendationService.swift; sourceTree = "<group>"; };
+		D2AC8B412EE6255700D440C3 /* VersioningService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersioningService.swift; sourceTree = "<group>"; };
+		D2AC8B432EE625AF00D440C3 /* NextEpisodeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextEpisodeService.swift; sourceTree = "<group>"; };
+		D2AC8B452EE625D000D440C3 /* SyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncEngine.swift; sourceTree = "<group>"; };
+		D2AC8B472EE6265700D440C3 /* EnrichmentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentService.swift; sourceTree = "<group>"; };
+		D2AC8B492EE6267900D440C3 /* VLCPlayerEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLCPlayerEngine.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -241,6 +253,7 @@
 		D292D6252EDF458100E8845A /* PrimeFlixPlus */ = {
 			isa = PBXGroup;
 			children = (
+				D2AC8B3E2EE6251C00D440C3 /* Services */,
 				D2AC8B1B2EE27D1E00D440C3 /* TVVLCKit.xcframework */,
 				D2AC8B012EE14D5C00D440C3 /* Fonts */,
 				D292D67A2EDF4D9100E8845A /* UI */,
@@ -409,6 +422,19 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		D2AC8B3E2EE6251C00D440C3 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				D2AC8B3F2EE6253800D440C3 /* RecommendationService.swift */,
+				D2AC8B412EE6255700D440C3 /* VersioningService.swift */,
+				D2AC8B432EE625AF00D440C3 /* NextEpisodeService.swift */,
+				D2AC8B452EE625D000D440C3 /* SyncEngine.swift */,
+				D2AC8B472EE6265700D440C3 /* EnrichmentService.swift */,
+				D2AC8B492EE6267900D440C3 /* VLCPlayerEngine.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -550,6 +576,7 @@
 			files = (
 				D292D6722EDF4B7B00E8845A /* HomeViewModel.swift in Sources */,
 				D2AC8B3B2EE4A03100D440C3 /* TasteProfile.swift in Sources */,
+				D2AC8B462EE625D000D440C3 /* SyncEngine.swift in Sources */,
 				D2AC8AF62EE0ADE900D440C3 /* SearchViewModel.swift in Sources */,
 				D2AC8AFE2EE1475700D440C3 /* GlassTextField.swift in Sources */,
 				D2AC8B112EE22EAF00D440C3 /* ManageCategoriesView.swift in Sources */,
@@ -558,6 +585,7 @@
 				D292D6772EDF4C3300E8845A /* HomeComponents.swift in Sources */,
 				D292D6642EDF49C900E8845A /* Programme.swift in Sources */,
 				D292D6522EDF45C000E8845A /* DataSource.swift in Sources */,
+				D2AC8B482EE6265700D440C3 /* EnrichmentService.swift in Sources */,
 				D2AC8B3D2EE4A05000D440C3 /* TasteItem.swift in Sources */,
 				D2AC8AFA2EE1419400D440C3 /* CinemeltStyle.swift in Sources */,
 				D2AC8B2F2EE4828C00D440C3 /* NetworkSpeedTester.swift in Sources */,
@@ -573,12 +601,14 @@
 				D228AD112EDF6682007C6114 /* AddPlaylistViewModel.swift in Sources */,
 				D292D6672EDF4A0800E8845A /* M3UParser.swift in Sources */,
 				D292D6792EDF4C5800E8845A /* XtreamClient.swift in Sources */,
+				D2AC8B422EE6255700D440C3 /* VersioningService.swift in Sources */,
 				D292D6752EDF4C1800E8845A /* MovieCard.swift in Sources */,
 				D292D65A2EDF46EA00E8845A /* WatchProgress.swift in Sources */,
 				D2AC8B092EE1FAE000D440C3 /* ContinueWatchingViewModel.swift in Sources */,
 				D292D6542EDF45FE00E8845A /* XtreamModels.swift in Sources */,
 				D2AC8B352EE49CD300D440C3 /* UserPreferencesRepository.swift in Sources */,
 				D2AC8AFC2EE141AE00D440C3 /* SidebarView.swift in Sources */,
+				D2AC8B442EE625AF00D440C3 /* NextEpisodeService.swift in Sources */,
 				D228AD172EDF7311007C6114 /* SyncStatusOverlay.swift in Sources */,
 				D228AD1B2EDF7952007C6114 /* UnsafeSession.swift in Sources */,
 				D228AD152EDF67FB007C6114 /* NeonTextField.swift in Sources */,
@@ -590,6 +620,7 @@
 				D2AC8B372EE49D5C00D440C3 /* OnboardingViewModel.swift in Sources */,
 				D292D6272EDF458100E8845A /* PrimeFlixPlusApp.swift in Sources */,
 				D2AC8B392EE49D7B00D440C3 /* OnboardingView.swift in Sources */,
+				D2AC8B4A2EE6267900D440C3 /* VLCPlayerEngine.swift in Sources */,
 				D2AC8B0D2EE1FB2F00D440C3 /* FavoritesViewModel.swift in Sources */,
 				D2AC8B0F2EE1FB4700D440C3 /* FavoritesView.swift in Sources */,
 				D2AC8B002EE148C100D440C3 /* EpisodeCard.swift in Sources */,
@@ -599,6 +630,7 @@
 				D228AD1D2EDFA8E3007C6114 /* DetailsViewModel.swift in Sources */,
 				D2AC8B332EE488ED00D440C3 /* VPNWarningView.swift in Sources */,
 				D2AC8B2D2EE481D100D440C3 /* NetworkSpeedTestView.swift in Sources */,
+				D2AC8B402EE6253800D440C3 /* RecommendationService.swift in Sources */,
 				D292D67E2EDF568C00E8845A /* SettingsViewModel.swift in Sources */,
 				D2AC8B312EE486E700D440C3 /* VPNDetector.swift in Sources */,
 				D228AD1F2EDFA961007C6114 /* DetailsView.swift in Sources */,

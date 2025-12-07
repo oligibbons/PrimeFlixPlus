@@ -67,15 +67,16 @@ struct DetailsView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        // --- SHEET 2: Top-Level Version Selector (For Movies) ---
+        // --- SHEET 2: Top-Level Version Selector (Fixed) ---
         .confirmationDialog(
             "Select Quality",
             isPresented: $viewModel.showVersionSelector,
             titleVisibility: .visible
         ) {
-            ForEach(viewModel.availableVersions, id: \.url) { version in
-                Button(version.title) {
-                    viewModel.userSelectedVersion(version)
+            // Updated to handle VersionOption struct
+            ForEach(viewModel.availableVersions) { option in
+                Button(option.label) {
+                    viewModel.userSelectedVersion(option.channel)
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -274,8 +275,11 @@ struct DetailsView: View {
                 Image(systemName: "square.stack.3d.up")
                 Text("Versions (\(viewModel.availableVersions.count))")
                 if let selected = viewModel.selectedVersion {
-                    Text("- \(selected.quality ?? "Unknown")")
-                        .foregroundColor(.gray)
+                    // Find the label for the selected version
+                    if let option = viewModel.availableVersions.first(where: { $0.id == selected.url }) {
+                         Text("- \(option.label)")
+                            .foregroundColor(.gray)
+                    }
                 }
             }
             .font(CinemeltTheme.fontBody(22))
@@ -323,7 +327,6 @@ struct DetailsView: View {
         }
     }
     
-    // NEW: "You Might Also Like" Rail
     private var similarContentRail: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("You Might Also Like")
@@ -338,7 +341,6 @@ struct DetailsView: View {
                             title: item.title,
                             posterPath: item.posterPath
                         )
-                        // In future updates, this could trigger a search or navigation
                         .focusable(true)
                     }
                 }
@@ -404,7 +406,6 @@ struct DetailsView: View {
 
 // MARK: - Helper Views
 
-// A lightweight card for "Similar Content" items (No Channel entity required)
 struct SimplePosterCard: View {
     let title: String
     let posterPath: String?
@@ -416,7 +417,6 @@ struct SimplePosterCard: View {
     
     var body: some View {
         Button(action: {
-            // Placeholder action for now
             print("Selected similar content: \(title)")
         }) {
             ZStack(alignment: .bottom) {
