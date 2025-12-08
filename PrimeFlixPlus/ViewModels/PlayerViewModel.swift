@@ -30,9 +30,11 @@ class PlayerViewModel: ObservableObject {
     @Published var currentUrl: String = ""
     @Published var playbackRate: Float = 1.0
     @Published var qualityBadge: String = "HD"
+    
+    // Scrubbing State
     @Published var isScrubbing: Bool = false
     
-    // Metadata
+    // Metadata (Enriched)
     @Published var videoOverview: String = ""
     @Published var videoYear: String = ""
     @Published var videoRating: String = ""
@@ -56,10 +58,14 @@ class PlayerViewModel: ObservableObject {
     // Internal
     private var repository: PrimeFlixRepository?
     private let tmdbClient = TmdbClient()
+    private let omdbClient = OmdbClient()
     private var currentChannel: Channel?
     private var cancellables = Set<AnyCancellable>()
     private var controlHideTimer: Timer?
     private var autoPlayTimer: Timer?
+    
+    // Anti-Rubberband Logic
+    private var isSeekingCommit: Bool = false
     private var lastSavedTime: Double = 0
     
     // MARK: - Configuration
@@ -83,10 +89,12 @@ class PlayerViewModel: ObservableObject {
         playerEngine.load(url: channel.url, isLive: channel.type == "live", is4K: channel.quality?.contains("4K") ?? false)
         
         // Metadata & Logic
-        fetchExtendedMetadata()
-        loadAlternatives()
-        Task { await checkForNextEpisode() }
+        Task {
+            await fetchRichMetadata(channel: channel)
+            await checkForNextEpisode()
+        }
         
+        loadAlternatives()
         triggerControls(forceShow: true)
     }
     
@@ -100,7 +108,11 @@ class PlayerViewModel: ObservableObject {
         playerEngine.$currentTime
             .receive(on: RunLoop.main)
             .sink { [weak self] time in
-                guard let self = self, !self.isScrubbing else { return }
+                guard let self = self else { return }
+                
+                // CRITICAL: Ignore engine time if user is scrubbing OR we just committed a seek
+                if self.isScrubbing || self.isSeekingCommit { return }
+                
                 self.currentTime = time
                 
                 // Save Progress periodically
@@ -149,32 +161,59 @@ class PlayerViewModel: ObservableObject {
     // MARK: - Actions
     
     func togglePlayPause() {
-        if playerEngine.isPlaying {
-            playerEngine.pause()
-        } else {
-            playerEngine.play()
-            // Dismiss overlays
-            showMiniDetails = false
-            showTrackSelection = false
-            showVersionSelection = false
-        }
+        playerEngine.togglePlayPause()
         triggerControls()
     }
     
-    func seekForward() { playerEngine.seek(to: currentTime + 10); triggerControls() }
-    func seekBackward() { playerEngine.seek(to: currentTime - 10); triggerControls() }
-    
-    func startScrubbing(translation: CGFloat, screenWidth: CGFloat) {
-        isScrubbing = true
-        triggerControls(forceShow: true)
-        let percent = Double(translation / screenWidth)
-        let delta = max(120.0, duration * 0.1) * percent
-        self.currentTime = max(0, min(currentTime + delta, duration))
+    func seekForward() {
+        let newTime = currentTime + 10
+        startScrubbing(translation: 0, screenWidth: 1) // Just to trigger UI state if needed
+        currentTime = newTime
+        endScrubbing()
     }
     
+    func seekBackward() {
+        let newTime = currentTime - 10
+        startScrubbing(translation: 0, screenWidth: 1)
+        currentTime = newTime
+        endScrubbing()
+    }
+    
+    /// Starts local UI scrubbing without seeking engine yet
+    func startScrubbing(translation: CGFloat, screenWidth: CGFloat) {
+        if !isScrubbing {
+            isScrubbing = true
+        }
+        triggerControls(forceShow: true)
+        
+        if screenWidth > 1 {
+            let percent = Double(translation / screenWidth)
+            // Dynamic Scrub Speed: Longer videos scrub faster
+            let totalDuration = duration > 0 ? duration : 3600
+            let sensitivity = max(120.0, totalDuration * 0.15)
+            
+            let delta = sensitivity * percent
+            self.currentTime = max(0, min(currentTime + delta, duration))
+        }
+    }
+    
+    /// Commits the seek
     func endScrubbing() {
         isScrubbing = false
+        isSeekingCommit = true // Lock incoming time updates
+        
         playerEngine.seek(to: currentTime)
+        
+        // Cooldown: Ignore engine time updates for 1.5 seconds to prevent "Rubber Banding"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            self?.isSeekingCommit = false
+        }
+        
+        // Ensure play resumes if it was just a seek action
+        if !playerEngine.isPlaying {
+            // Optional: Auto-resume on seek? Usually user expects this.
+            // playerEngine.play()
+        }
     }
     
     func setPlaybackSpeed(_ speed: Float) {
@@ -204,6 +243,64 @@ class PlayerViewModel: ObservableObject {
         autoPlayTimer?.invalidate()
     }
     
+    // MARK: - Smart Metadata Fetcher
+    
+    private func fetchRichMetadata(channel: Channel) async {
+        let info = TitleNormalizer.parse(rawTitle: channel.canonicalTitle ?? channel.title)
+        let isSeries = (channel.type == "series" || channel.type == "series_episode")
+        
+        if let cover = channel.cover, let url = URL(string: cover) { self.posterImage = url }
+        if let ov = channel.overview, !ov.isEmpty { self.videoOverview = ov }
+        
+        guard let match = await tmdbClient.findBestMatch(
+            title: info.normalizedTitle,
+            year: info.year,
+            type: isSeries ? "series" : "movie"
+        ) else { return }
+        
+        if isSeries {
+            let seasonNum = Int(channel.season)
+            let episodeNum = Int(channel.episode)
+            
+            if seasonNum > 0 {
+                if let seasonData = try? await tmdbClient.getTvSeason(tvId: match.id, seasonNumber: seasonNum) {
+                    if let ep = seasonData.episodes.first(where: { $0.episodeNumber == episodeNum }) {
+                        await MainActor.run {
+                            self.videoTitle = "S\(seasonNum) E\(episodeNum) - \(ep.name)"
+                            self.videoOverview = ep.overview ?? self.videoOverview
+                            self.videoRating = String(format: "%.1f", ep.voteAverage ?? 0.0)
+                            if let still = ep.stillPath {
+                                self.posterImage = URL(string: "https://image.tmdb.org/t/p/original\(still)")
+                            } else if let poster = match.poster {
+                                self.posterImage = URL(string: "https://image.tmdb.org/t/p/w500\(poster)")
+                            }
+                        }
+                        return
+                    }
+                }
+            }
+            
+            if let details = try? await tmdbClient.getTvDetails(id: match.id) {
+                await MainActor.run {
+                    self.videoYear = String(details.firstAirDate?.prefix(4) ?? "")
+                    if self.videoOverview.isEmpty { self.videoOverview = details.overview ?? "" }
+                }
+            }
+            
+        } else {
+            if let details = try? await tmdbClient.getMovieDetails(id: match.id) {
+                await MainActor.run {
+                    self.videoOverview = details.overview ?? self.videoOverview
+                    self.videoYear = String(details.releaseDate?.prefix(4) ?? "")
+                    self.videoRating = String(format: "%.1f", details.voteAverage ?? 0.0)
+                    if let backdrop = details.backdropPath {
+                        self.posterImage = URL(string: "https://image.tmdb.org/t/p/original\(backdrop)")
+                    }
+                }
+            }
+        }
+    }
+    
     // MARK: - Logic Helpers
     
     func triggerControls(forceShow: Bool = false) {
@@ -223,7 +320,6 @@ class PlayerViewModel: ObservableObject {
     func checkForNextEpisode() async {
         guard let current = currentChannel, let service = nextEpisodeService else { return }
         
-        // Use the new Service to find the next episode
         if let next = await Task(priority: .userInitiated, operation: {
             return service.findNextEpisode(currentChannel: current)
         }).value {
@@ -249,18 +345,6 @@ class PlayerViewModel: ObservableObject {
         
         if (pos > 10000 && dur > 0) || channel.type == "live" {
             repo.saveProgress(url: channel.url, pos: pos, dur: dur)
-        }
-    }
-    
-    private func fetchExtendedMetadata() {
-        guard let channel = currentChannel else { return }
-        if let cover = channel.cover, let url = URL(string: cover) { self.posterImage = url }
-        
-        let _ = TitleNormalizer.parse(rawTitle: channel.title)
-        
-        // FIX: Corrected type name (removed "TmdbClient.")
-        Task.detached {
-            let _: [TmdbTrendingItem] = []
         }
     }
     

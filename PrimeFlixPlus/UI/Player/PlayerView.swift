@@ -9,20 +9,18 @@ struct PlayerView: View {
     @StateObject private var viewModel = PlayerViewModel()
     @EnvironmentObject var repository: PrimeFlixRepository
     
-    // MARK: - Focus State
-    // Public so sub-overlays can bind to it
+    // Focus Management
     enum PlayerFocus: Hashable {
-        case videoSurface       // The "Playhead" / Scrubbing Zone
-        case upperControls      // Top Bar Buttons
-        case miniDetails        // Swipe-Down overlay
-        case autoPlayOverlay    // Timer Overlay
-        case trackSelection     // Audio/Subtitle selection
-        case versionSelection   // Quality selection
+        case videoSurface
+        case upperControls
+        case miniDetails
+        case autoPlayOverlay
+        case trackSelection
+        case versionSelection
     }
     
     @FocusState private var focusedField: PlayerFocus?
     
-    // Helper to determine if we should lock standard controls
     private var areOverlaysActive: Bool {
         viewModel.showMiniDetails ||
         viewModel.showAutoPlay ||
@@ -32,27 +30,24 @@ struct PlayerView: View {
     
     var body: some View {
         ZStack {
-            // 0. Background
             Color.black.ignoresSafeArea()
             
             GeometryReader { geo in
                 ZStack {
-                    // 1. Video Surface (Base Layer)
+                    // 1. Video Surface
                     VLCVideoSurface(viewModel: viewModel)
                         .ignoresSafeArea()
                     
-                    // 2. Interaction Layer (Gestures & Focus)
+                    // 2. Interaction Layer
                     interactionLayer(geo: geo)
                 }
             }
             
-            // 3. Status Views (Buffering, Scrubbing, Error)
+            // 3. Status & Overlays
             statusLayers
-            
-            // 4. Overlays
             overlaysLayer
             
-            // 5. Controls (Top/Bottom Bars)
+            // 4. Controls
             if viewModel.showControls && !areOverlaysActive {
                 ControlsOverlayView(
                     viewModel: viewModel,
@@ -72,7 +67,6 @@ struct PlayerView: View {
         }
         .onAppear {
             viewModel.configure(repository: repository, channel: channel)
-            // Force initial focus
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 focusedField = .videoSurface
             }
@@ -86,40 +80,26 @@ struct PlayerView: View {
                 onPlayChannel?(nextChannel)
             }
         }
-        // Auto-focus logic when controls appear/disappear
         .onChange(of: viewModel.showControls) { show in
-            if show && !areOverlaysActive {
-                focusedField = .videoSurface
-            }
-        }
-        // Handle focus navigation to Upper Controls
-        .onChange(of: focusedField) { focus in
-            if focus == .upperControls {
-                viewModel.triggerControls(forceShow: true)
-            }
+            if show && !areOverlaysActive { focusedField = .videoSurface }
         }
     }
-    
-    // MARK: - Subviews & Layers
     
     private func interactionLayer(geo: GeometryProxy) -> some View {
         Color.clear
             .contentShape(Rectangle())
+            // CRITICAL: Always allow focus unless a modal overlay is blocking
             .focusable(!areOverlaysActive)
             .focused($focusedField, equals: .videoSurface)
-            
-            // Gestures
             .background(
                 SiriRemoteSwipeHandler(
                     onPan: { x, y in
                         guard !areOverlaysActive else { return }
-                        
-                        // Horizontal: Scrub
                         if abs(x) > abs(y) {
+                            // Horizontal Scrub
                             viewModel.startScrubbing(translation: x, screenWidth: geo.size.width)
-                        }
-                        // Vertical Down: Show Mini Details
-                        else if y > 50 {
+                        } else if y > 50 {
+                            // Swipe Down for Mini Details
                             withAnimation {
                                 viewModel.showMiniDetails = true
                                 focusedField = .miniDetails
@@ -133,22 +113,16 @@ struct PlayerView: View {
                     }
                 )
             )
-            
-            // D-Pad / Remote Clicks
             .onMoveCommand { direction in
                 guard !areOverlaysActive else { return }
-                
                 viewModel.triggerControls(forceShow: true)
                 
                 switch direction {
                 case .left: viewModel.seekBackward()
                 case .right: viewModel.seekForward()
                 case .up:
-                    if viewModel.showControls {
-                        focusedField = .upperControls
-                    } else {
-                        viewModel.triggerControls(forceShow: true)
-                    }
+                    if viewModel.showControls { focusedField = .upperControls }
+                    else { viewModel.triggerControls(forceShow: true) }
                 case .down:
                     withAnimation {
                         viewModel.showMiniDetails = true
@@ -161,7 +135,6 @@ struct PlayerView: View {
                 if !areOverlaysActive { viewModel.togglePlayPause() }
             }
             .onExitCommand {
-                print("🔙 Menu Pressed on Playhead - Exiting")
                 viewModel.cleanup()
                 onBack()
             }
@@ -174,9 +147,7 @@ struct PlayerView: View {
             ZStack {
                 Color.black.opacity(0.4)
                 VStack(spacing: 20) {
-                    ProgressView()
-                        .tint(CinemeltTheme.accent)
-                        .scaleEffect(2.5)
+                    CinemeltLoadingIndicator()
                     Text("Loading Stream...")
                         .font(CinemeltTheme.fontBody(24))
                         .foregroundColor(CinemeltTheme.cream)
@@ -191,27 +162,34 @@ struct PlayerView: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: 16)
                         .fill(.ultraThinMaterial)
-                        .frame(width: 280, height: 180)
+                        .frame(width: 320, height: 200)
                         .shadow(radius: 20)
                     
-                    AsyncImage(url: URL(string: channel.cover ?? "")) { img in
-                        img.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: { Color.black }
-                    .frame(width: 280, height: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .opacity(0.6)
+                    if let poster = viewModel.posterImage {
+                        AsyncImage(url: poster) { img in
+                            img.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: { Color.black }
+                        .frame(width: 320, height: 200)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .opacity(0.5)
+                    }
                     
-                    Text(PlayerTimeFormatter.string(from: viewModel.currentTime))
-                        .font(CinemeltTheme.fontTitle(40))
-                        .foregroundColor(.white)
-                        .shadow(color: .black, radius: 5)
+                    VStack {
+                        Image(systemName: "arrow.left.and.right.circle.fill")
+                            .font(.largeTitle)
+                            .foregroundColor(CinemeltTheme.accent)
+                        Text(PlayerTimeFormatter.string(from: viewModel.currentTime))
+                            .font(CinemeltTheme.fontTitle(40))
+                            .foregroundColor(.white)
+                            .shadow(color: .black, radius: 5)
+                            .monospacedDigit()
+                    }
                 }
                 .padding(.bottom, 120)
-                .transition(.opacity)
+                .transition(.scale.combined(with: .opacity))
             }
         }
         
-        // Error
         if viewModel.isError {
             errorOverlay
         }
@@ -219,7 +197,6 @@ struct PlayerView: View {
     
     @ViewBuilder
     private var overlaysLayer: some View {
-        // 1. Mini Details
         if viewModel.showMiniDetails {
             MiniDetailsOverlay(
                 viewModel: viewModel,
@@ -232,18 +209,13 @@ struct PlayerView: View {
                 },
                 onClose: {
                     withAnimation { viewModel.showMiniDetails = false }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        focusedField = .videoSurface
-                    }
+                    focusedField = .videoSurface
                 }
             )
-            .transition(.move(edge: .bottom).combined(with: .opacity))
             .zIndex(50)
-            .focusSection()
             .focused($focusedField, equals: .miniDetails)
         }
         
-        // 2. Track Selection
         if viewModel.showTrackSelection {
             TrackSelectionOverlay(
                 viewModel: viewModel,
@@ -253,12 +225,9 @@ struct PlayerView: View {
                 }
             )
             .zIndex(55)
-            .focusSection()
-            .onAppear { focusedField = .trackSelection }
             .focused($focusedField, equals: .trackSelection)
         }
         
-        // 3. Version Selection
         if viewModel.showVersionSelection {
             VersionSelectionOverlay(
                 viewModel: viewModel,
@@ -268,17 +237,12 @@ struct PlayerView: View {
                 }
             )
             .zIndex(56)
-            .focusSection()
-            .onAppear { focusedField = .versionSelection }
             .focused($focusedField, equals: .versionSelection)
         }
         
-        // 4. Auto Play
         if viewModel.showAutoPlay {
             AutoPlayOverlay(viewModel: viewModel)
                 .zIndex(60)
-                .focusSection()
-                .onAppear { focusedField = .autoPlayOverlay }
                 .focused($focusedField, equals: .autoPlayOverlay)
         }
     }
@@ -290,23 +254,17 @@ struct PlayerView: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 80))
                     .foregroundColor(.red)
-                
                 Text("Playback Failed")
                     .font(CinemeltTheme.fontTitle(40))
                     .foregroundColor(CinemeltTheme.cream)
-                
                 Text(viewModel.errorMessage ?? "Unknown Error")
                     .font(CinemeltTheme.fontBody(24))
                     .foregroundColor(.gray)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 60)
-                
                 Button("Close") {
                     viewModel.cleanup()
                     onBack()
                 }
                 .buttonStyle(CinemeltCardButtonStyle())
-                .padding(.top, 20)
             }
             .padding(60)
             .background(CinemeltTheme.charcoal)
@@ -314,4 +272,3 @@ struct PlayerView: View {
         }
     }
 }
-
