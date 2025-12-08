@@ -8,8 +8,8 @@ class DetailsViewModel: ObservableObject {
     
     // --- Data Sources ---
     @Published var channel: Channel
-    @Published var tmdbDetails: TmdbDetails? // Kept for Movies
-    @Published var omdbDetails: OmdbSeriesDetails? // NEW: For Series
+    @Published var tmdbDetails: TmdbDetails?
+    @Published var omdbDetails: OmdbSeriesDetails?
     @Published var cast: [TmdbCast] = []
     
     // --- UI State ---
@@ -18,6 +18,7 @@ class DetailsViewModel: ObservableObject {
     @Published var backgroundUrl: URL?
     @Published var posterUrl: URL?
     @Published var backdropOpacity: Double = 0.0
+    @Published var showFullPlot: Bool = false
     
     // --- Extra Ratings (OMDB) ---
     @Published var externalRatings: [OmdbRating] = []
@@ -51,7 +52,7 @@ class DetailsViewModel: ObservableObject {
     
     // --- Dependencies ---
     private let tmdbClient = TmdbClient()
-    private let omdbClient = OmdbClient() // NEW
+    private let omdbClient = OmdbClient()
     private let xtreamClient = XtreamClient()
     private var repository: PrimeFlixRepository?
     private let settings = SettingsViewModel()
@@ -105,33 +106,40 @@ class DetailsViewModel: ObservableObject {
     }
     
     func loadData() async {
-        self.isLoading = true // Force loading state
+        self.isLoading = true
         
         let rawTitle = channel.canonicalTitle ?? channel.title
         let info = TitleNormalizer.parse(rawTitle: rawTitle)
         
-        // --- 1. EPISODE INGESTION (Lazy Sync) ---
+        // 1. Lazy Sync Episodes (Series Only)
         if channel.type == "series" && channel.seriesId != nil && channel.seriesId != "0" {
             await ingestXtreamEpisodes(seriesId: channel.seriesId!)
         }
         
-        // --- 2. FETCH VERSIONS (Core Data Aggregation) ---
+        // 2. Fetch Local Files (Versions)
         if channel.type == "series" || channel.type == "series_episode" {
             await fetchSeriesEcosystem(baseInfo: info)
         } else {
             await fetchMovieVersions()
         }
         
-        // --- 3. METADATA STRATEGY ---
-        if channel.type == "series" || channel.type == "series_episode" {
-            // Use OMDB for Series
-            await fetchOmdbSeriesData(title: info.normalizedTitle, year: info.year)
-        } else {
-            // Use TMDB for Movies (as it works perfectly)
-            await fetchTmdbMovieData(title: info.normalizedTitle)
+        // 3. Hybrid Metadata Fetching (Parallel)
+        await withTaskGroup(of: Void.self) { group in
+            
+            // Task A: TMDB (Cast, Images, Recommendations) - Runs for ALL types
+            group.addTask {
+                await self.fetchTmdbData(title: info.normalizedTitle, type: self.channel.type)
+            }
+            
+            // Task B: OMDB (Ratings, Plot) - Runs for Series Only
+            if self.channel.type == "series" || self.channel.type == "series_episode" {
+                group.addTask {
+                    await self.fetchOmdbSeriesData(title: info.normalizedTitle, year: info.year)
+                }
+            }
         }
         
-        // --- 4. REFRESH UI ---
+        // 4. Refresh UI
         if channel.type == "series" || channel.type == "series_episode" {
             await selectSeason(self.selectedSeason)
         }
@@ -143,11 +151,10 @@ class DetailsViewModel: ObservableObject {
         withAnimation(.easeIn(duration: 0.5)) { self.backdropOpacity = 1.0 }
     }
     
-    // MARK: - OMDB Logic (New)
+    // MARK: - OMDB Logic (Restored Core Data Caching)
     
     private func fetchOmdbSeriesData(title: String, year: String?) async {
         // 1. Check Local Cache (MediaMetadata via Title Hash)
-        // Since we don't have a clean IMDB ID stored yet, we hash the title.
         let titleHash = String(title.lowercased().hashValue)
         
         if let cached = fetchFromCoreData(titleHash: titleHash) {
@@ -170,7 +177,6 @@ class DetailsViewModel: ObservableObject {
                 if self.channel.cover == nil, let poster = details.poster, poster.hasPrefix("http") {
                     self.channel.cover = poster
                     self.posterUrl = URL(string: poster)
-                    // Use poster as backdrop for series if no better option
                     if self.backgroundUrl == nil { self.backgroundUrl = URL(string: poster) }
                 }
             }
@@ -191,7 +197,6 @@ class DetailsViewModel: ObservableObject {
     private func saveToCoreData(details: OmdbSeriesDetails, titleHash: String, title: String) {
         guard let repo = repository else { return }
         
-        // Perform on background to avoid UI hitch
         repo.container.performBackgroundTask { context in
             let req = NSFetchRequest<MediaMetadata>(entityName: "MediaMetadata")
             req.predicate = NSPredicate(format: "normalizedTitleHash == %@", titleHash)
@@ -207,44 +212,62 @@ class DetailsViewModel: ObservableObject {
             meta.title = details.title
             meta.overview = details.plot
             meta.posterPath = details.poster
-            // We store the IMDB ID in the overview or a separate field if we had one.
-            // For now, this is enough to cache the expensive fetch.
+            meta.mediaType = "series" // Explicitly mark as series in cache
             meta.lastUpdated = Date()
-            
-            // Hack: Store ratings in overview? No, better not mess it up.
-            // We rely on OMDB Client memory cache for ratings during session,
-            // and this Core Data cache for the heavy lifting of text/images.
             
             try? context.save()
         }
     }
     
     private func applyMetadata(_ meta: MediaMetadata) {
+        // We manually construct OMDB details from Core Data if needed,
+        // or just apply directly to the channel object for display
         self.channel.overview = meta.overview
         if let p = meta.posterPath {
             self.channel.cover = p
             self.posterUrl = URL(string: p)
             if self.backgroundUrl == nil { self.backgroundUrl = URL(string: p) }
         }
+        
+        // Note: Ratings are complex to store in a flat Core Data object without a relationship,
+        // so we accept that "Offline/Cached" mode might show fewer ratings than a fresh fetch,
+        // but the important text (Plot) is saved.
     }
 
-    // MARK: - TMDB Logic (Movies Only)
+    // MARK: - TMDB Logic (Cast, Similar, Backdrops)
     
-    private func fetchTmdbMovieData(title: String) async {
-        if let match = await tmdbClient.findBestMatch(title: title, year: nil, type: "movie") {
-            if let details = try? await tmdbClient.getMovieDetails(id: match.id) {
-                await MainActor.run { self.applyTmdbData(details) }
+    private func fetchTmdbData(title: String, type: String) async {
+        let searchType = (type == "series" || type == "series_episode") ? "series" : "movie"
+        
+        if let match = await tmdbClient.findBestMatch(title: title, year: nil, type: searchType) {
+            if searchType == "series" {
+                if let details = try? await tmdbClient.getTvDetails(id: match.id) {
+                    await MainActor.run { self.applyTmdbData(details) }
+                }
+            } else {
+                if let details = try? await tmdbClient.getMovieDetails(id: match.id) {
+                    await MainActor.run { self.applyTmdbData(details) }
+                }
             }
         }
     }
     
     private func applyTmdbData(_ details: TmdbDetails) {
         self.tmdbDetails = details
+        
+        // 1. High Res Background
         if let bg = details.backdropPath {
             self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)")
         }
-        if let castData = details.credits?.cast {
+        
+        // 2. Cast (Crucial Fix)
+        if let castData = details.aggregateCredits?.cast ?? details.credits?.cast {
             self.cast = castData
+        }
+        
+        // 3. Fallback Overview (If OMDB failed)
+        if self.channel.overview == nil || self.channel.overview?.isEmpty == true {
+             self.channel.overview = details.overview
         }
     }
     
@@ -265,14 +288,11 @@ class DetailsViewModel: ObservableObject {
         
         let input = XtreamInput.decodeFromPlaylistUrl(channel.playlistUrl)
         
-        // Added visual feedback in UI via 'isLoading'
-        
         guard let episodes = try? await xtreamClient.getSeriesEpisodes(input: input, seriesId: seriesId) else {
             print("❌ Failed to lazy-load episodes for Series \(seriesId)")
             return
         }
         
-        // Capture show cover for the background task
         let showCover = self.channel.cover
         
         await Task.detached {
@@ -323,8 +343,15 @@ class DetailsViewModel: ObservableObject {
         var foundSeasons = Set<Int>()
         
         for file in allFiles {
-            let s = Int(file.season)
-            let e = Int(file.episode)
+            var s = Int(file.season)
+            var e = Int(file.episode)
+            
+            if s == 0 && e == 0 {
+                let info = TitleNormalizer.parse(rawTitle: file.canonicalTitle ?? file.title)
+                s = info.season
+                e = info.episode
+            }
+            
             if s == 0 && e == 0 { continue }
             
             let key = String(format: "S%02dE%02d", s, e)
@@ -358,12 +385,15 @@ class DetailsViewModel: ObservableObject {
     func selectSeason(_ season: Int) async {
         self.selectedSeason = season
         
-        // Display what we have locally.
-        // Since we are using OMDB for series now, we won't have TMDB-based episode metadata maps.
-        // We will just show the file names or simple "Episode X" unless we want to fetch full season details from OMDB too.
-        // To save API calls, we'll rely on the file title for now or just generic numbering.
+        // 1. Ensure TMDB data for this season is fetched (Needed for Titles/Stills)
+        if tmdbEpisodes[season] == nil, let tmdbId = tmdbDetails?.id {
+            if let seasonDetails = try? await tmdbClient.getTvSeason(tvId: tmdbId, seasonNumber: season) {
+                tmdbEpisodes[season] = seasonDetails.episodes
+            }
+        }
         
         var displayList: [MergedEpisode] = []
+        let tmdbData = tmdbEpisodes[season] ?? []
         let seasonPrefix = String(format: "S%02d", season)
         let localKeys = episodeRegistry.keys.filter { $0.hasPrefix(seasonPrefix) }
         let sortedKeys = localKeys.sorted()
@@ -372,14 +402,17 @@ class DetailsViewModel: ObservableObject {
             guard let versions = episodeRegistry[key] else { continue }
             let epNum = Int(key.suffix(2)) ?? 0
             
-            // Basic Construction
+            // Map Metadata
+            let meta = tmdbData.first(where: { $0.episodeNumber == epNum })
+            let stillUrl: URL? = meta?.stillPath.flatMap { URL(string: "https://image.tmdb.org/t/p/w500\($0)") }
+            
             let merged = MergedEpisode(
                 id: key,
                 season: season,
                 number: epNum,
-                title: "Episode \(epNum)", // Fallback since we aren't deep-fetching season details from OMDB yet to save calls
-                overview: "",
-                stillPath: nil,
+                title: meta?.name ?? "Episode \(epNum)",
+                overview: meta?.overview ?? "No description available.",
+                stillPath: stillUrl,
                 versions: versions
             )
             displayList.append(merged)
@@ -406,7 +439,7 @@ class DetailsViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Version Selection
+    // MARK: - Version Selection (Movies)
     
     private func fetchMovieVersions() async {
         guard let repo = repository else { return }

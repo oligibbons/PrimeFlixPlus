@@ -7,6 +7,9 @@ struct DetailsView: View {
     var onPlay: (Channel) -> Void
     var onBack: () -> Void
     
+    // UI State for "Read More" text
+    @State private var showFullDescription: Bool = false
+    
     init(channel: Channel, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
         _viewModel = StateObject(wrappedValue: DetailsViewModel(channel: channel))
         self.onPlay = onPlay
@@ -16,7 +19,12 @@ struct DetailsView: View {
     @FocusState private var focusedField: FocusField?
     
     enum FocusField: Hashable {
-        case play, favorite, version, season(Int), episode(String), cast, similar
+        case description
+        case play, favorite, version
+        case season(Int)
+        case episode(String)
+        case cast(Int)
+        case similar(Int)
     }
     
     var body: some View {
@@ -42,22 +50,19 @@ struct DetailsView: View {
         .task {
             await viewModel.loadData()
             
-            // Initial focus behavior
+            // Initial focus behavior: Force focus onto the Play button
             if focusedField == nil {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     focusedField = .play
                 }
             }
         }
         .onExitCommand { onBack() }
         
-        // --- SHEET 1: Episode Version Picker ---
-        // Displayed when an episode has multiple versions (e.g. 4K, 1080p, French)
-        .confirmationDialog(
-            "Select Version",
-            isPresented: $viewModel.showEpisodeVersionPicker,
-            titleVisibility: .visible
-        ) {
+        // --- SHEETS ---
+        
+        // 1. Episode Version Picker
+        .confirmationDialog("Select Version", isPresented: $viewModel.showEpisodeVersionPicker, titleVisibility: .visible) {
             if let ep = viewModel.episodeToPlay {
                 ForEach(ep.versions) { v in
                     Button(v.qualityLabel.isEmpty ? "Default" : v.qualityLabel) {
@@ -68,19 +73,26 @@ struct DetailsView: View {
             Button("Cancel", role: .cancel) {}
         }
         
-        // --- SHEET 2: Top-Level Version Selector ---
-        // Displayed when the Movie (or Series Container) has multiple versions
-        .confirmationDialog(
-            "Select Quality",
-            isPresented: $viewModel.showVersionSelector,
-            titleVisibility: .visible
-        ) {
+        // 2. Top-Level Version Selector (Movies)
+        .confirmationDialog("Select Quality", isPresented: $viewModel.showVersionSelector, titleVisibility: .visible) {
             ForEach(viewModel.availableVersions) { option in
                 Button(option.label) {
                     viewModel.userSelectedVersion(option.channel)
                 }
             }
             Button("Cancel", role: .cancel) {}
+        }
+        
+        // 3. Full Description Popup (New Feature)
+        .sheet(isPresented: $showFullDescription) {
+            ScrollView {
+                Text(viewModel.omdbDetails?.plot ?? viewModel.tmdbDetails?.overview ?? viewModel.channel.overview ?? "")
+                    .font(CinemeltTheme.fontBody(32))
+                    .foregroundColor(CinemeltTheme.cream)
+                    .padding(60)
+            }
+            .background(CinemeltTheme.mainBackground)
+            .ignoresSafeArea()
         }
     }
     
@@ -99,8 +111,8 @@ struct DetailsView: View {
                                 LinearGradient(
                                     stops: [
                                         .init(color: .black, location: 0),
-                                        .init(color: .black.opacity(0.6), location: 0.4),
-                                        .init(color: CinemeltTheme.charcoal, location: 1.0)
+                                        .init(color: .black.opacity(0.4), location: 0.3), // Lighter top for text readability
+                                        .init(color: CinemeltTheme.charcoal, location: 0.9)
                                     ],
                                     startPoint: .top,
                                     endPoint: .bottom
@@ -138,8 +150,7 @@ struct DetailsView: View {
                 
                 // --- Title & Metadata ---
                 VStack(alignment: .leading, spacing: 15) {
-                    // Logo or Title
-                    // Priority: OMDB (Series) -> TMDB (Movies) -> Local
+                    // Title Priority: OMDB -> TMDB -> Channel
                     Text(viewModel.omdbDetails?.title ?? viewModel.tmdbDetails?.displayTitle ?? viewModel.channel.title)
                         .font(CinemeltTheme.fontTitle(90))
                         .foregroundColor(CinemeltTheme.cream)
@@ -148,45 +159,53 @@ struct DetailsView: View {
                     
                     metadataRow
                     
-                    // Plot
-                    Text(viewModel.omdbDetails?.plot ?? viewModel.tmdbDetails?.overview ?? "No synopsis available.")
-                        .font(CinemeltTheme.fontBody(28))
-                        .lineSpacing(8)
-                        .foregroundColor(CinemeltTheme.cream.opacity(0.9))
-                        .frame(maxWidth: 950, alignment: .leading)
-                        .lineLimit(4)
-                        .padding(.top, 10)
+                    // Description (Interactable - Click to Expand)
+                    Button(action: { showFullDescription = true }) {
+                        Text(viewModel.omdbDetails?.plot ?? viewModel.tmdbDetails?.overview ?? viewModel.channel.overview ?? "No synopsis available.")
+                            .font(CinemeltTheme.fontBody(28))
+                            .lineSpacing(8)
+                            .foregroundColor(focusedField == .description ? .white : CinemeltTheme.cream.opacity(0.9))
+                            .frame(maxWidth: 950, alignment: .leading)
+                            .lineLimit(4)
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(focusedField == .description ? Color.white.opacity(0.1) : Color.clear)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .focused($focusedField, equals: .description)
                 }
                 .padding(.horizontal, 80)
-                .focusSection()
+                .focusSection() // Creates a focus fence so you can enter from sidebar easily
                 
                 // --- Buttons ---
                 actionButtons
                     .padding(.horizontal, 80)
                     .focusSection()
                 
-                // --- Top-Level Version Selector (If multiple versions found) ---
+                // --- Top-Level Version Selector ---
                 if viewModel.availableVersions.count > 1 {
                     versionSelectorButton
                         .padding(.horizontal, 80)
                         .focusSection()
                 }
                 
+                // --- Seasons/Episodes (Series Only) ---
+                // Moved up priority for Series to be accessible quickly
+                if viewModel.channel.type == "series" || viewModel.channel.type == "series_episode" {
+                    seriesContent
+                        .zIndex(2)
+                }
+                
                 // --- Cast Rail ---
                 if !viewModel.cast.isEmpty {
                     castRail
-                        .focusSection()
                 }
                 
                 // --- Similar Content Rail ---
                 if !viewModel.similarContent.isEmpty {
                     similarContentRail
-                        .focusSection()
-                }
-                
-                // --- Seasons/Episodes (Series Only) ---
-                if viewModel.channel.type == "series" || viewModel.channel.type == "series_episode" {
-                    seriesContent
                 }
                 
                 Spacer(minLength: 150)
@@ -196,7 +215,7 @@ struct DetailsView: View {
     
     private var metadataRow: some View {
         HStack(spacing: 25) {
-            // Quality Badge (Derived from selected version)
+            // Quality Badge
             if let v = viewModel.selectedVersion {
                 Text(v.quality ?? "HD")
                     .font(CinemeltTheme.fontTitle(20))
@@ -207,14 +226,13 @@ struct DetailsView: View {
                     .cornerRadius(8)
             }
             
-            // NEW: OMDB Ratings Display
+            // OMDB Ratings
             if !viewModel.externalRatings.isEmpty {
                 ForEach(viewModel.externalRatings, id: \.source) { rating in
                     HStack(spacing: 6) {
-                        // Icons based on source
                         if rating.source.contains("Rotten") {
                             Image(systemName: "popcorn.fill").foregroundColor(.red)
-                        } else if rating.source.contains("Internet Movie") {
+                        } else if rating.source.contains("Internet") {
                             Text("IMDb").fontWeight(.bold).foregroundColor(.yellow)
                         } else {
                             Image(systemName: "star.fill").foregroundColor(.orange)
@@ -226,7 +244,7 @@ struct DetailsView: View {
                     }
                 }
             } else if let score = viewModel.tmdbDetails?.voteAverage {
-                // Fallback to TMDB Score
+                // Fallback TMDB Score
                 HStack(spacing: 8) {
                     Image(systemName: "star.fill")
                         .foregroundColor(CinemeltTheme.accent)
@@ -237,9 +255,8 @@ struct DetailsView: View {
                 }
             }
             
-            // Year Logic - Fixed Ambiguity
-            // We use a safe map here to extract the year string
-            if let year = viewModel.omdbDetails?.year ?? viewModel.tmdbDetails?.displayDate.map({ String($0.prefix(4)) }) {
+            // Year (Safe unwrap logic)
+            if let year = viewModel.omdbDetails?.year ?? viewModel.tmdbDetails?.displayDate?.prefix(4).map(String.init) {
                 Text(year)
                     .font(CinemeltTheme.fontBody(24))
                     .foregroundColor(.gray)
@@ -263,10 +280,8 @@ struct DetailsView: View {
             // Play Button
             Button(action: {
                 if let target = viewModel.smartPlayTarget {
-                    // Series: Play smart target
                     viewModel.onPlayEpisodeClicked(target)
                 } else {
-                    // Movie: Check versions or play directly
                     if viewModel.availableVersions.count > 1 {
                         viewModel.showVersionSelector = true
                     } else {
@@ -333,12 +348,13 @@ struct DetailsView: View {
             
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 40) {
-                    ForEach(viewModel.cast) { actor in
+                    ForEach(Array(viewModel.cast.prefix(15).enumerated()), id: \.element.id) { index, actor in
                         VStack(spacing: 15) {
                             AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w200\(actor.profilePath ?? "")")) { img in
                                 img.resizable().aspectRatio(contentMode: .fill)
                             } placeholder: {
                                 Circle().fill(Color.white.opacity(0.1))
+                                    .overlay(Text(String(actor.name.prefix(1))).font(.title))
                             }
                             .frame(width: 120, height: 120)
                             .clipShape(Circle())
@@ -352,12 +368,14 @@ struct DetailsView: View {
                                 .frame(width: 140)
                         }
                         .focusable(true)
+                        .focused($focusedField, equals: .cast(index))
                     }
                 }
                 .padding(.horizontal, 80)
                 .padding(.bottom, 20)
             }
         }
+        .focusSection()
     }
     
     private var similarContentRail: some View {
@@ -369,17 +387,19 @@ struct DetailsView: View {
             
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 40) {
-                    ForEach(viewModel.similarContent) { item in
+                    ForEach(Array(viewModel.similarContent.enumerated()), id: \.element.id) { index, item in
                         SimplePosterCard(
                             title: item.title,
                             posterPath: item.posterPath
                         )
+                        .focused($focusedField, equals: .similar(index))
                     }
                 }
                 .padding(.horizontal, 80)
                 .padding(.bottom, 20)
             }
         }
+        .focusSection()
     }
     
     private var seriesContent: some View {
