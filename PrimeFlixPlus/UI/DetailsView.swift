@@ -256,7 +256,8 @@ struct DetailsView: View {
             }
             
             // Year (Safe unwrap logic)
-            if let year = viewModel.omdbDetails?.year ?? viewModel.tmdbDetails?.displayDate?.prefix(4).map(String.init) {
+            // FIX: Use .map on the optional String property, and explicitly convert the resulting Substring to a String.
+            if let year = viewModel.omdbDetails?.year ?? viewModel.tmdbDetails?.displayDate.map({ String($0.prefix(4)) }) {
                 Text(year)
                     .font(CinemeltTheme.fontBody(24))
                     .foregroundColor(.gray)
@@ -388,10 +389,15 @@ struct DetailsView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 40) {
                     ForEach(Array(viewModel.similarContent.enumerated()), id: \.element.id) { index, item in
-                        SimplePosterCard(
-                            title: item.title,
-                            posterPath: item.posterPath
-                        )
+                        Button(action: {
+                            print("Selected similar content: \(item.title)")
+                        }) {
+                            SimplePosterCard(
+                                title: item.title,
+                                posterPath: item.posterPath
+                            )
+                        }
+                        .buttonStyle(CinemeltCardButtonStyle())
                         .focused($focusedField, equals: .similar(index))
                     }
                 }
@@ -477,7 +483,8 @@ struct SimplePosterCard: View {
                     AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w300\(path)")) { img in
                         img.resizable().aspectRatio(contentMode: .fill)
                     } placeholder: {
-                        Rectangle().fill(Color.white.opacity(0.1))
+                        Circle().fill(Color.white.opacity(0.1))
+                            .overlay(Text(String(title.prefix(1))).font(.title)) // Use title here, not actor name prefix
                     }
                     .frame(width: width, height: height)
                     .clipped()
