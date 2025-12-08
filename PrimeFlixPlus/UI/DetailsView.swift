@@ -61,8 +61,8 @@ struct DetailsView: View {
         
         // --- POPUPS & INTERACTION ---
         
-        // 1. Version Selection Dialog (Shared for Movies & Episodes)
-        // This is the critical fix: It listens to the unified 'showVersionPicker' from the new ViewModel
+        // 1. Version Selection Dialog
+        // FIXED: Uses correct struct path for selection
         .confirmationDialog(
             viewModel.pickerTitle,
             isPresented: $viewModel.showVersionPicker,
@@ -70,7 +70,7 @@ struct DetailsView: View {
         ) {
             ForEach(viewModel.pickerOptions) { option in
                 Button(option.label) {
-                    viewModel.onPickerSelect?(option.channel)
+                    viewModel.onPickerSelect?(option.channelStruct)
                 }
             }
             Button("Cancel", role: .cancel) {}

@@ -17,7 +17,6 @@ class VersioningService {
     /// Used to find versions like "4K", "1080p", "French", etc. for a single playable item.
     func getVersions(for channel: Channel) -> [Channel] {
         // Always prioritize Title Matching for aggregation.
-        // Even if Series IDs differ (Provider Logic), if the normalized title matches, it's the same content.
         return fetchByNormalizedTitle(
             title: channel.title,
             type: channel.type,
@@ -27,7 +26,8 @@ class VersioningService {
     }
     
     /// Finds all "Series Containers" (Show-level entries) that match this title.
-    /// Used by ViewModel to find all versions of a show (EN, FR, 4K, etc.) to trigger multi-ingestion.
+    /// Used by ViewModel to find all versions of a show (EN, FR, 4K, etc.).
+    /// Returns: List of Channel objects found in the service's context.
     func findMatchingSeriesContainers(title: String) -> [Channel] {
         let req = NSFetchRequest<Channel>(entityName: "Channel")
         // We look for any 'series' (the show folder) that shares the exact same normalized title.
@@ -38,8 +38,7 @@ class VersioningService {
     }
     
     /// Finds all episodes belonging to a specific set of Series IDs.
-    /// This allows us to aggregate content from multiple provider entries (e.g. ID 123=English, ID 456=French).
-    /// Instead of searching by Title (which is fragile for episodes named "Chapter One"), we rely on the strict ID link.
+    /// This allows us to aggregate content from multiple provider entries.
     func getEpisodes(for seriesIds: [String]) -> [Channel] {
         guard !seriesIds.isEmpty else { return [] }
         
@@ -62,14 +61,11 @@ class VersioningService {
         let req = NSFetchRequest<Channel>(entityName: "Channel")
         
         if type == "series_episode" {
-            // Match Show Title + S/E
-            // This pulls together S01E01 from "Series ID A" and S01E01 from "Series ID B"
             req.predicate = NSPredicate(
                 format: "title == %@ AND season == %d AND episode == %d AND type == 'series_episode'",
                 title, season, episode
             )
         } else {
-            // Match Movie Title strictly
             req.predicate = NSPredicate(format: "title == %@ AND type == %@", title, type)
         }
         
