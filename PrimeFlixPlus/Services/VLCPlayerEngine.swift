@@ -3,7 +3,7 @@ import Combine
 import TVVLCKit
 
 /// A robust, SwiftUI-friendly wrapper around VLCMediaPlayer.
-/// Includes "Watchdog" logic and "Safe Seek" to prevent crashes.
+/// Includes Watchdog logic, Safe Seeking, Resume support, AV Sync, and Video Settings.
 class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     // MARK: - Published State
@@ -13,11 +13,15 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     @Published var duration: Double = 0.0
     @Published var error: String? = nil
     
-    // Tracks
+    // Tracks & Sync
     @Published var audioTracks: [String] = []
     @Published var currentAudioIndex: Int = 0
     @Published var subtitleTracks: [String] = []
     @Published var currentSubtitleIndex: Int = 0
+    
+    // Delays (in milliseconds)
+    @Published var audioDelay: Int = 0
+    @Published var subtitleDelay: Int = 0
     
     // MARK: - Internal Properties
     private let player = VLCMediaPlayer()
@@ -47,10 +51,10 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     // MARK: - Playback Control
     
-    func load(url: String, isLive: Bool, is4K: Bool) {
+    func load(url: String, isLive: Bool, is4K: Bool, startTime: Double = 0) {
         self.error = nil
         self.duration = 0
-        self.currentTime = 0
+        self.currentTime = startTime // Optimistic set
         self.isBuffering = true
         self.lastTimeRecorded = -1.0
         
@@ -61,7 +65,7 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         
         let media = VLCMedia(url: mediaUrl)
         
-        // Optimized Caching for tvOS stability
+        // Optimized Caching
         let cacheSize = isLive ? 5000 : (is4K ? 15000 : 4000)
         let options: [String: Any] = [
             "network-caching": cacheSize,
@@ -70,6 +74,11 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             "http-reconnect": true
         ]
         media.addOptions(options)
+        
+        // Start Time Optimization
+        if startTime > 0 {
+            media.addOptions(["start-time": "\(startTime)"])
+        }
         
         player.media = media
         player.play()
@@ -92,11 +101,7 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
     
     func togglePlayPause() {
-        if player.isPlaying {
-            pause()
-        } else {
-            play()
-        }
+        if player.isPlaying { pause() } else { play() }
     }
     
     func stop() {
@@ -111,33 +116,50 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.rate = rate
     }
     
+    // MARK: - Video Settings (NEW)
+    
+    func setDeinterlace(_ enabled: Bool) {
+        // TVVLCKit uses setDeinterlaceFilter to toggle.
+        // "blend" is a good general-purpose deinterlacing filter.
+        // Passing nil disables it.
+        player.setDeinterlaceFilter(enabled ? "blend" : nil)
+    }
+    
+    func setAspectRatio(_ ratio: String) {
+        if ratio == "Default" {
+            player.videoAspectRatio = nil
+        } else if ratio == "Fill" {
+            // "Fill" isn't a standard VLC aspect ratio.
+            // On TV, usually you want to force 16:9 to fill the screen if the content is weird.
+            player.videoAspectRatio = UnsafeMutablePointer<Int8>(mutating: ("16:9" as NSString).utf8String)
+        } else {
+            // Pass specific ratios like "16:9", "4:3", "2.35:1"
+            player.videoAspectRatio = UnsafeMutablePointer<Int8>(mutating: (ratio as NSString).utf8String)
+        }
+    }
+    
+    // MARK: - Synchronization
+    
+    func setAudioDelay(_ ms: Int) {
+        self.audioDelay = ms
+        player.currentAudioPlaybackDelay = Int(ms * 1000)
+    }
+    
+    func setSubtitleDelay(_ ms: Int) {
+        self.subtitleDelay = ms
+        player.currentVideoSubTitleDelay = Int(ms * 1000)
+    }
+    
     // MARK: - Safe Seeking
     
     func seek(to time: Double) {
-        // 1. Safety Check: Ensure media exists and is valid
-        guard player.media != nil, player.state != .error, player.state != .stopped else {
-            print("⚠️ Seek Ignored: Player in invalid state.")
-            return
-        }
+        guard player.media != nil, player.state != .error, player.state != .stopped else { return }
         
-        // 2. Lock Updates
         isSeeking = true
-        
-        // 3. Perform Seek
         let vlcTime = VLCTime(int: Int32(time * 1000))
         player.time = vlcTime
-        
-        // 4. Paused Scrub Fix: Force a frame update if paused
-        if !player.isPlaying {
-            // VLC trick: sometimes need to 'play' momentarily to render the new frame
-            // usually not strictly required if just updating time, but good for "Live Scrub" preview.
-            // For now, we trust the player to update the frame buffer.
-        }
-        
-        // Optimistic UI update
         self.currentTime = time
         
-        // 5. Release Lock with Delay (Allow engine to catch up)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             self.isSeeking = false
         }
@@ -179,14 +201,12 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         Task { @MainActor in
             guard let p = aNotification.object as? VLCMediaPlayer else { return }
             
-            // Check for valid duration update
             if self.duration <= 0.1, let len = p.media?.length, len.intValue > 0 {
                 self.duration = Double(len.intValue) / 1000.0
             }
             
             switch p.state {
             case .buffering:
-                // Only show buffering if NOT scrubbing and NOT seeking
                 if !self.isSeeking && abs(self.currentTime - self.lastTimeRecorded) < 1.0 {
                     self.isBuffering = true
                 }
@@ -203,21 +223,18 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             case .error:
                 self.isBuffering = false
                 self.error = "Playback Stream Error"
-            default:
-                break
+            default: break
             }
         }
     }
     
     func mediaPlayerTimeChanged(_ aNotification: Notification) {
-        // STRICT BLOCK: Do not update time while seeking
         if isSeeking { return }
         
         Task { @MainActor in
             let time = Double(player.time.intValue) / 1000.0
             self.currentTime = time
             
-            // Watchdog: If time advanced, kill buffering
             if self.isBuffering && time > (self.lastTimeRecorded + 0.5) {
                 self.isBuffering = false
             }
@@ -229,7 +246,6 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         progressTimer?.invalidate()
         watchdogTimer?.invalidate()
         
-        // Progress Timer
         progressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             if self.player.isPlaying && !self.isSeeking {
@@ -240,15 +256,11 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             }
         }
         
-        // Watchdog Timer
         watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             Task { @MainActor in
-                if self.isBuffering && self.player.isPlaying {
-                    // Force re-check
-                    if self.player.state == .playing {
-                        self.isBuffering = false
-                    }
+                if self.isBuffering && self.player.isPlaying && self.player.state == .playing {
+                    self.isBuffering = false
                 }
             }
         }

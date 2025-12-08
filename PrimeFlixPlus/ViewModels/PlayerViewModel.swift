@@ -22,6 +22,8 @@ class PlayerViewModel: ObservableObject {
     @Published var showTrackSelection: Bool = false
     @Published var showVersionSelection: Bool = false
     @Published var showAutoPlay: Bool = false
+    @Published var showResumePrompt: Bool = false
+    @Published var showVideoSettings: Bool = false
     
     // MARK: - Playback Data
     @Published var videoTitle: String = ""
@@ -30,11 +32,18 @@ class PlayerViewModel: ObservableObject {
     @Published var currentUrl: String = ""
     @Published var playbackRate: Float = 1.0
     @Published var qualityBadge: String = "HD"
-    
-    // Scrubbing State
     @Published var isScrubbing: Bool = false
+    @Published var resumeTime: Double = 0.0
     
-    // Metadata (Enriched)
+    // Sync State
+    @Published var audioDelay: Int = 0
+    @Published var subtitleDelay: Int = 0
+    
+    // Video Settings State
+    @Published var isDeinterlaceEnabled: Bool = false
+    @Published var aspectRatio: String = "Default"
+    
+    // Metadata
     @Published var videoOverview: String = ""
     @Published var videoYear: String = ""
     @Published var videoRating: String = ""
@@ -64,7 +73,6 @@ class PlayerViewModel: ObservableObject {
     private var controlHideTimer: Timer?
     private var autoPlayTimer: Timer?
     
-    // Anti-Rubberband Logic
     private var isSeekingCommit: Bool = false
     private var lastSavedTime: Double = 0
     
@@ -79,95 +87,142 @@ class PlayerViewModel: ObservableObject {
         self.qualityBadge = channel.quality ?? "HD"
         self.nextEpisodeService = NextEpisodeService(context: repository.container.viewContext)
         
+        // 1. Read Global Playback Speed Default
         let speed = UserDefaults.standard.double(forKey: "defaultPlaybackSpeed")
         self.playbackRate = speed > 0 ? Float(speed) : 1.0
         
         setupEngineBindings()
         
-        // Start Playback
-        playerEngine.setRate(self.playbackRate)
-        playerEngine.load(url: channel.url, isLive: channel.type == "live", is4K: channel.quality?.contains("4K") ?? false)
+        // 2. Check for Resume Point
+        checkForResume(channel: channel)
         
-        // Metadata & Logic
+        // 3. Metadata & Logic
         Task {
             await fetchRichMetadata(channel: channel)
             await checkForNextEpisode()
         }
         
         loadAlternatives()
-        triggerControls(forceShow: true)
     }
     
     func assignView(_ view: UIView) {
         playerEngine.attach(to: view)
     }
     
-    private func setupEngineBindings() {
-        // Sync Engine State -> ViewModel State
+    // MARK: - Resume & Defaults Logic
+    
+    private func checkForResume(channel: Channel) {
+        guard let repo = repository else { return }
         
-        playerEngine.$currentTime
-            .receive(on: RunLoop.main)
-            .sink { [weak self] time in
-                guard let self = self else { return }
-                
-                // CRITICAL: Ignore engine time if user is scrubbing OR we just committed a seek
-                if self.isScrubbing || self.isSeekingCommit { return }
-                
-                self.currentTime = time
-                
-                // Save Progress periodically
-                if abs(time - self.lastSavedTime) > 10 {
-                    self.saveProgress()
-                }
-            }
-            .store(in: &cancellables)
+        let context = repo.container.viewContext
+        let req = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
+        req.predicate = NSPredicate(format: "channelUrl == %@", channel.url)
+        req.fetchLimit = 1
         
-        playerEngine.$duration
-            .receive(on: RunLoop.main)
-            .assign(to: \.duration, on: self)
-            .store(in: &cancellables)
-        
-        playerEngine.$isPlaying
-            .receive(on: RunLoop.main)
-            .sink { [weak self] playing in
-                self?.isPlaying = playing
-                if !playing { self?.triggerControls(forceShow: true) }
-            }
-            .store(in: &cancellables)
-        
-        playerEngine.$isBuffering
-            .receive(on: RunLoop.main)
-            .assign(to: \.isBuffering, on: self)
-            .store(in: &cancellables)
-        
-        playerEngine.$error
-            .receive(on: RunLoop.main)
-            .sink { [weak self] err in
-                if let err = err {
-                    self?.isError = true
-                    self?.errorMessage = err
-                    self?.triggerControls(forceShow: true)
-                }
-            }
-            .store(in: &cancellables)
+        if let progress = try? context.fetch(req).first {
+            let savedPos = Double(progress.position) / 1000.0
+            let savedDur = Double(progress.duration) / 1000.0
             
-        // Track Sync
+            // Resume if > 1 min duration and between 3%-95%
+            if savedDur > 60 && savedPos > (savedDur * 0.03) && savedPos < (savedDur * 0.95) {
+                self.resumeTime = savedPos
+                self.showResumePrompt = true
+            } else {
+                startPlayback(from: 0)
+            }
+        } else {
+            startPlayback(from: 0)
+        }
+    }
+    
+    func startPlayback(from time: Double) {
+        guard let channel = currentChannel else { return }
+        self.showResumePrompt = false
+        
+        // 1. Load Engine
+        playerEngine.setRate(self.playbackRate)
+        playerEngine.load(
+            url: channel.url,
+            isLive: channel.type == "live",
+            is4K: channel.quality?.contains("4K") ?? false,
+            startTime: time
+        )
+        
+        // 2. Apply User Defaults for Video Settings
+        let defDeinterlace = UserDefaults.standard.bool(forKey: "defaultDeinterlace")
+        let defRatio = UserDefaults.standard.string(forKey: "defaultAspectRatio") ?? "Default"
+        
+        // Deinterlace Logic:
+        // If Default is TRUE (Always On) -> Enable
+        // If Default is FALSE (Auto) -> Enable ONLY if Live TV
+        if defDeinterlace {
+            self.isDeinterlaceEnabled = true
+        } else {
+            self.isDeinterlaceEnabled = (channel.type == "live")
+        }
+        
+        // Aspect Ratio Logic
+        self.aspectRatio = defRatio
+        
+        // Reset Sync
+        self.audioDelay = 0
+        self.subtitleDelay = 0
+        
+        // 3. Push to Engine
+        // Note: Engine must support these methods
+        playerEngine.setDeinterlace(self.isDeinterlaceEnabled)
+        playerEngine.setAspectRatio(self.aspectRatio)
+        
+        triggerControls(forceShow: true)
+    }
+    
+    // MARK: - Engine Bindings
+    
+    private func setupEngineBindings() {
+        playerEngine.$currentTime.receive(on: RunLoop.main).sink { [weak self] time in
+            guard let self = self else { return }
+            if self.isScrubbing || self.isSeekingCommit { return }
+            self.currentTime = time
+            
+            if abs(time - self.lastSavedTime) > 10 {
+                self.saveProgress()
+            }
+        }.store(in: &cancellables)
+        
+        playerEngine.$duration.receive(on: RunLoop.main).assign(to: \.duration, on: self).store(in: &cancellables)
+        
+        playerEngine.$isPlaying.receive(on: RunLoop.main).sink { [weak self] playing in
+            self?.isPlaying = playing
+            if !playing { self?.triggerControls(forceShow: true) }
+        }.store(in: &cancellables)
+        
+        playerEngine.$isBuffering.receive(on: RunLoop.main).assign(to: \.isBuffering, on: self).store(in: &cancellables)
+        
+        playerEngine.$error.receive(on: RunLoop.main).sink { [weak self] err in
+            if let err = err {
+                self?.isError = true
+                self?.errorMessage = err
+                self?.triggerControls(forceShow: true)
+            }
+        }.store(in: &cancellables)
+            
+        // Tracks & Sync
         playerEngine.$audioTracks.assign(to: \.audioTracks, on: self).store(in: &cancellables)
         playerEngine.$subtitleTracks.assign(to: \.subtitleTracks, on: self).store(in: &cancellables)
         playerEngine.$currentAudioIndex.assign(to: \.currentAudioIndex, on: self).store(in: &cancellables)
         playerEngine.$currentSubtitleIndex.assign(to: \.currentSubtitleIndex, on: self).store(in: &cancellables)
+        
+        playerEngine.$audioDelay.assign(to: \.audioDelay, on: self).store(in: &cancellables)
+        playerEngine.$subtitleDelay.assign(to: \.subtitleDelay, on: self).store(in: &cancellables)
     }
     
     // MARK: - Actions
     
-    func togglePlayPause() {
-        playerEngine.togglePlayPause()
-        triggerControls()
-    }
+    func togglePlayPause() { playerEngine.togglePlayPause(); triggerControls() }
     
     func seekForward() {
         let newTime = currentTime + 10
-        startScrubbing(translation: 0, screenWidth: 1) // Just to trigger UI state if needed
+        startScrubbing(translation: 0, screenWidth: 1)
         currentTime = newTime
         endScrubbing()
     }
@@ -179,41 +234,25 @@ class PlayerViewModel: ObservableObject {
         endScrubbing()
     }
     
-    /// Starts local UI scrubbing without seeking engine yet
     func startScrubbing(translation: CGFloat, screenWidth: CGFloat) {
-        if !isScrubbing {
-            isScrubbing = true
-        }
+        if !isScrubbing { isScrubbing = true }
         triggerControls(forceShow: true)
         
         if screenWidth > 1 {
             let percent = Double(translation / screenWidth)
-            // Dynamic Scrub Speed: Longer videos scrub faster
             let totalDuration = duration > 0 ? duration : 3600
             let sensitivity = max(120.0, totalDuration * 0.15)
-            
             let delta = sensitivity * percent
             self.currentTime = max(0, min(currentTime + delta, duration))
         }
     }
     
-    /// Commits the seek
     func endScrubbing() {
         isScrubbing = false
-        isSeekingCommit = true // Lock incoming time updates
-        
+        isSeekingCommit = true
         playerEngine.seek(to: currentTime)
-        
-        // Cooldown: Ignore engine time updates for 1.5 seconds to prevent "Rubber Banding"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            self?.isSeekingCommit = false
-        }
-        
-        // Ensure play resumes if it was just a seek action
-        if !playerEngine.isPlaying {
-            // Optional: Auto-resume on seek? Usually user expects this.
-            // playerEngine.play()
-        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.isSeekingCommit = false }
+        if !playerEngine.isPlaying { playerEngine.play() }
     }
     
     func setPlaybackSpeed(_ speed: Float) {
@@ -223,6 +262,23 @@ class PlayerViewModel: ObservableObject {
     
     func setAudioTrack(index: Int) { playerEngine.setAudioTrack(index) }
     func setSubtitleTrack(index: Int) { playerEngine.setSubtitleTrack(index) }
+    
+    // MARK: - Sync & Video Actions
+    
+    func setAudioDelay(_ ms: Int) { playerEngine.setAudioDelay(ms) }
+    func setSubtitleDelay(_ ms: Int) { playerEngine.setSubtitleDelay(ms) }
+    
+    func toggleDeinterlace() {
+        isDeinterlaceEnabled.toggle()
+        playerEngine.setDeinterlace(isDeinterlaceEnabled)
+    }
+    
+    func setAspectRatio(_ ratio: String) {
+        self.aspectRatio = ratio
+        playerEngine.setAspectRatio(ratio)
+    }
+    
+    // MARK: - Navigation
     
     func switchVersion(_ newChannel: Channel) {
         saveProgress()
@@ -243,7 +299,7 @@ class PlayerViewModel: ObservableObject {
         autoPlayTimer?.invalidate()
     }
     
-    // MARK: - Smart Metadata Fetcher
+    // MARK: - Metadata
     
     private func fetchRichMetadata(channel: Channel) async {
         let info = TitleNormalizer.parse(rawTitle: channel.canonicalTitle ?? channel.title)
@@ -252,11 +308,7 @@ class PlayerViewModel: ObservableObject {
         if let cover = channel.cover, let url = URL(string: cover) { self.posterImage = url }
         if let ov = channel.overview, !ov.isEmpty { self.videoOverview = ov }
         
-        guard let match = await tmdbClient.findBestMatch(
-            title: info.normalizedTitle,
-            year: info.year,
-            type: isSeries ? "series" : "movie"
-        ) else { return }
+        guard let match = await tmdbClient.findBestMatch(title: info.normalizedTitle, year: info.year, type: isSeries ? "series" : "movie") else { return }
         
         if isSeries {
             let seasonNum = Int(channel.season)
@@ -279,14 +331,12 @@ class PlayerViewModel: ObservableObject {
                     }
                 }
             }
-            
             if let details = try? await tmdbClient.getTvDetails(id: match.id) {
                 await MainActor.run {
                     self.videoYear = String(details.firstAirDate?.prefix(4) ?? "")
                     if self.videoOverview.isEmpty { self.videoOverview = details.overview ?? "" }
                 }
             }
-            
         } else {
             if let details = try? await tmdbClient.getMovieDetails(id: match.id) {
                 await MainActor.run {
@@ -306,7 +356,6 @@ class PlayerViewModel: ObservableObject {
     func triggerControls(forceShow: Bool = false) {
         withAnimation { showControls = true }
         controlHideTimer?.invalidate()
-        
         if (isPlaying || !forceShow) && !isError {
             controlHideTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
                 guard let self = self else { return }
@@ -319,7 +368,6 @@ class PlayerViewModel: ObservableObject {
     
     func checkForNextEpisode() async {
         guard let current = currentChannel, let service = nextEpisodeService else { return }
-        
         if let next = await Task(priority: .userInitiated, operation: {
             return service.findNextEpisode(currentChannel: current)
         }).value {
@@ -342,7 +390,6 @@ class PlayerViewModel: ObservableObject {
         self.lastSavedTime = currentTime
         let pos = Int64(currentTime * 1000)
         let dur = Int64(duration * 1000)
-        
         if (pos > 10000 && dur > 0) || channel.type == "live" {
             repo.saveProgress(url: channel.url, pos: pos, dur: dur)
         }
@@ -354,7 +401,6 @@ class PlayerViewModel: ObservableObject {
         isFavorite.toggle()
     }
     
-    // Auto Play Logic
     func triggerAutoPlay() {
         guard canPlayNext else { return }
         showAutoPlay = true
@@ -366,10 +412,7 @@ class PlayerViewModel: ObservableObject {
         }
     }
     
-    func cancelAutoPlay() {
-        autoPlayTimer?.invalidate()
-        showAutoPlay = false
-    }
+    func cancelAutoPlay() { autoPlayTimer?.invalidate(); showAutoPlay = false }
     
     func confirmAutoPlay() {
         autoPlayTimer?.invalidate()

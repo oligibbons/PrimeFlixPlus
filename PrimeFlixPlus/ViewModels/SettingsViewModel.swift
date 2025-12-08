@@ -108,6 +108,10 @@ class SettingsViewModel: ObservableObject {
     @AppStorage("autoHideForeign") var autoHideForeign: Bool = false
     @AppStorage("defaultPlaybackSpeed") var defaultPlaybackSpeed: Double = 1.0
     
+    // NEW: Default Playback Settings
+    @AppStorage("defaultDeinterlace") var defaultDeinterlace: Bool = false
+    @AppStorage("defaultAspectRatio") var defaultAspectRatio: String = "Default"
+    
     // --- Configuration Options ---
     let availableLanguages = [
         "English", "Dutch", "French", "German", "Spanish",
@@ -136,14 +140,12 @@ class SettingsViewModel: ObservableObject {
     private func loadCategories() {
         guard let repo = repository else { return }
         
-        // Fetch via passthroughs
         let movieGroups = repo.getGroups(playlistUrl: playlists.first?.url ?? "", type: .movie)
         let seriesGroups = repo.getGroups(playlistUrl: playlists.first?.url ?? "", type: .series)
         let liveGroups = repo.getGroups(playlistUrl: playlists.first?.url ?? "", type: .live)
         
         let combined = Set(movieGroups + seriesGroups + liveGroups)
         
-        // FIX: Explicitly type the closure arguments to fix compiler inference error
         self.allCategories = combined.sorted { (a: String, b: String) -> Bool in
             let clean1 = CategoryPreferences.shared.cleanName(a)
             let clean2 = CategoryPreferences.shared.cleanName(b)

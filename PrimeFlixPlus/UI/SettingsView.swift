@@ -7,7 +7,7 @@ struct SettingsView: View {
     var onBack: () -> Void
     var onSpeedTest: () -> Void
     
-    // NEW: Trigger for re-taking the questionnaire
+    // Trigger for re-taking the questionnaire
     @State private var showOnboarding: Bool = false
     
     @FocusState private var focusedField: String?
@@ -50,7 +50,7 @@ struct SettingsView: View {
                 Spacer()
                 
                 // Version Info
-                Text("Cinemelt v1.4")
+                Text("Cinemelt v1.5")
                     .font(CinemeltTheme.fontBody(18))
                     .foregroundColor(.gray)
                     .padding(.horizontal, 20)
@@ -69,7 +69,7 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 50) {
                         
-                        // --- SECTION 1: PERSONALIZATION (NEW) ---
+                        // --- SECTION 1: PERSONALIZATION ---
                         VStack(alignment: .leading, spacing: 25) {
                             Text("Personalization")
                                 .font(CinemeltTheme.fontTitle(32))
@@ -199,6 +199,7 @@ struct SettingsView: View {
                                 .foregroundColor(CinemeltTheme.accent)
                                 .cinemeltGlow()
                             
+                            // Row 1: Quality & Speed
                             HStack(alignment: .top, spacing: 40) {
                                 VStack(alignment: .leading, spacing: 15) {
                                     Text("Preferred Quality")
@@ -249,6 +250,69 @@ struct SettingsView: View {
                                                 }
                                                 .buttonStyle(CinemeltCardButtonStyle())
                                                 .foregroundColor(viewModel.defaultPlaybackSpeed == speed ? .black : CinemeltTheme.cream)
+                                            }
+                                        }
+                                        .padding(10)
+                                    }
+                                    .frame(maxWidth: 600)
+                                }
+                            }
+                            
+                            Divider().background(Color.white.opacity(0.1))
+                            
+                            // Row 2: Default Video Settings (NEW)
+                            HStack(alignment: .top, spacing: 40) {
+                                // Deinterlace
+                                VStack(alignment: .leading, spacing: 15) {
+                                    Text("Deinterlace Mode")
+                                        .font(CinemeltTheme.fontBody(22))
+                                        .foregroundColor(CinemeltTheme.cream.opacity(0.8))
+                                    
+                                    Button(action: { viewModel.defaultDeinterlace.toggle() }) {
+                                        HStack {
+                                            Text(viewModel.defaultDeinterlace ? "Always On" : "Auto (Live Only)")
+                                                .font(CinemeltTheme.fontBody(20))
+                                                .fontWeight(viewModel.defaultDeinterlace ? .bold : .regular)
+                                            
+                                            Spacer()
+                                            
+                                            Image(systemName: viewModel.defaultDeinterlace ? "checkmark.circle.fill" : "circle")
+                                                .foregroundColor(viewModel.defaultDeinterlace ? CinemeltTheme.accent : .gray)
+                                        }
+                                        .padding(.horizontal, 20)
+                                        .padding(.vertical, 12)
+                                        .background(Color.white.opacity(0.05))
+                                        .cornerRadius(12)
+                                        .frame(width: 250)
+                                    }
+                                    .buttonStyle(CinemeltCardButtonStyle())
+                                }
+                                
+                                Spacer()
+                                
+                                // Aspect Ratio
+                                VStack(alignment: .leading, spacing: 15) {
+                                    Text("Default Aspect Ratio")
+                                        .font(CinemeltTheme.fontBody(22))
+                                        .foregroundColor(CinemeltTheme.cream.opacity(0.8))
+                                    
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 15) {
+                                            ForEach(["Default", "16:9", "4:3", "Fill"], id: \.self) { ratio in
+                                                Button(action: { viewModel.defaultAspectRatio = ratio }) {
+                                                    Text(ratio)
+                                                        .font(CinemeltTheme.fontBody(20))
+                                                        .fontWeight(viewModel.defaultAspectRatio == ratio ? .bold : .regular)
+                                                        .padding(.horizontal, 20)
+                                                        .padding(.vertical, 12)
+                                                        .background(
+                                                            viewModel.defaultAspectRatio == ratio ?
+                                                            CinemeltTheme.accent : Color.white.opacity(0.05)
+                                                        )
+                                                        .cornerRadius(12)
+                                                }
+                                                .buttonStyle(CinemeltCardButtonStyle())
+                                                .foregroundColor(viewModel.defaultAspectRatio == ratio ? .black : CinemeltTheme.cream)
                                             }
                                         }
                                         .padding(10)
@@ -372,7 +436,6 @@ struct SettingsView: View {
             .focusSection()
         }
         .background(CinemeltTheme.mainBackground)
-        // MODAL INJECTION
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView(onComplete: { showOnboarding = false })
         }

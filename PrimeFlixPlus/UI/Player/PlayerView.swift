@@ -11,12 +11,16 @@ struct PlayerView: View {
     
     // Focus Management
     enum PlayerFocus: Hashable {
-        case videoSurface
-        case upperControls
+        case videoSurface   // The scrubber/play bar
+        case upperControls  // The entire top row (Settings, Tracks, etc.)
+        
+        // Overlays (Modals)
         case miniDetails
         case autoPlayOverlay
         case trackSelection
         case versionSelection
+        case videoSettings
+        case resumePrompt
     }
     
     @FocusState private var focusedField: PlayerFocus?
@@ -25,7 +29,9 @@ struct PlayerView: View {
         viewModel.showMiniDetails ||
         viewModel.showAutoPlay ||
         viewModel.showTrackSelection ||
-        viewModel.showVersionSelection
+        viewModel.showVersionSelection ||
+        viewModel.showVideoSettings ||
+        viewModel.showResumePrompt
     }
     
     var body: some View {
@@ -60,6 +66,10 @@ struct PlayerView: View {
                     onShowVersions: {
                         withAnimation { viewModel.showVersionSelection = true }
                         focusedField = .versionSelection
+                    },
+                    onShowSettings: {
+                        withAnimation { viewModel.showVideoSettings = true }
+                        focusedField = .videoSettings
                     }
                 )
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
@@ -67,9 +77,7 @@ struct PlayerView: View {
         }
         .onAppear {
             viewModel.configure(repository: repository, channel: channel)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                focusedField = .videoSurface
-            }
+            // Initial focus logic handled by Resume Check in ViewModel
         }
         .onDisappear {
             viewModel.cleanup()
@@ -83,12 +91,15 @@ struct PlayerView: View {
         .onChange(of: viewModel.showControls) { show in
             if show && !areOverlaysActive { focusedField = .videoSurface }
         }
+        .onChange(of: viewModel.showResumePrompt) { show in
+            if show { focusedField = .resumePrompt }
+            else { focusedField = .videoSurface }
+        }
     }
     
     private func interactionLayer(geo: GeometryProxy) -> some View {
         Color.clear
             .contentShape(Rectangle())
-            // CRITICAL: Always allow focus unless a modal overlay is blocking
             .focusable(!areOverlaysActive)
             .focused($focusedField, equals: .videoSurface)
             .background(
@@ -121,8 +132,13 @@ struct PlayerView: View {
                 case .left: viewModel.seekBackward()
                 case .right: viewModel.seekForward()
                 case .up:
-                    if viewModel.showControls { focusedField = .upperControls }
-                    else { viewModel.triggerControls(forceShow: true) }
+                    if viewModel.showControls {
+                        // FIX: Just signal we want "Upper Controls".
+                        // The ControlsOverlayView will decide WHICH button gets focus (Settings).
+                        focusedField = .upperControls
+                    } else {
+                        viewModel.triggerControls(forceShow: true)
+                    }
                 case .down:
                     withAnimation {
                         viewModel.showMiniDetails = true
@@ -142,7 +158,6 @@ struct PlayerView: View {
     
     @ViewBuilder
     private var statusLayers: some View {
-        // Buffering
         if viewModel.isBuffering {
             ZStack {
                 Color.black.opacity(0.4)
@@ -155,7 +170,6 @@ struct PlayerView: View {
             }
         }
         
-        // Scrubbing Preview
         if viewModel.isScrubbing {
             VStack {
                 Spacer()
@@ -238,6 +252,24 @@ struct PlayerView: View {
             )
             .zIndex(56)
             .focused($focusedField, equals: .versionSelection)
+        }
+        
+        if viewModel.showVideoSettings {
+            VideoSettingsOverlay(
+                viewModel: viewModel,
+                onClose: {
+                    withAnimation { viewModel.showVideoSettings = false }
+                    focusedField = .videoSurface
+                }
+            )
+            .zIndex(57)
+            .focused($focusedField, equals: .videoSettings)
+        }
+        
+        if viewModel.showResumePrompt {
+            ResumePromptOverlay(viewModel: viewModel)
+                .zIndex(58)
+                .focused($focusedField, equals: .resumePrompt)
         }
         
         if viewModel.showAutoPlay {
