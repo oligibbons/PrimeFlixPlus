@@ -8,7 +8,10 @@ class ContentInfoWrapper: NSObject {
 
 struct ContentInfo {
     let rawTitle: String
-    let normalizedTitle: String
+    let normalizedTitle: String // Clean for Grouping (e.g. "Severance")
+    let displayTitle: String    // UI Friendly (e.g. "Severance")
+    
+    // Metadata extracted from tags
     let quality: String      // "4K", "1080p", "SD"
     let language: String?    // "English", "French"
     let year: String?
@@ -62,6 +65,31 @@ enum TitleNormalizer {
         pattern: "^(?:[A-Z0-9]{2,4}\\s*[|:-]\\s*)+",
         options: []
     )
+    
+    // Aggressive Tag Stripping List
+    // These are removed from the END of the normalized title to merge "Severance Fr" and "Severance"
+    private static let tagsToRemove: Set<String> = [
+        // Languages
+        "FR", "FRE", "VF", "VOSTFR", "FRENCH",
+        "EN", "ENG", "ENGLISH", "VO",
+        "DE", "GER", "DEUTSCH", "GERMAN",
+        "ES", "SPA", "ESP", "SPANISH", "LATINO",
+        "IT", "ITA", "ITALIAN",
+        "RU", "RUS", "RUSSIAN",
+        "TR", "TUR", "TURKISH",
+        "PT", "POR", "PORTUGUESE", "BR",
+        "PL", "POL", "POLISH",
+        "NL", "DUTCH",
+        "SUB", "DUB", "MULTI",
+        
+        // Quality / Format
+        "4K", "UHD", "2160P", "1080P", "720P", "SD", "FHD", "HD",
+        "HEVC", "H265", "H264", "X264", "X265", "HDR", "10BIT",
+        "BLURAY", "WEB-DL", "WEBRIP", "DV", "ATMOS", "REMUX",
+        
+        // Providers / Junk
+        "AMZN", "NFLX", "DISNEY", "HULU", "APPLE", "TVP", "HBO", "MAX"
+    ]
     
     private static let languageMap: [String: String] = [
         "AR": "Arabic", "ARA": "Arabic", "KSA": "Arabic",
@@ -127,22 +155,42 @@ enum TitleNormalizer {
             }
         }
         
-        // 4. Clean The Extracted Title
+        // 4. Clean The Extracted Title (Basic Chars)
         // Replace dots, underscores, parens with spaces
         let separators = CharacterSet(charactersIn: "._-()[]")
-        let cleanTitle = workingTitle.components(separatedBy: separators)
+        var cleanTitle = workingTitle.components(separatedBy: separators)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .capitalized
         
-        // 5. Detect Quality & Language from RAW string (to catch tags at the end)
+        // 5. Aggressive Suffix Removal Loop (The "Chillio" Fix)
+        // Repeatedly strip known tags from the end until clean
+        // e.g. "Severance Fr 4K" -> "Severance Fr" -> "Severance"
+        var changed = true
+        while changed {
+            changed = false
+            let tokens = cleanTitle.components(separatedBy: " ")
+            if let last = tokens.last?.uppercased() {
+                // Remove if it matches a tag OR looks like a Year (if we haven't found one yet or want to clean it)
+                if tagsToRemove.contains(last) || (Int(last) != nil && last.count == 4) {
+                    cleanTitle = tokens.dropLast().joined(separator: " ")
+                    changed = true
+                }
+            }
+        }
+        
+        // Fallback: If title became empty (e.g. file was just "4K.mp4"), revert
+        if cleanTitle.isEmpty { cleanTitle = "Unknown Title" }
+        
+        // 6. Detect Quality & Language from RAW string (to catch tags at the end)
         let quality = detectQuality(in: rawTitle)
         let language = detectLanguage(in: rawTitle)
         
         let info = ContentInfo(
             rawTitle: rawTitle,
-            normalizedTitle: cleanTitle.isEmpty ? rawTitle : cleanTitle,
+            normalizedTitle: cleanTitle,
+            displayTitle: cleanTitle, // Used for UI
             quality: quality,
             language: language,
             year: detectedYear,
@@ -157,6 +205,7 @@ enum TitleNormalizer {
     
     private static func detectQuality(in text: String) -> String {
         let lower = text.lowercased()
+        if lower.contains("8k") { return "8K" }
         if lower.contains("2160") || lower.contains("4k") || lower.contains("uhd") { return "4K UHD" }
         if lower.contains("1080") { return "1080p" }
         if lower.contains("720") { return "720p" }

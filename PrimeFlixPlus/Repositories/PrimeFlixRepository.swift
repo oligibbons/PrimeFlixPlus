@@ -50,7 +50,7 @@ class PrimeFlixRepository: ObservableObject {
         self.channelRepo = ChannelRepository(context: container.viewContext)
     }
     
-    // MARK: - Passthrough Accessors (Fixes Build Errors)
+    // MARK: - Passthrough Accessors
     // These methods forward requests to the ChannelRepository, maintaining the
     // "Single Source of Truth" API that ViewModels expect.
     
@@ -208,7 +208,8 @@ class PrimeFlixRepository: ObservableObject {
             
             // Run Enrichment if needed (First time or content changed)
             if hasChanges || isFirstTime {
-                await enrichmentService.enrichMovies(
+                // FIXED: Use new 'enrichLibrary' method for Episodes support
+                await enrichmentService.enrichLibrary(
                     playlistUrl: playlistUrl,
                     onStatus: { msg in
                         Task { @MainActor in self.syncStatusMessage = msg }

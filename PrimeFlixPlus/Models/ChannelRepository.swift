@@ -2,7 +2,7 @@ import Foundation
 import CoreData
 
 /// The primary Data Access Object (DAO) for fetching Channels.
-/// Refactored to focus on CRUD operations. Complex logic has been moved to Domain Services.
+/// Now enforces strict deduplication to ensure "One Show, One Entry" across the app.
 class ChannelRepository {
     private let context: NSManagedObjectContext
     
@@ -10,24 +10,28 @@ class ChannelRepository {
         self.context = context
     }
     
-    // MARK: - Standard Lists
+    // MARK: - Standard Lists (Deduplicated)
     
     func getFavorites(type: String) -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "isFavorite == YES AND type == %@", type)
         request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
-        return (try? context.fetch(request)) ?? []
+        
+        let raw = (try? context.fetch(request)) ?? []
+        return deduplicateChannels(raw)
     }
     
     func getRecentlyAdded(type: String, limit: Int) -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "type == %@", type)
         request.sortDescriptors = [
-            NSSortDescriptor(key: "addedAt", ascending: false),
-            NSSortDescriptor(key: "title", ascending: true)
+            NSSortDescriptor(key: "addedAt", ascending: false)
         ]
-        request.fetchLimit = limit
-        return (try? context.fetch(request)) ?? []
+        // Fetch extra to account for deduplication removal
+        request.fetchLimit = limit * 4
+        
+        let raw = (try? context.fetch(request)) ?? []
+        return Array(deduplicateChannels(raw).prefix(limit))
     }
     
     func getRecentFallback(type: String, limit: Int) -> [Channel] {
@@ -38,13 +42,14 @@ class ChannelRepository {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "type == %@ AND group == %@", type, groupName)
         request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
-        request.fetchLimit = limit
-        return deduplicateChannels((try? context.fetch(request)) ?? [])
+        request.fetchLimit = limit * 3
+        
+        let raw = (try? context.fetch(request)) ?? []
+        return Array(deduplicateChannels(raw).prefix(limit))
     }
     
     // MARK: - Smart Fetching
     
-    /// Logic: Checks WatchHistory. If a series is finished, it asks NextEpisodeService for the next one.
     func getSmartContinueWatching(type: String) -> [Channel] {
         let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -60, to: Date()) ?? Date()
@@ -53,8 +58,6 @@ class ChannelRepository {
         request.fetchLimit = 50
         
         var results: [Channel] = []
-        
-        // Initialize the service for series logic
         let nextEpService = NextEpisodeService(context: context)
         
         context.performAndWait {
@@ -68,24 +71,21 @@ class ChannelRepository {
                 let percentage = Double(item.duration) > 0 ? Double(item.position) / Double(item.duration) : 0
                 
                 if channel.type == "movie" {
-                    // Movie Logic: Resume if between 5% and 95%
                     if percentage > 0.05 && percentage < 0.95 {
                         results.append(channel)
                     }
                 } else if channel.type == "series" || channel.type == "series_episode" {
-                    // Series Logic: Resume OR Find Next
+                    // Use Normalized Title as Key to prevent duplicate entries for same show
                     let info = TitleNormalizer.parse(rawTitle: channel.title)
-                    // Use seriesId as key if available, else normalized title
-                    let seriesKey = channel.seriesId ?? info.normalizedTitle
+                    let seriesKey = info.normalizedTitle
                     
                     if processedSeriesMap[seriesKey] == true { continue }
                     
                     if percentage < 0.95 {
-                        // Resume current episode
                         results.append(channel)
                         processedSeriesMap[seriesKey] = true
                     } else {
-                        // Episode finished? Find next.
+                        // Finished? Find next
                         if let nextEp = nextEpService.findNextEpisode(currentChannel: channel) {
                             results.append(nextEp)
                             processedSeriesMap[seriesKey] = true
@@ -112,10 +112,10 @@ class ChannelRepository {
         }
         request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
-        request.fetchLimit = 500
+        request.fetchLimit = 1000
         
-        guard let allChannels = try? context.fetch(request) else { return [] }
-        return deduplicateChannels(allChannels)
+        let raw = (try? context.fetch(request)) ?? []
+        return deduplicateChannels(raw)
     }
     
     func getGroups(playlistUrl: String, type: String) -> [String] {
@@ -127,8 +127,7 @@ class ChannelRepository {
         request.sortDescriptors = [NSSortDescriptor(key: "group", ascending: true)]
         
         guard let results = try? context.fetch(request) as? [[String: Any]] else { return [] }
-        let groups = results.compactMap { $0["group"] as? String }
-        return groups
+        return results.compactMap { $0["group"] as? String }
     }
     
     // MARK: - Search
@@ -143,10 +142,8 @@ class ChannelRepository {
         
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let request = NSFetchRequest<Channel>(entityName: "Channel")
-        
-        // Simple CONTAINS search
         request.predicate = NSPredicate(format: "title CONTAINS[cd] %@", normalizedQuery)
-        request.fetchLimit = 100
+        request.fetchLimit = 200
         
         var movies: [Channel] = []
         var series: [Channel] = []
@@ -160,7 +157,7 @@ class ChannelRepository {
             }
         }
         
-        return SearchResults(movies: movies, series: deduplicateChannels(series))
+        return SearchResults(movies: deduplicateChannels(movies), series: deduplicateChannels(series))
     }
     
     func searchLiveContent(query: String) -> (categories: [String], channels: [Channel]) {
@@ -203,22 +200,42 @@ class ChannelRepository {
         return try? context.fetch(request).first
     }
     
-    func toggleFavorite(channel: Channel) {
-        channel.isFavorite.toggle()
-        try? context.save()
-    }
+    // MARK: - Deduplication Engine
     
+    /// Groups channels by their `normalizedTitle` and returns the single best version for display.
     private func deduplicateChannels(_ channels: [Channel]) -> [Channel] {
-        var uniqueMap = [String: Channel]()
+        var groups: [String: [Channel]] = [:]
+        
+        // 1. Grouping
         for channel in channels {
             let info = TitleNormalizer.parse(rawTitle: channel.canonicalTitle ?? channel.title)
-            var key = info.normalizedTitle.lowercased()
-            
-            if channel.type == "series_episode" {
-                key += "_s\(channel.season)_e\(channel.episode)"
-            }
-            if uniqueMap[key] == nil { uniqueMap[key] = channel }
+            // Key is the clean title (e.g. "SEVERANCE")
+            let key = info.normalizedTitle.uppercased()
+            groups[key, default: []].append(channel)
         }
-        return Array(uniqueMap.values)
+        
+        // 2. Selection (Best Candidate)
+        var unique: [Channel] = []
+        for (_, variants) in groups {
+            // Sort variants to find the "best" one to display
+            // Criteria:
+            // 1. Has metadata (cover/backdrop)
+            // 2. Highest Quality Score
+            // 3. Alphabetical
+            
+            if let best = variants.max(by: { a, b in
+                let aHasCover = a.cover != nil
+                let bHasCover = b.cover != nil
+                if aHasCover != bHasCover { return aHasCover ? false : true } // Prefer existing cover
+                
+                let infoA = TitleNormalizer.parse(rawTitle: a.canonicalTitle ?? a.title)
+                let infoB = TitleNormalizer.parse(rawTitle: b.canonicalTitle ?? b.title)
+                return infoA.qualityScore < infoB.qualityScore
+            }) {
+                unique.append(best)
+            }
+        }
+        
+        return unique
     }
 }

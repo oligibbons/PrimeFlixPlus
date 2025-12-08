@@ -3,6 +3,7 @@ import CoreData
 
 /// Service responsible for calculating the "Up Next" logic.
 /// Uses a Hybrid Strategy: Checks strict Database relationships first, falls back to Regex/Title parsing.
+/// VERSION-AWARE: Prioritizes maintaining the same Language/Quality as the current stream.
 class NextEpisodeService {
     
     private let context: NSManagedObjectContext
@@ -14,99 +15,125 @@ class NextEpisodeService {
     // MARK: - Public API
     
     func findNextEpisode(currentChannel: Channel) -> Channel? {
-        // Strategy A: Strict Metadata Match (Xtream / Structured Data)
-        if let seriesId = currentChannel.seriesId, !seriesId.isEmpty, seriesId != "0" {
-            // 1. Check next episode in current season
-            if let next = findSpecificEpisodeByMetadata(
-                playlistUrl: currentChannel.playlistUrl,
-                seriesId: seriesId,
-                season: Int(currentChannel.season),
-                episode: Int(currentChannel.episode) + 1
-            ) {
-                return next
-            }
-            
-            // 2. Check first episode of next season
-            if let nextSeason = findSpecificEpisodeByMetadata(
-                playlistUrl: currentChannel.playlistUrl,
-                seriesId: seriesId,
-                season: Int(currentChannel.season) + 1,
-                episode: 1
-            ) {
-                return nextSeason
-            }
+        // 1. Analyze Current Stream to establish "Sticky" preferences
+        // We capture the "Signature" of what the user is currently watching
+        let currentRaw = currentChannel.canonicalTitle ?? currentChannel.title
+        let currentInfo = TitleNormalizer.parse(rawTitle: currentRaw)
+        
+        // Target: Next Episode in Season
+        if let nextEp = findBestMatchForEpisode(
+            currentChannel: currentChannel,
+            currentInfo: currentInfo,
+            targetSeason: Int(currentChannel.season),
+            targetEpisode: Int(currentChannel.episode) + 1
+        ) {
+            return nextEp
         }
         
-        // Strategy B: Fallback Title Parsing (M3U / Missing Metadata)
-        // If the provider didn't send a series_id, we parse "Show Name S01E01" from the title.
-        let raw = currentChannel.title
-        let (s, e) = ChannelStruct.parseSeasonEpisode(from: raw)
-        
-        if s > 0 || e > 0 {
-            return findNextByTitle(currentChannel: currentChannel, season: s, episode: e)
+        // Target: First Episode of Next Season
+        if let nextSeasonEp = findBestMatchForEpisode(
+            currentChannel: currentChannel,
+            currentInfo: currentInfo,
+            targetSeason: Int(currentChannel.season) + 1,
+            targetEpisode: 1
+        ) {
+            return nextSeasonEp
         }
         
         return nil
     }
     
-    // MARK: - Strategy A: Strict DB Lookup
+    // MARK: - Smart Matching Engine
     
-    private func findSpecificEpisodeByMetadata(playlistUrl: String, seriesId: String, season: Int, episode: Int) -> Channel? {
-        let req = NSFetchRequest<Channel>(entityName: "Channel")
-        req.predicate = NSPredicate(
-            format: "playlistUrl == %@ AND seriesId == %@ AND season == %d AND episode == %d",
-            playlistUrl, seriesId, season, episode
+    private func findBestMatchForEpisode(
+        currentChannel: Channel,
+        currentInfo: ContentInfo,
+        targetSeason: Int,
+        targetEpisode: Int
+    ) -> Channel? {
+        
+        // A. Fetch All Candidates for this specific episode (SxxExx)
+        // We fetch ALL versions (4K, 1080p, French, English) of the target episode
+        let candidates = fetchCandidates(
+            playlistUrl: currentChannel.playlistUrl,
+            seriesId: currentChannel.seriesId,
+            showTitle: currentInfo.normalizedTitle,
+            season: targetSeason,
+            episode: targetEpisode
         )
-        req.fetchLimit = 1
-        return try? context.fetch(req).first
+        
+        if candidates.isEmpty { return nil }
+        
+        // B. Rank Candidates based on "Stickiness" to current stream
+        // Logic: Keep the user on the same track (Lang/Quality) if possible.
+        
+        let sorted = candidates.sorted { c1, c2 in
+            let info1 = TitleNormalizer.parse(rawTitle: c1.canonicalTitle ?? c1.title)
+            let info2 = TitleNormalizer.parse(rawTitle: c2.canonicalTitle ?? c2.title)
+            
+            // Criteria 1: Language Match (Highest Priority)
+            // If I'm watching French, I MUST get the French next episode.
+            let lang1Match = (info1.language == currentInfo.language)
+            let lang2Match = (info2.language == currentInfo.language)
+            
+            if lang1Match != lang2Match {
+                return lang1Match // Prefer the one that matches
+            }
+            
+            // Criteria 2: Exact Quality Match
+            // If I'm watching 4K, prefer 4K.
+            let qual1Match = (info1.quality == currentInfo.quality)
+            let qual2Match = (info2.quality == currentInfo.quality)
+            
+            if qual1Match != qual2Match {
+                return qual1Match
+            }
+            
+            // Criteria 3: Fallback to Highest Quality Score
+            // If exact match fails (e.g. 4K next ep missing), give me the best available (1080p).
+            return info1.qualityScore > info2.qualityScore
+        }
+        
+        // Return the best match
+        return sorted.first
     }
     
-    // MARK: - Strategy B: Fuzzy Title Lookup
+    // MARK: - Database Fetching
     
-    private func findNextByTitle(currentChannel: Channel, season: Int, episode: Int) -> Channel? {
-        // Try Next Episode in Season
-        if let next = findEpisodeVariant(original: currentChannel, season: season, episode: episode + 1) {
-            return next
-        }
-        // Try First Episode of Next Season
-        if let nextSeason = findEpisodeVariant(original: currentChannel, season: season + 1, episode: 1) {
-            return nextSeason
-        }
-        return nil
-    }
-    
-    private func findEpisodeVariant(original: Channel, season: Int, episode: Int) -> Channel? {
+    private func fetchCandidates(playlistUrl: String, seriesId: String?, showTitle: String, season: Int, episode: Int) -> [Channel] {
         let req = NSFetchRequest<Channel>(entityName: "Channel")
         
-        // Prepare target strings
-        let sPadded = String(format: "%02d", season)
-        let ePadded = String(format: "%02d", episode)
+        // Strategy 1: Strict Metadata (Xtream / Structured)
+        // Fast & Accurate if seriesId exists
+        if let sid = seriesId, !sid.isEmpty, sid != "0" {
+            req.predicate = NSPredicate(
+                format: "playlistUrl == %@ AND seriesId == %@ AND season == %d AND episode == %d",
+                playlistUrl, sid, season, episode
+            )
+            // We do NOT limit to 1 here anymore; we want all versions to sort them.
+            if let results = try? context.fetch(req), !results.isEmpty {
+                return results
+            }
+        }
         
-        // Identify the "Show Name" base
-        let info = TitleNormalizer.parse(rawTitle: original.title)
-        // Use a prefix scan to limit the DB search space before filtering in Swift
-        let prefix = String(info.normalizedTitle.prefix(5))
+        // Strategy 2: Fuzzy Title Matching (M3U / Unstructured)
+        // If seriesId is missing, we match by Title + Season + Episode columns
+        
+        // Optimization: Prefix match to limit DB scan
+        let prefix = String(showTitle.prefix(4))
         
         req.predicate = NSPredicate(
-            format: "playlistUrl == %@ AND type == 'series' AND title BEGINSWITH[cd] %@",
-            original.playlistUrl, prefix
+            format: "playlistUrl == %@ AND type == 'series_episode' AND season == %d AND episode == %d AND title BEGINSWITH[cd] %@",
+            playlistUrl, season, episode, prefix
         )
-        req.fetchLimit = 100 // Cap to prevent memory explosion on huge lists
         
-        guard let candidates = try? context.fetch(req) else { return nil }
+        guard let potential = try? context.fetch(req) else { return [] }
         
-        // Perform precise matching in memory (Core Data regex is expensive/limited)
-        return candidates.first { ch in
-            let title = ch.title.uppercased()
-            
-            // Ensure it's actually the same show (contains normalized title)
-            if !ch.title.localizedCaseInsensitiveContains(info.normalizedTitle) { return false }
-            
-            // Check for standard SxxExx patterns
-            // "S01E02" OR "S1E2" OR "1x02"
-            return title.contains("S\(sPadded)E\(ePadded)") ||
-                   title.contains("S\(season)E\(episode)") ||
-                   title.contains("\(season)X\(ePadded)")
+        // Strict in-memory verification
+        return potential.filter { ch in
+            let chInfo = TitleNormalizer.parse(rawTitle: ch.canonicalTitle ?? ch.title)
+            // Ensure it's actually the same show (e.g. "Severance" != "Severance Special")
+            return TitleNormalizer.similarity(between: showTitle, and: chInfo.normalizedTitle) > 0.85
         }
     }
 }

@@ -13,103 +13,105 @@ class VersioningService {
     
     /// Finds all channels that represent the same content, preserving language variants.
     func getVersions(for channel: Channel) -> [Channel] {
-        // 1. Series Episode Matching (Strict)
-        if channel.type == "series_episode" {
-            // A. Try Series ID Match
-            if let sid = channel.seriesId, !sid.isEmpty, sid != "0" {
-                let request = NSFetchRequest<Channel>(entityName: "Channel")
-                request.predicate = NSPredicate(
-                    format: "seriesId == %@ AND season == %d AND episode == %d",
-                    sid, channel.season, channel.episode
-                )
-                if let matches = try? context.fetch(request), !matches.isEmpty {
-                    return deduplicateChannels(matches)
-                }
-            }
-            
-            // B. Fallback: Fuzzy Title Match on SxxExx
-            let rawSource = channel.canonicalTitle ?? channel.title
-            let info = TitleNormalizer.parse(rawTitle: rawSource)
-            let baseTitle = info.normalizedTitle.lowercased()
-            
-            let prefix = String(baseTitle.prefix(3))
-            let request = NSFetchRequest<Channel>(entityName: "Channel")
-            request.predicate = NSPredicate(format: "type == 'series_episode' AND title BEGINSWITH[cd] %@", prefix)
-            request.fetchLimit = 100
-            
-            guard let candidates = try? context.fetch(request) else { return [channel] }
-            
-            let targetSE = (channel.season, channel.episode)
-            
-            let variants = candidates.filter { candidate in
-                if candidate.season != targetSE.0 || candidate.episode != targetSE.1 { return false }
-                
-                let candRaw = candidate.canonicalTitle ?? candidate.title
-                let candInfo = TitleNormalizer.parse(rawTitle: candRaw)
-                
-                return TitleNormalizer.similarity(between: baseTitle, and: candInfo.normalizedTitle.lowercased()) > 0.8
-            }
-            return variants.isEmpty ? [channel] : deduplicateChannels(variants)
-        }
         
-        // 2. Movie / Series Container Matching (Fuzzy)
+        // 1. Analyze the input channel using the new Aggressive Normalizer
         let rawSource = channel.canonicalTitle ?? channel.title
         let info = TitleNormalizer.parse(rawTitle: rawSource)
         let targetTitle = info.normalizedTitle.lowercased()
         
-        let prefix = String(targetTitle.prefix(1))
+        // Optimization: Use a broad prefix search to limit DB hits
+        // We assume the first 3 chars of the normalized title are stable.
+        guard targetTitle.count >= 2 else { return [channel] }
+        let prefix = String(targetTitle.prefix(3))
+        
         let request = NSFetchRequest<Channel>(entityName: "Channel")
-        request.predicate = NSPredicate(format: "type == %@ AND title BEGINSWITH[cd] %@", channel.type, prefix)
-        request.fetchLimit = 500
+        request.sortDescriptors = [NSSortDescriptor(key: "addedAt", ascending: false)]
+        request.fetchLimit = 1000
         
-        guard let candidates = try? context.fetch(request) else { return [channel] }
+        var matches: [Channel] = []
         
-        // Filter using Levenshtein Distance
-        let variants = candidates.filter { candidate in
-            let candRaw = candidate.canonicalTitle ?? candidate.title
-            let candInfo = TitleNormalizer.parse(rawTitle: candRaw)
-            let candTitle = candInfo.normalizedTitle.lowercased()
+        // 2. Logic Split: Series Episodes vs Movies/SeriesContainers
+        if channel.type == "series_episode" {
+            // --- EPISODE MATCHING ---
+            // Matches must have: Same Normalized Title + Same SxxExx
             
-            if candTitle == targetTitle { return true }
-            if candTitle.contains(targetTitle) || targetTitle.contains(candTitle) { return true }
+            // Try Strict Series ID first (if both have it)
+            if let sid = channel.seriesId, !sid.isEmpty, sid != "0" {
+                request.predicate = NSPredicate(
+                    format: "seriesId == %@ AND season == %d AND episode == %d",
+                    sid, channel.season, channel.episode
+                )
+            } else {
+                // Fallback to Fuzzy Title Matching
+                // Uses the Aggressive Normalized Title prefix
+                request.predicate = NSPredicate(
+                    format: "type == 'series_episode' AND season == %d AND episode == %d AND title BEGINSWITH[cd] %@",
+                    channel.season, channel.episode, prefix
+                )
+            }
             
-            let score = TitleNormalizer.similarity(between: targetTitle, and: candTitle)
-            return score > 0.7
+            guard let candidates = try? context.fetch(request) else { return [channel] }
+            
+            matches = candidates.filter { candidate in
+                // Double check Series ID if available to prevent cross-show collisions
+                if let s1 = channel.seriesId, let s2 = candidate.seriesId, s1 != "0", s2 != "0", s1 != s2 {
+                    return false
+                }
+                
+                let candRaw = candidate.canonicalTitle ?? candidate.title
+                let candInfo = TitleNormalizer.parse(rawTitle: candRaw)
+                
+                // Strict Title Match on the Clean Normalized Title
+                // "Severance Fr" -> "Severance" == "Severance"
+                return TitleNormalizer.similarity(between: targetTitle, and: candInfo.normalizedTitle.lowercased()) > 0.85
+            }
+            
+        } else {
+            // --- MOVIE / SERIES CONTAINER MATCHING ---
+            
+            request.predicate = NSPredicate(
+                format: "type == %@ AND title BEGINSWITH[cd] %@",
+                channel.type, prefix
+            )
+            
+            guard let candidates = try? context.fetch(request) else { return [channel] }
+            
+            matches = candidates.filter { candidate in
+                let candRaw = candidate.canonicalTitle ?? candidate.title
+                let candInfo = TitleNormalizer.parse(rawTitle: candRaw)
+                let candTitle = candInfo.normalizedTitle.lowercased()
+                
+                // Exact Match (Fast)
+                if candTitle == targetTitle { return true }
+                
+                // Fuzzy Match (Slower but handles "Severance." vs "Severance")
+                return TitleNormalizer.similarity(between: targetTitle, and: candTitle) > 0.90
+            }
         }
         
-        return variants.isEmpty ? [channel] : deduplicateChannels(variants)
+        // 3. Deduplicate by unique content URL (keep unique versions)
+        let unique = deduplicateVariants(matches)
+        
+        // Ensure at least the original channel is returned if logic fails
+        if unique.isEmpty { return [channel] }
+        
+        return unique
     }
     
     // MARK: - Private Helpers
     
-    private func deduplicateChannels(_ channels: [Channel]) -> [Channel] {
-        var uniqueMap = [String: Channel]()
-        uniqueMap.reserveCapacity(channels.count)
+    /// Deduplicates entries while preserving distinct Versions (Lang/Quality).
+    private func deduplicateVariants(_ channels: [Channel]) -> [Channel] {
+        var seenUrls = Set<String>()
+        var uniqueChannels: [Channel] = []
         
-        for channel in channels {
-            let raw = channel.canonicalTitle ?? channel.title
-            let info = TitleNormalizer.parse(rawTitle: raw)
-            
-            // BASE KEY: Normalized Title (e.g. "Iron Man")
-            var key = info.normalizedTitle.lowercased()
-            
-            // ADDITION: Series Metadata
-            if channel.type == "series_episode" {
-                key += "_s\(channel.season)_e\(channel.episode)"
-                if let sid = channel.seriesId { key += "_\(sid)" }
-            }
-            
-            // ADDITION: Language & Quality
-            // This ensures "French 1080p" and "English 4K" are unique keys
-            let lang = info.language ?? "default"
-            let quality = info.quality
-            key += "_\(lang)_\(quality)"
-            
-            // Store unique variant
-            if uniqueMap[key] == nil {
-                uniqueMap[key] = channel
+        for ch in channels {
+            if !seenUrls.contains(ch.url) {
+                uniqueChannels.append(ch)
+                seenUrls.insert(ch.url)
             }
         }
-        return Array(uniqueMap.values)
+        
+        return uniqueChannels
     }
 }

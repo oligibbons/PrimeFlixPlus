@@ -28,6 +28,7 @@ actor TmdbClient {
                 var results = try await searchTv(query: title, year: year)
                 
                 // 2. Fallback: If no results, try WITHOUT year
+                // TV Shows often have years that don't match the file (e.g. Season Year vs Show Start Year)
                 if results.isEmpty && year != nil {
                     print("⚠️ No TV match for '\(title)' + '\(year ?? "")'. Retrying without year...")
                     results = try await searchTv(query: title, year: nil)
@@ -60,8 +61,6 @@ actor TmdbClient {
     
     func searchMovie(query: String, year: String? = nil) async throws -> [TmdbMovieResult] {
         var params = ["query": query, "language": "en-US", "include_adult": "false"]
-        if let year = year { params["year"] = year }
-        // NEW: primary_release_year is often safer for movies
         if let year = year { params["primary_release_year"] = year }
         
         let response: TmdbSearchResponse<TmdbMovieResult> = try await fetch("/search/movie", params: params)
@@ -71,6 +70,7 @@ actor TmdbClient {
     func searchTv(query: String, year: String? = nil) async throws -> [TmdbTvResult] {
         var params = ["query": query, "language": "en-US", "include_adult": "false"]
         if let year = year { params["first_air_date_year"] = year }
+        
         let response: TmdbSearchResponse<TmdbTvResult> = try await fetch("/search/tv", params: params)
         return response.results
     }
@@ -79,7 +79,7 @@ actor TmdbClient {
         let params = [
             "append_to_response": "credits,similar,release_dates,videos,images,external_ids",
             "language": "en-US",
-            "include_image_language": "en,null" // Critical: Gets english logos even for foreign films
+            "include_image_language": "en,null"
         ]
         return try await fetch("/movie/\(id)", params: params)
     }

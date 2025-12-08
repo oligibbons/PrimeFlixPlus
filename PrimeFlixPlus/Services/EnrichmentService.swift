@@ -2,7 +2,7 @@ import Foundation
 import CoreData
 
 /// Service responsible for "Enriching" content with metadata and artwork from TMDB.
-/// Background worker that fixes missing covers for Movies AND Series using Smart Fallback logic.
+/// Background worker that fixes missing covers and populates Episode Metadata (Titles/Stills).
 class EnrichmentService {
     
     private let context: NSManagedObjectContext
@@ -15,107 +15,128 @@ class EnrichmentService {
     
     // MARK: - Main Enrichment Loop
     
-    /// Scans a playlist for items without covers and fetches them from TMDB.
-    func enrichMovies(playlistUrl: String, onStatus: @escaping (String) -> Void) async {
+    /// Scans the library for items needing metadata and fetches it efficiently.
+    func enrichLibrary(playlistUrl: String, onStatus: @escaping (String) -> Void) async {
         
-        // 1. Identify candidates (Movies & Series with missing covers)
-        var fetchedCandidates: [NSManagedObjectID] = []
+        // 1. Identify candidates (Items missing metadata)
+        // We look for items with missing covers OR Series Episodes missing episode names
+        var candidates: [Channel] = []
         
         await context.perform {
             let req = NSFetchRequest<Channel>(entityName: "Channel")
-            // Target items from this playlist that are Movies or Series
             req.predicate = NSPredicate(
-                format: "playlistUrl == %@ AND (type == 'movie' OR type == 'series')",
+                format: "playlistUrl == %@ AND (type == 'movie' OR type == 'series' OR type == 'series_episode')",
                 playlistUrl
             )
-            req.fetchLimit = 2000 // Process in chunks
+            // Fetch everything to group them (Memory optimized by only fetching needed properties later if possible,
+            // but for grouping we need titles).
+            // Limiting to 5000 to prevent OOM on huge playlists.
+            req.fetchLimit = 5000
             
             if let results = try? self.context.fetch(req) {
-                // Filter: Only process items with no cover, or empty string
-                fetchedCandidates = results.filter { ch in
-                    guard let c = ch.cover, !c.isEmpty else { return true }
-                    // Optional: Add logic to re-check items with generic placeholders if needed
+                candidates = results.filter { ch in
+                    // Re-process if:
+                    // 1. Cover is missing
+                    // 2. It's an episode and missing a proper Episode Name
+                    if ch.cover == nil || ch.cover?.isEmpty == true { return true }
+                    if ch.type == "series_episode" && (ch.episodeName == nil || ch.episodeName!.isEmpty) { return true }
                     return false
-                }.map { $0.objectID }
+                }
             }
         }
         
-        let candidates = fetchedCandidates
         if candidates.isEmpty { return }
         
-        // 2. Process in small batches to respect API limits
-        let batchSize = 10
-        let chunks = stride(from: 0, to: candidates.count, by: batchSize).map {
-            Array(candidates[$0..<min($0 + batchSize, candidates.count)])
+        // 2. Group by Normalized Title (e.g. "Severance") to minimize API calls
+        let groups = Dictionary(grouping: candidates) { ch -> String in
+            let info = TitleNormalizer.parse(rawTitle: ch.canonicalTitle ?? ch.title)
+            return info.normalizedTitle
         }
         
-        for (index, chunk) in chunks.enumerated() {
-            if index % 5 == 0 {
-                let progressMsg = "Enriching Library (\(index * batchSize)/\(candidates.count))..."
-                onStatus(progressMsg)
+        let totalGroups = groups.keys.count
+        var processed = 0
+        
+        // 3. Process Groups
+        for (showTitle, items) in groups {
+            processed += 1
+            if processed % 5 == 0 {
+                onStatus("Enriching: \(showTitle) (\(processed)/\(totalGroups))")
             }
             
-            await processBatch(chunk: chunk)
+            guard let first = items.first else { continue }
+            let type = (first.type == "series" || first.type == "series_episode") ? "series" : "movie"
+            
+            // Extract Year from one of the items if possible
+            let year = items.compactMap { TitleNormalizer.parse(rawTitle: $0.canonicalTitle ?? $0.title).year }.first
+            
+            await processGroup(title: showTitle, year: year, type: type, items: items)
         }
     }
     
-    // MARK: - Internal Batch Logic
+    // MARK: - Group Logic
     
-    private func processBatch(chunk: [NSManagedObjectID]) async {
+    private func processGroup(title: String, year: String?, type: String, items: [Channel]) async {
         
-        await withTaskGroup(of: (NSManagedObjectID, String?).self) { group in
-            for oid in chunk {
-                group.addTask {
-                    var rawTitle: String = ""
-                    var type: String = "movie"
+        // A. Find the Show/Movie ID
+        guard let match = await tmdbClient.findBestMatch(title: title, year: year, type: type) else { return }
+        
+        let posterUrl = match.poster.map { "https://image.tmdb.org/t/p/w500\($0)" }
+        let backdropUrl = match.backdrop.map { "https://image.tmdb.org/t/p/original\($0)" }
+        
+        // B. Handle Series Episodes (Deep Fetch)
+        if type == "series" {
+            // 1. Get Show Details (for generic description/backdrop)
+            guard let showDetails = try? await tmdbClient.getTvDetails(id: match.id) else { return }
+            
+            // 2. Identify needed seasons
+            let neededSeasons = Set(items.map { Int($0.season) }).filter { $0 > 0 }
+            
+            for seasonNum in neededSeasons {
+                // 3. Fetch Season Details
+                if let seasonData = try? await tmdbClient.getTvSeason(tvId: match.id, seasonNumber: seasonNum) {
                     
-                    // A. Read Data (Thread-safe)
-                    await self.context.perform {
-                        if let ch = try? self.context.existingObject(with: oid) as? Channel {
-                            rawTitle = ch.canonicalTitle ?? ch.title
-                            type = ch.type
+                    // 4. Update Episodes in this Season
+                    await context.perform {
+                        for ch in items where ch.season == Int16(seasonNum) {
+                            // Assign Show Poster (so grids look uniform)
+                            if ch.cover == nil { ch.cover = posterUrl }
+                            
+                            // Assign Episode Metadata
+                            if let epData = seasonData.episodes.first(where: { $0.episodeNumber == Int(ch.episode) }) {
+                                ch.episodeName = epData.name
+                                ch.overview = epData.overview
+                                if let still = epData.stillPath {
+                                    ch.backdrop = "https://image.tmdb.org/t/p/w500\(still)"
+                                } else {
+                                    ch.backdrop = backdropUrl // Fallback to show backdrop
+                                }
+                            }
                         }
                     }
-                    
-                    if rawTitle.isEmpty { return (oid, nil) }
-                    
-                    // B. Parse Title (Using the new Anchor-Based Normalizer)
-                    let info = TitleNormalizer.parse(rawTitle: rawTitle)
-                    
-                    // C. Smart Network Call
-                    // Uses the new findBestMatch which handles the "Year Mismatch" fallback automatically
-                    if let match = await self.tmdbClient.findBestMatch(
-                        title: info.normalizedTitle,
-                        year: info.year,
-                        type: type
-                    ) {
-                        if let poster = match.poster {
-                            return (oid, "https://image.tmdb.org/t/p/w500\(poster)")
-                        }
-                    }
-                    
-                    return (oid, nil)
                 }
             }
             
-            // D. Collect Results
-            var updates: [(NSManagedObjectID, String)] = []
-            for await (oid, newCover) in group {
-                if let cover = newCover {
-                    updates.append((oid, cover))
+            // 5. Update Items that didn't match specific episodes (or Season 0)
+            await context.perform {
+                for ch in items where ch.season == 0 {
+                    if ch.cover == nil { ch.cover = posterUrl }
+                    if ch.backdrop == nil { ch.backdrop = backdropUrl }
+                    if ch.overview == nil { ch.overview = showDetails.overview }
                 }
+                try? self.context.save()
             }
             
-            // E. Write Changes (Thread-safe)
-            if !updates.isEmpty {
-                await self.context.perform {
-                    for (oid, cover) in updates {
-                        if let ch = try? self.context.existingObject(with: oid) as? Channel {
-                            ch.cover = cover
-                        }
-                    }
-                    try? self.context.save()
+        } else {
+            // C. Handle Movies (Simple)
+            await context.perform {
+                for ch in items {
+                    if ch.cover == nil { ch.cover = posterUrl }
+                    if ch.backdrop == nil { ch.backdrop = backdropUrl }
+                    
+                    // Optional: Fetch detailed movie info for overview if needed,
+                    // but usually we fetch that on-demand in DetailsView to save bandwidth.
                 }
+                try? self.context.save()
             }
         }
     }

@@ -1,5 +1,3 @@
-// oligibbons/primeflixplus/PrimeFlixPlus-87ed36e89476dd94828b2fb759896cdbd9a22d84/PrimeFlixPlus/UI/DetailsView.swift
-
 import SwiftUI
 
 struct DetailsView: View {
@@ -52,7 +50,9 @@ struct DetailsView: View {
             }
         }
         .onExitCommand { onBack() }
+        
         // --- SHEET 1: Episode Version Picker ---
+        // Displayed when an episode has multiple versions (e.g. 4K, 1080p, French)
         .confirmationDialog(
             "Select Version",
             isPresented: $viewModel.showEpisodeVersionPicker,
@@ -67,13 +67,14 @@ struct DetailsView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        // --- SHEET 2: Top-Level Version Selector (Fixed) ---
+        
+        // --- SHEET 2: Top-Level Version Selector ---
+        // Displayed when the Movie (or Series Container) has multiple versions
         .confirmationDialog(
             "Select Quality",
             isPresented: $viewModel.showVersionSelector,
             titleVisibility: .visible
         ) {
-            // Updated to handle VersionOption struct
             ForEach(viewModel.availableVersions) { option in
                 Button(option.label) {
                     viewModel.userSelectedVersion(option.channel)
@@ -137,6 +138,7 @@ struct DetailsView: View {
                 
                 // --- Title & Metadata ---
                 VStack(alignment: .leading, spacing: 15) {
+                    // Logo or Title
                     Text(viewModel.tmdbDetails?.displayTitle ?? viewModel.channel.title)
                         .font(CinemeltTheme.fontTitle(90))
                         .foregroundColor(CinemeltTheme.cream)
@@ -161,9 +163,9 @@ struct DetailsView: View {
                     .padding(.horizontal, 80)
                     .focusSection()
                 
-                // --- Top-Level Version Selector ---
+                // --- Top-Level Version Selector (If multiple versions found) ---
                 if viewModel.availableVersions.count > 1 {
-                    versionSelector
+                    versionSelectorButton
                         .padding(.horizontal, 80)
                         .focusSection()
                 }
@@ -174,14 +176,14 @@ struct DetailsView: View {
                         .focusSection()
                 }
                 
-                // --- Similar Content Rail (NEW) ---
+                // --- Similar Content Rail ---
                 if !viewModel.similarContent.isEmpty {
                     similarContentRail
                         .focusSection()
                 }
                 
                 // --- Seasons/Episodes (Series Only) ---
-                if viewModel.channel.type == "series" {
+                if viewModel.channel.type == "series" || viewModel.channel.type == "series_episode" {
                     seriesContent
                 }
                 
@@ -192,6 +194,7 @@ struct DetailsView: View {
     
     private var metadataRow: some View {
         HStack(spacing: 25) {
+            // Quality Badge (Derived from selected version)
             if let v = viewModel.selectedVersion {
                 Text(v.quality ?? "HD")
                     .font(CinemeltTheme.fontTitle(20))
@@ -232,8 +235,10 @@ struct DetailsView: View {
             // Play Button
             Button(action: {
                 if let target = viewModel.smartPlayTarget {
+                    // Series: Play smart target
                     viewModel.onPlayEpisodeClicked(target)
                 } else {
+                    // Movie: Check versions or play directly
                     if viewModel.availableVersions.count > 1 {
                         viewModel.showVersionSelector = true
                     } else {
@@ -269,17 +274,16 @@ struct DetailsView: View {
         }
     }
     
-    private var versionSelector: some View {
+    private var versionSelectorButton: some View {
         Button(action: { viewModel.showVersionSelector = true }) {
             HStack {
                 Image(systemName: "square.stack.3d.up")
                 Text("Versions (\(viewModel.availableVersions.count))")
-                if let selected = viewModel.selectedVersion {
-                    // Find the label for the selected version
-                    if let option = viewModel.availableVersions.first(where: { $0.id == selected.url }) {
-                         Text("- \(option.label)")
-                            .foregroundColor(.gray)
-                    }
+                
+                if let selected = viewModel.selectedVersion,
+                   let option = viewModel.availableVersions.first(where: { $0.id == selected.url }) {
+                    Text("- \(option.label)")
+                        .foregroundColor(.gray)
                 }
             }
             .font(CinemeltTheme.fontBody(22))
@@ -319,6 +323,7 @@ struct DetailsView: View {
                                 .lineLimit(1)
                                 .frame(width: 140)
                         }
+                        .focusable(true)
                     }
                 }
                 .padding(.horizontal, 80)
@@ -341,7 +346,6 @@ struct DetailsView: View {
                             title: item.title,
                             posterPath: item.posterPath
                         )
-                        .focusable(true)
                     }
                 }
                 .padding(.horizontal, 80)

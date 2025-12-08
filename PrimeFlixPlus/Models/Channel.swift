@@ -16,12 +16,17 @@ public class Channel: NSManagedObject, Identifiable {
     @NSManaged public var addedAt: Date?
     @NSManaged public var isFavorite: Bool
     
-    // NEW: Structured Series Data (for Next Episode Logic)
+    // Structured Series Data
     @NSManaged public var seriesId: String?
     @NSManaged public var season: Int16
     @NSManaged public var episode: Int16
     
-    // Computed helper for safe access
+    // NEW: Enhanced Metadata
+    @NSManaged public var episodeName: String? // "The We We Are"
+    @NSManaged public var overview: String?    // "Mark begins to question..."
+    @NSManaged public var backdrop: String?    // 16:9 Still Image
+    
+    // Computed helper
     public var id: String { url }
     
     // Convenience init
@@ -37,7 +42,10 @@ public class Channel: NSManagedObject, Identifiable {
         quality: String? = nil,
         seriesId: String? = nil,
         season: Int = 0,
-        episode: Int = 0
+        episode: Int = 0,
+        episodeName: String? = nil,
+        overview: String? = nil,
+        backdrop: String? = nil
     ) {
         self.init(entity: context.persistentStoreCoordinator!.managedObjectModel.entitiesByName["Channel"]!, insertInto: context)
         self.playlistUrl = playlistUrl
@@ -51,9 +59,12 @@ public class Channel: NSManagedObject, Identifiable {
         self.addedAt = Date()
         self.isFavorite = false
         
-        // Initialize new fields
         self.seriesId = seriesId
         self.season = Int16(season)
         self.episode = Int16(episode)
+        
+        self.episodeName = episodeName
+        self.overview = overview
+        self.backdrop = backdrop
     }
 }

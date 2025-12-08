@@ -27,12 +27,12 @@ struct PersistenceController {
         
         channelEntity.properties = [
             NSAttributeDescription(name: "url", type: .stringAttributeType),
-            NSAttributeDescription(name: "title", type: .stringAttributeType),
+            NSAttributeDescription(name: "title", type: .stringAttributeType), // Normalized Show Title
             NSAttributeDescription(name: "group", type: .stringAttributeType),
-            NSAttributeDescription(name: "cover", type: .stringAttributeType),
+            NSAttributeDescription(name: "cover", type: .stringAttributeType), // Poster (2:3)
             NSAttributeDescription(name: "type", type: .stringAttributeType),
             NSAttributeDescription(name: "playlistUrl", type: .stringAttributeType),
-            NSAttributeDescription(name: "canonicalTitle", type: .stringAttributeType),
+            NSAttributeDescription(name: "canonicalTitle", type: .stringAttributeType), // Raw
             NSAttributeDescription(name: "quality", type: .stringAttributeType),
             NSAttributeDescription(name: "addedAt", type: .dateAttributeType),
             NSAttributeDescription(name: "isFavorite", type: .booleanAttributeType),
@@ -40,7 +40,12 @@ struct PersistenceController {
             // Structured Series Metadata
             NSAttributeDescription(name: "seriesId", type: .stringAttributeType),
             NSAttributeDescription(name: "season", type: .integer16AttributeType),
-            NSAttributeDescription(name: "episode", type: .integer16AttributeType)
+            NSAttributeDescription(name: "episode", type: .integer16AttributeType),
+            
+            // NEW: Enhanced Metadata Properties
+            NSAttributeDescription(name: "episodeName", type: .stringAttributeType), // "Pilot"
+            NSAttributeDescription(name: "overview", type: .stringAttributeType),    // Synopsis
+            NSAttributeDescription(name: "backdrop", type: .stringAttributeType)     // 16:9 Image
         ]
         
         // --- Entity: WatchProgress ---
@@ -94,7 +99,7 @@ struct PersistenceController {
         tasteProfileEntity.managedObjectClassName = "TasteProfile"
         
         tasteProfileEntity.properties = [
-            NSAttributeDescription(name: "id", type: .stringAttributeType), // Singleton ID "user_main"
+            NSAttributeDescription(name: "id", type: .stringAttributeType),
             NSAttributeDescription(name: "selectedMoods", type: .stringAttributeType),
             NSAttributeDescription(name: "selectedGenres", type: .stringAttributeType),
             NSAttributeDescription(name: "isOnboardingComplete", type: .booleanAttributeType)
@@ -108,9 +113,9 @@ struct PersistenceController {
         tasteItemEntity.properties = [
             NSAttributeDescription(name: "tmdbId", type: .integer64AttributeType),
             NSAttributeDescription(name: "title", type: .stringAttributeType),
-            NSAttributeDescription(name: "mediaType", type: .stringAttributeType), // "movie" or "tv"
-            NSAttributeDescription(name: "status", type: .stringAttributeType), // "watched", "loved", "super_loved"
-            NSAttributeDescription(name: "posterPath", type: .stringAttributeType), // For UI persistence
+            NSAttributeDescription(name: "mediaType", type: .stringAttributeType),
+            NSAttributeDescription(name: "status", type: .stringAttributeType),
+            NSAttributeDescription(name: "posterPath", type: .stringAttributeType),
             NSAttributeDescription(name: "createdAt", type: .dateAttributeType)
         ]
 
@@ -137,7 +142,7 @@ struct PersistenceController {
     }
 }
 
-// Helper extension to make defining properties cleaner
+// Helper extension
 extension NSAttributeDescription {
     convenience init(name: String, type: NSAttributeType) {
         self.init()

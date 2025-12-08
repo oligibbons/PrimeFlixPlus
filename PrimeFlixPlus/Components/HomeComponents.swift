@@ -32,21 +32,18 @@ struct ContinueWatchingLane: View {
     }
 }
 
-// MARK: - Continue Watching Card (Redesigned)
+// MARK: - Continue Watching Card (Enhanced)
 struct ContinueWatchingCard: View {
     let channel: Channel
     let onClick: () -> Void
     
     @FocusState private var isFocused: Bool
-    
-    // Fetch the specific progress for this channel URL
     @FetchRequest var progressHistory: FetchedResults<WatchProgress>
     
     init(channel: Channel, onClick: @escaping () -> Void) {
         self.channel = channel
         self.onClick = onClick
         
-        // Dynamic fetch request
         _progressHistory = FetchRequest<WatchProgress>(
             entity: WatchProgress.entity(),
             sortDescriptors: [],
@@ -59,44 +56,73 @@ struct ContinueWatchingCard: View {
         return Double(item.position) / Double(item.duration)
     }
     
+    // Smart Title Logic: Prefer Episode Name if available
+    var displayTitle: String {
+        if let epName = channel.episodeName {
+            return epName
+        }
+        return channel.title
+    }
+    
+    var displaySubtitle: String {
+        if channel.season > 0 {
+            return "S\(channel.season) E\(channel.episode)"
+        }
+        return ""
+    }
+    
     var body: some View {
         Button(action: onClick) {
             ZStack(alignment: .bottom) {
-                // 1. Thumbnail
-                AsyncImage(url: URL(string: channel.cover ?? "")) { image in
+                // 1. Thumbnail (Prefer Backdrop for episodes if available)
+                AsyncImage(url: URL(string: channel.backdrop ?? channel.cover ?? "")) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
                     ZStack {
                         CinemeltTheme.charcoal
-                        Text(String(channel.title.prefix(1)))
-                            .font(CinemeltTheme.fontTitle(50))
-                            .foregroundColor(CinemeltTheme.cream.opacity(0.1))
+                        if let cover = channel.cover {
+                            // Fallback to poster in 16:9 container if backdrop missing
+                            AsyncImage(url: URL(string: cover)) { img in
+                                img.resizable().aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                Text(String(channel.title.prefix(1)))
+                                    .font(CinemeltTheme.fontTitle(50))
+                                    .foregroundColor(CinemeltTheme.cream.opacity(0.1))
+                            }
+                            .blur(radius: 20) // Blur poster to make background
+                        }
                     }
                 }
                 .frame(width: 340, height: 190)
                 .clipped()
                 
-                // 2. Info Overlay (Visible on Focus)
-                if isFocused {
-                    LinearGradient(
-                        colors: [.clear, .black.opacity(0.9)],
-                        startPoint: .center,
-                        endPoint: .bottom
-                    )
-                    .transition(.opacity)
-                    
-                    HStack {
-                        Text(channel.title)
+                // 2. Info Overlay (Always visible for CW)
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.9)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+                
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(displayTitle)
                             .font(CinemeltTheme.fontBody(22))
                             .fontWeight(.bold)
-                            .foregroundColor(CinemeltTheme.cream)
+                            .foregroundColor(isFocused ? .white : CinemeltTheme.cream)
                             .lineLimit(1)
-                            .padding(12)
-                        Spacer()
+                        
+                        if !displaySubtitle.isEmpty {
+                            Text(displaySubtitle)
+                                .font(CinemeltTheme.fontBody(16))
+                                .foregroundColor(CinemeltTheme.accent)
+                        }
                     }
+                    Spacer()
                 }
+                .padding(12)
+                .padding(.bottom, 8)
                 
-                // 3. Progress Bar (Always visible)
+                // 3. Progress Bar
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Rectangle()
@@ -106,7 +132,7 @@ struct ContinueWatchingCard: View {
                         Rectangle()
                             .fill(CinemeltTheme.accent)
                             .frame(width: geo.size.width * progressPercentage, height: 6)
-                            .shadow(color: CinemeltTheme.accent, radius: 4) // Glowing bar
+                            .shadow(color: CinemeltTheme.accent, radius: 4)
                     }
                 }
                 .frame(height: 6)
@@ -116,6 +142,5 @@ struct ContinueWatchingCard: View {
         .focused($isFocused)
         .frame(width: 340, height: 190)
         .cornerRadius(16)
-        // Ambilight Glow is handled by the ButtonStyle
     }
 }
