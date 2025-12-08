@@ -82,6 +82,7 @@
 		D2AC8B462EE625D000D440C3 /* SyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B452EE625D000D440C3 /* SyncEngine.swift */; };
 		D2AC8B482EE6265700D440C3 /* EnrichmentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B472EE6265700D440C3 /* EnrichmentService.swift */; };
 		D2AC8B4A2EE6267900D440C3 /* VLCPlayerEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B492EE6267900D440C3 /* VLCPlayerEngine.swift */; };
+		D2AC8B4C2EE6E60D00D440C3 /* OmdbClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B4B2EE6E60D00D440C3 /* OmdbClient.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -197,6 +198,7 @@
 		D2AC8B452EE625D000D440C3 /* SyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncEngine.swift; sourceTree = "<group>"; };
 		D2AC8B472EE6265700D440C3 /* EnrichmentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentService.swift; sourceTree = "<group>"; };
 		D2AC8B492EE6267900D440C3 /* VLCPlayerEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLCPlayerEngine.swift; sourceTree = "<group>"; };
+		D2AC8B4B2EE6E60D00D440C3 /* OmdbClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmdbClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -335,6 +337,7 @@
 				D292D6782EDF4C5800E8845A /* XtreamClient.swift */,
 				D228AD1A2EDF7952007C6114 /* UnsafeSession.swift */,
 				D2AC8B302EE486E700D440C3 /* VPNDetector.swift */,
+				D2AC8B4B2EE6E60D00D440C3 /* OmdbClient.swift */,
 			);
 			path = Network;
 			sourceTree = "<group>";
@@ -575,6 +578,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D292D6722EDF4B7B00E8845A /* HomeViewModel.swift in Sources */,
+				D2AC8B4C2EE6E60D00D440C3 /* OmdbClient.swift in Sources */,
 				D2AC8B3B2EE4A03100D440C3 /* TasteProfile.swift in Sources */,
 				D2AC8B462EE625D000D440C3 /* SyncEngine.swift in Sources */,
 				D2AC8AF62EE0ADE900D440C3 /* SearchViewModel.swift in Sources */,

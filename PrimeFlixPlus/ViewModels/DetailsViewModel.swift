@@ -8,7 +8,8 @@ class DetailsViewModel: ObservableObject {
     
     // --- Data Sources ---
     @Published var channel: Channel
-    @Published var tmdbDetails: TmdbDetails?
+    @Published var tmdbDetails: TmdbDetails? // Kept for Movies
+    @Published var omdbDetails: OmdbSeriesDetails? // NEW: For Series
     @Published var cast: [TmdbCast] = []
     
     // --- UI State ---
@@ -17,6 +18,9 @@ class DetailsViewModel: ObservableObject {
     @Published var backgroundUrl: URL?
     @Published var posterUrl: URL?
     @Published var backdropOpacity: Double = 0.0
+    
+    // --- Extra Ratings (OMDB) ---
+    @Published var externalRatings: [OmdbRating] = []
     
     // --- Versioning ---
     struct VersionOption: Identifiable {
@@ -43,9 +47,11 @@ class DetailsViewModel: ObservableObject {
     // --- Interaction ---
     @Published var episodeToPlay: MergedEpisode? = nil
     @Published var showEpisodeVersionPicker: Bool = false
+    @Published var directPlayChannel: Channel? = nil
     
     // --- Dependencies ---
     private let tmdbClient = TmdbClient()
+    private let omdbClient = OmdbClient() // NEW
     private let xtreamClient = XtreamClient()
     private var repository: PrimeFlixRepository?
     private let settings = SettingsViewModel()
@@ -99,8 +105,7 @@ class DetailsViewModel: ObservableObject {
     }
     
     func loadData() async {
-        withAnimation { self.isLoading = false }
-        withAnimation(.easeIn(duration: 0.5)) { self.backdropOpacity = 1.0 }
+        self.isLoading = true // Force loading state
         
         let rawTitle = channel.canonicalTitle ?? channel.title
         let info = TitleNormalizer.parse(rawTitle: rawTitle)
@@ -117,8 +122,14 @@ class DetailsViewModel: ObservableObject {
             await fetchMovieVersions()
         }
         
-        // --- 3. TMDB METADATA ---
-        await fetchTmdbData(title: info.normalizedTitle, type: channel.type)
+        // --- 3. METADATA STRATEGY ---
+        if channel.type == "series" || channel.type == "series_episode" {
+            // Use OMDB for Series
+            await fetchOmdbSeriesData(title: info.normalizedTitle, year: info.year)
+        } else {
+            // Use TMDB for Movies (as it works perfectly)
+            await fetchTmdbMovieData(title: info.normalizedTitle)
+        }
         
         // --- 4. REFRESH UI ---
         if channel.type == "series" || channel.type == "series_episode" {
@@ -126,14 +137,122 @@ class DetailsViewModel: ObservableObject {
         }
         
         await recalculateSmartPlay()
+        
+        // Reveal UI
+        withAnimation { self.isLoading = false }
+        withAnimation(.easeIn(duration: 0.5)) { self.backdropOpacity = 1.0 }
     }
     
-    // MARK: - The "Lazy Sync" Engine
+    // MARK: - OMDB Logic (New)
+    
+    private func fetchOmdbSeriesData(title: String, year: String?) async {
+        // 1. Check Local Cache (MediaMetadata via Title Hash)
+        // Since we don't have a clean IMDB ID stored yet, we hash the title.
+        let titleHash = String(title.lowercased().hashValue)
+        
+        if let cached = fetchFromCoreData(titleHash: titleHash) {
+            print("✅ Loaded Series Metadata from Core Data Cache")
+            applyMetadata(cached)
+            return
+        }
+        
+        // 2. Fetch from API
+        print("🌍 Fetching OMDB Series Data for: \(title)")
+        if let details = await omdbClient.getSeriesMetadata(title: title, year: year) {
+            
+            // 3. Update UI
+            await MainActor.run {
+                self.omdbDetails = details
+                self.externalRatings = details.ratings ?? []
+                self.channel.overview = details.plot
+                
+                // Update Cover if missing
+                if self.channel.cover == nil, let poster = details.poster, poster.hasPrefix("http") {
+                    self.channel.cover = poster
+                    self.posterUrl = URL(string: poster)
+                    // Use poster as backdrop for series if no better option
+                    if self.backgroundUrl == nil { self.backgroundUrl = URL(string: poster) }
+                }
+            }
+            
+            // 4. Save to Core Data (Cache)
+            saveToCoreData(details: details, titleHash: titleHash, title: title)
+        }
+    }
+    
+    private func fetchFromCoreData(titleHash: String) -> MediaMetadata? {
+        guard let ctx = repository?.container.viewContext else { return nil }
+        let req = NSFetchRequest<MediaMetadata>(entityName: "MediaMetadata")
+        req.predicate = NSPredicate(format: "normalizedTitleHash == %@", titleHash)
+        req.fetchLimit = 1
+        return try? ctx.fetch(req).first
+    }
+    
+    private func saveToCoreData(details: OmdbSeriesDetails, titleHash: String, title: String) {
+        guard let repo = repository else { return }
+        
+        // Perform on background to avoid UI hitch
+        repo.container.performBackgroundTask { context in
+            let req = NSFetchRequest<MediaMetadata>(entityName: "MediaMetadata")
+            req.predicate = NSPredicate(format: "normalizedTitleHash == %@", titleHash)
+            
+            let meta: MediaMetadata
+            if let existing = try? context.fetch(req).first {
+                meta = existing
+            } else {
+                meta = MediaMetadata(context: context)
+                meta.normalizedTitleHash = titleHash
+            }
+            
+            meta.title = details.title
+            meta.overview = details.plot
+            meta.posterPath = details.poster
+            // We store the IMDB ID in the overview or a separate field if we had one.
+            // For now, this is enough to cache the expensive fetch.
+            meta.lastUpdated = Date()
+            
+            // Hack: Store ratings in overview? No, better not mess it up.
+            // We rely on OMDB Client memory cache for ratings during session,
+            // and this Core Data cache for the heavy lifting of text/images.
+            
+            try? context.save()
+        }
+    }
+    
+    private func applyMetadata(_ meta: MediaMetadata) {
+        self.channel.overview = meta.overview
+        if let p = meta.posterPath {
+            self.channel.cover = p
+            self.posterUrl = URL(string: p)
+            if self.backgroundUrl == nil { self.backgroundUrl = URL(string: p) }
+        }
+    }
+
+    // MARK: - TMDB Logic (Movies Only)
+    
+    private func fetchTmdbMovieData(title: String) async {
+        if let match = await tmdbClient.findBestMatch(title: title, year: nil, type: "movie") {
+            if let details = try? await tmdbClient.getMovieDetails(id: match.id) {
+                await MainActor.run { self.applyTmdbData(details) }
+            }
+        }
+    }
+    
+    private func applyTmdbData(_ details: TmdbDetails) {
+        self.tmdbDetails = details
+        if let bg = details.backdropPath {
+            self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)")
+        }
+        if let castData = details.credits?.cast {
+            self.cast = castData
+        }
+    }
+    
+    // MARK: - Lazy Sync (Episodes)
     
     private func ingestXtreamEpisodes(seriesId: String) async {
         guard let repo = repository else { return }
         
-        // Check if we already have episodes for this series ID to avoid re-fetching on every open
         let hasEpisodes: Bool = await Task.detached {
             let ctx = repo.container.newBackgroundContext()
             let req = NSFetchRequest<Channel>(entityName: "Channel")
@@ -142,26 +261,25 @@ class DetailsViewModel: ObservableObject {
             return (try? ctx.count(for: req)) ?? 0 > 0
         }.value
         
-        if hasEpisodes { return } // Cache hit, skip fetch
+        if hasEpisodes { return }
         
-        // Fetch from API
         let input = XtreamInput.decodeFromPlaylistUrl(channel.playlistUrl)
+        
+        // Added visual feedback in UI via 'isLoading'
         
         guard let episodes = try? await xtreamClient.getSeriesEpisodes(input: input, seriesId: seriesId) else {
             print("❌ Failed to lazy-load episodes for Series \(seriesId)")
             return
         }
         
-        // We use the Show's cover for episodes initially
+        // Capture show cover for the background task
         let showCover = self.channel.cover
         
         await Task.detached {
             let ctx = repo.container.newBackgroundContext()
             ctx.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
             
-            // Map to Channel Entities (Dictionary Batch Insert)
             let objects = episodes.map { ep -> [String: Any] in
-                // Note: We access local variable 'showCover' captured by closure, not self.channel
                 let structItem = ChannelStruct.from(ep, seriesId: seriesId, playlistUrl: input.basicUrl, input: input, cover: showCover)
                 return structItem.toDictionary()
             }
@@ -173,7 +291,122 @@ class DetailsViewModel: ObservableObject {
         }.value
     }
     
-    // MARK: - Movie Logic
+    // MARK: - Series Grouping & Logic
+    
+    private func fetchSeriesEcosystem(baseInfo: ContentInfo) async {
+        guard let repo = repository else { return }
+        let cleanTitle = baseInfo.normalizedTitle
+        let targetSeriesId = self.channel.seriesId
+        
+        let allFiles: [Channel] = await Task.detached(priority: .userInitiated) {
+            let ctx = repo.container.newBackgroundContext()
+            let req = NSFetchRequest<Channel>(entityName: "Channel")
+            
+            if let sid = targetSeriesId, sid != "0" {
+                req.predicate = NSPredicate(format: "seriesId == %@", sid)
+            } else {
+                req.predicate = NSPredicate(
+                    format: "type == 'series_episode' AND title BEGINSWITH[cd] %@",
+                    String(cleanTitle.prefix(4))
+                )
+            }
+            
+            let candidates = (try? ctx.fetch(req)) ?? []
+            return candidates.filter { ch in
+                if let sid = targetSeriesId, sid != "0", ch.seriesId == sid { return true }
+                let info = TitleNormalizer.parse(rawTitle: ch.canonicalTitle ?? ch.title)
+                return TitleNormalizer.similarity(between: cleanTitle, and: info.normalizedTitle) > 0.85
+            }
+        }.value
+        
+        var registry: [String: [EpisodeVersion]] = [:]
+        var foundSeasons = Set<Int>()
+        
+        for file in allFiles {
+            let s = Int(file.season)
+            let e = Int(file.episode)
+            if s == 0 && e == 0 { continue }
+            
+            let key = String(format: "S%02dE%02d", s, e)
+            foundSeasons.insert(s)
+            
+            let raw = file.canonicalTitle ?? file.title
+            let info = TitleNormalizer.parse(rawTitle: raw)
+            var score = info.qualityScore
+            
+            if let lang = info.language, lang.lowercased().contains(self.settings.preferredLanguage.lowercased()) {
+                score += 10000
+            }
+            if file.seriesId != nil { score += 500 }
+            
+            let label = "\(info.language ?? "Default") \(info.quality)"
+            let version = EpisodeVersion(channel: file, qualityLabel: label, score: score)
+            
+            registry[key, default: []].append(version)
+        }
+        
+        for (key, _) in registry { registry[key]?.sort { $0.score > $1.score } }
+        
+        self.episodeRegistry = registry
+        self.seasons = foundSeasons.sorted()
+        
+        if !self.seasons.contains(self.selectedSeason), let first = self.seasons.first {
+            self.selectedSeason = first
+        }
+    }
+    
+    func selectSeason(_ season: Int) async {
+        self.selectedSeason = season
+        
+        // Display what we have locally.
+        // Since we are using OMDB for series now, we won't have TMDB-based episode metadata maps.
+        // We will just show the file names or simple "Episode X" unless we want to fetch full season details from OMDB too.
+        // To save API calls, we'll rely on the file title for now or just generic numbering.
+        
+        var displayList: [MergedEpisode] = []
+        let seasonPrefix = String(format: "S%02d", season)
+        let localKeys = episodeRegistry.keys.filter { $0.hasPrefix(seasonPrefix) }
+        let sortedKeys = localKeys.sorted()
+        
+        for key in sortedKeys {
+            guard let versions = episodeRegistry[key] else { continue }
+            let epNum = Int(key.suffix(2)) ?? 0
+            
+            // Basic Construction
+            let merged = MergedEpisode(
+                id: key,
+                season: season,
+                number: epNum,
+                title: "Episode \(epNum)", // Fallback since we aren't deep-fetching season details from OMDB yet to save calls
+                overview: "",
+                stillPath: nil,
+                versions: versions
+            )
+            displayList.append(merged)
+        }
+        
+        withAnimation { self.displayedEpisodes = displayList }
+        await updateProgressForDisplayedEpisodes()
+    }
+    
+    // MARK: - Interactions
+    
+    func onPlayEpisodeClicked(_ episode: MergedEpisode) {
+        if episode.versions.count > 1 {
+            self.episodeToPlay = episode
+            self.showEpisodeVersionPicker = true
+        } else if let best = episode.getBestVersion() {
+            self.directPlayChannel = best.channel
+        }
+    }
+    
+    func triggerDirectPlay(_ episode: MergedEpisode) {
+        if let best = episode.getBestVersion() {
+            self.directPlayChannel = best.channel
+        }
+    }
+    
+    // MARK: - Version Selection
     
     private func fetchMovieVersions() async {
         guard let repo = repository else { return }
@@ -202,191 +435,7 @@ class DetailsViewModel: ObservableObject {
         self.showVersionSelector = false
     }
     
-    // MARK: - Series Logic (Aggregation)
-    
-    private func fetchSeriesEcosystem(baseInfo: ContentInfo) async {
-        guard let repo = repository else { return }
-        
-        let cleanTitle = baseInfo.normalizedTitle
-        
-        // FIX: Capture seriesId on MainActor BEFORE entering the background task.
-        // This avoids the "await inside synchronous filter" error.
-        let targetSeriesId = self.channel.seriesId
-        
-        // Fetch ALL candidate episodes from DB
-        let allFiles: [Channel] = await Task.detached(priority: .userInitiated) {
-            let ctx = repo.container.newBackgroundContext()
-            let req = NSFetchRequest<Channel>(entityName: "Channel")
-            
-            // 1. Strict ID Match (Xtream)
-            if let sid = targetSeriesId, sid != "0" {
-                req.predicate = NSPredicate(format: "seriesId == %@", sid)
-            }
-            // 2. Fallback: Fuzzy Name Match (M3U / Mixed Sources)
-            else {
-                req.predicate = NSPredicate(
-                    format: "type == 'series_episode' AND title BEGINSWITH[cd] %@",
-                    String(cleanTitle.prefix(4))
-                )
-            }
-            
-            let candidates = (try? ctx.fetch(req)) ?? []
-            
-            // Strict Filter for Name Match
-            return candidates.filter { ch in
-                // Strict ID Check (Thread-safe usage of captured 'targetSeriesId')
-                if let sid = targetSeriesId, sid != "0", ch.seriesId == sid {
-                    return true
-                }
-                
-                // Fuzzy Fallback
-                let info = TitleNormalizer.parse(rawTitle: ch.canonicalTitle ?? ch.title)
-                return TitleNormalizer.similarity(between: cleanTitle, and: info.normalizedTitle) > 0.85
-            }
-        }.value
-        
-        // Grouping Logic
-        var registry: [String: [EpisodeVersion]] = [:]
-        var foundSeasons = Set<Int>()
-        
-        for file in allFiles {
-            let s = Int(file.season)
-            let e = Int(file.episode)
-            
-            if s == 0 && e == 0 { continue }
-            
-            let key = String(format: "S%02dE%02d", s, e)
-            foundSeasons.insert(s)
-            
-            // Score
-            let raw = file.canonicalTitle ?? file.title
-            let info = TitleNormalizer.parse(rawTitle: raw)
-            var score = info.qualityScore
-            
-            // Accessing settings on MainActor inside async context is tricky,
-            // but we are currently on MainActor in 'fetchSeriesEcosystem' (async),
-            // so we should capture preferences before loop if strict.
-            // However, loop above was inside Task.detached. This loop is back on MainActor?
-            // Wait, 'fetchSeriesEcosystem' is async but NOT isolated to Task yet.
-            // The `allFiles` is awaited. So we are back on MainActor here. Safe.
-            if let lang = info.language, lang.lowercased().contains(self.settings.preferredLanguage.lowercased()) {
-                score += 10000
-            }
-            
-            if file.seriesId != nil { score += 500 }
-            
-            let label = "\(info.language ?? "Default") \(info.quality)"
-            let version = EpisodeVersion(channel: file, qualityLabel: label, score: score)
-            
-            registry[key, default: []].append(version)
-        }
-        
-        // Sort versions
-        for (key, _) in registry {
-            registry[key]?.sort { $0.score > $1.score }
-        }
-        
-        self.episodeRegistry = registry
-        self.seasons = foundSeasons.sorted()
-        
-        if !self.seasons.contains(self.selectedSeason), let first = self.seasons.first {
-            self.selectedSeason = first
-        }
-    }
-    
-    func selectSeason(_ season: Int) async {
-        self.selectedSeason = season
-        
-        // Fetch TMDB data if missing
-        if tmdbEpisodes[season] == nil, let tmdbId = tmdbDetails?.id {
-            if let seasonDetails = try? await tmdbClient.getTvSeason(tvId: tmdbId, seasonNumber: season) {
-                tmdbEpisodes[season] = seasonDetails.episodes
-            }
-        }
-        
-        var displayList: [MergedEpisode] = []
-        let tmdbData = tmdbEpisodes[season] ?? []
-        
-        // Iterate Local Files
-        let seasonPrefix = String(format: "S%02d", season)
-        let localKeys = episodeRegistry.keys.filter { $0.hasPrefix(seasonPrefix) }
-        let sortedKeys = localKeys.sorted()
-        
-        for key in sortedKeys {
-            guard let versions = episodeRegistry[key] else { continue }
-            let epNum = Int(key.suffix(2)) ?? 0
-            let meta = tmdbData.first(where: { $0.episodeNumber == epNum })
-            
-            let stillUrl: URL?
-            if let path = meta?.stillPath {
-                stillUrl = URL(string: "https://image.tmdb.org/t/p/w500\(path)")
-            } else {
-                stillUrl = nil
-            }
-            
-            let merged = MergedEpisode(
-                id: key,
-                season: season,
-                number: epNum,
-                title: meta?.name ?? "Episode \(epNum)",
-                overview: meta?.overview ?? "No description available.",
-                stillPath: stillUrl,
-                versions: versions
-            )
-            displayList.append(merged)
-        }
-        
-        withAnimation { self.displayedEpisodes = displayList }
-        await updateProgressForDisplayedEpisodes()
-    }
-    
-    // MARK: - Interactions
-    
-    func onPlayEpisodeClicked(_ episode: MergedEpisode) {
-        if episode.versions.count > 1 {
-            self.episodeToPlay = episode
-            self.showEpisodeVersionPicker = true
-        } else if episode.getBestVersion() != nil {
-            // Logic to trigger direct play is handled by the View's closure.
-            // We just ensure we don't open the picker.
-        }
-    }
-    
-    // Added for Direct Play support
-    @Published var directPlayChannel: Channel? = nil
-    
-    func triggerDirectPlay(_ episode: MergedEpisode) {
-        if let best = episode.getBestVersion() {
-            self.directPlayChannel = best.channel
-        }
-    }
-    
-    // MARK: - TMDB
-    
-    private func fetchTmdbData(title: String, type: String) async {
-        let searchType = (type == "series" || type == "series_episode") ? "series" : "movie"
-        if let match = await tmdbClient.findBestMatch(title: title, year: nil, type: searchType) {
-            if searchType == "series" {
-                if let details = try? await tmdbClient.getTvDetails(id: match.id) {
-                    await MainActor.run { self.applyTmdbData(details) }
-                }
-            } else {
-                if let details = try? await tmdbClient.getMovieDetails(id: match.id) {
-                    await MainActor.run { self.applyTmdbData(details) }
-                }
-            }
-        }
-    }
-    
-    private func applyTmdbData(_ details: TmdbDetails) {
-        self.tmdbDetails = details
-        if let bg = details.backdropPath {
-            self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)")
-        }
-        if let castData = details.aggregateCredits?.cast ?? details.credits?.cast {
-            self.cast = castData
-        }
-    }
+    // MARK: - Progress & History
     
     private func updateProgressForDisplayedEpisodes() async {
         guard let repo = repository else { return }

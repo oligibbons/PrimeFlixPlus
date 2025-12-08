@@ -139,7 +139,8 @@ struct DetailsView: View {
                 // --- Title & Metadata ---
                 VStack(alignment: .leading, spacing: 15) {
                     // Logo or Title
-                    Text(viewModel.tmdbDetails?.displayTitle ?? viewModel.channel.title)
+                    // Priority: OMDB (Series) -> TMDB (Movies) -> Local
+                    Text(viewModel.omdbDetails?.title ?? viewModel.tmdbDetails?.displayTitle ?? viewModel.channel.title)
                         .font(CinemeltTheme.fontTitle(90))
                         .foregroundColor(CinemeltTheme.cream)
                         .lineLimit(2)
@@ -147,7 +148,8 @@ struct DetailsView: View {
                     
                     metadataRow
                     
-                    Text(viewModel.tmdbDetails?.overview ?? "No synopsis available.")
+                    // Plot
+                    Text(viewModel.omdbDetails?.plot ?? viewModel.tmdbDetails?.overview ?? "No synopsis available.")
                         .font(CinemeltTheme.fontBody(28))
                         .lineSpacing(8)
                         .foregroundColor(CinemeltTheme.cream.opacity(0.9))
@@ -165,7 +167,7 @@ struct DetailsView: View {
                 
                 // --- Top-Level Version Selector (If multiple versions found) ---
                 if viewModel.availableVersions.count > 1 {
-                    versionSelector
+                    versionSelectorButton
                         .padding(.horizontal, 80)
                         .focusSection()
                 }
@@ -205,7 +207,26 @@ struct DetailsView: View {
                     .cornerRadius(8)
             }
             
-            if let score = viewModel.tmdbDetails?.voteAverage {
+            // NEW: OMDB Ratings Display
+            if !viewModel.externalRatings.isEmpty {
+                ForEach(viewModel.externalRatings, id: \.source) { rating in
+                    HStack(spacing: 6) {
+                        // Icons based on source
+                        if rating.source.contains("Rotten") {
+                            Image(systemName: "popcorn.fill").foregroundColor(.red)
+                        } else if rating.source.contains("Internet Movie") {
+                            Text("IMDb").fontWeight(.bold).foregroundColor(.yellow)
+                        } else {
+                            Image(systemName: "star.fill").foregroundColor(.orange)
+                        }
+                        
+                        Text(rating.value)
+                            .font(CinemeltTheme.fontBody(24))
+                            .foregroundColor(CinemeltTheme.cream)
+                    }
+                }
+            } else if let score = viewModel.tmdbDetails?.voteAverage {
+                // Fallback to TMDB Score
                 HStack(spacing: 8) {
                     Image(systemName: "star.fill")
                         .foregroundColor(CinemeltTheme.accent)
@@ -216,13 +237,20 @@ struct DetailsView: View {
                 }
             }
             
-            if let year = viewModel.tmdbDetails?.displayDate?.prefix(4) {
-                Text(String(year))
+            // Year Logic - Fixed Ambiguity
+            // We use a safe map here to extract the year string
+            if let year = viewModel.omdbDetails?.year ?? viewModel.tmdbDetails?.displayDate.map({ String($0.prefix(4)) }) {
+                Text(year)
                     .font(CinemeltTheme.fontBody(24))
                     .foregroundColor(.gray)
             }
             
-            if let runtime = viewModel.tmdbDetails?.runtime, runtime > 0 {
+            // Runtime
+            if let runtime = viewModel.omdbDetails?.runtime {
+                Text(runtime)
+                    .font(CinemeltTheme.fontBody(24))
+                    .foregroundColor(.gray)
+            } else if let runtime = viewModel.tmdbDetails?.runtime, runtime > 0 {
                 Text(formatRuntime(runtime))
                     .font(CinemeltTheme.fontBody(24))
                     .foregroundColor(.gray)
@@ -274,7 +302,7 @@ struct DetailsView: View {
         }
     }
     
-    private var versionSelector: some View {
+    private var versionSelectorButton: some View {
         Button(action: { viewModel.showVersionSelector = true }) {
             HStack {
                 Image(systemName: "square.stack.3d.up")
