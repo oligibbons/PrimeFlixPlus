@@ -26,28 +26,31 @@ class VersioningService {
         )
     }
     
-    /// Finds all Episodes for a given Series.
-    /// CRITICAL: Matches ALL episodes sharing the same Show Title, regardless of Series ID.
-    func getSeriesEcosystem(for channel: Channel) -> [Channel] {
+    /// Finds all "Series Containers" (Show-level entries) that match this title.
+    /// Used by ViewModel to find all versions of a show (EN, FR, 4K, etc.) to trigger multi-ingestion.
+    func findMatchingSeriesContainers(title: String) -> [Channel] {
         let req = NSFetchRequest<Channel>(entityName: "Channel")
-        req.sortDescriptors = [
-            NSSortDescriptor(key: "season", ascending: true),
-            NSSortDescriptor(key: "episode", ascending: true),
-            NSSortDescriptor(key: "title", ascending: true)
-        ]
-        
-        // Match ANY episode that belongs to a show with this Normalized Title
-        req.predicate = NSPredicate(format: "title == %@ AND type == 'series_episode'", channel.title)
+        // We look for any 'series' (the show folder) that shares the exact same normalized title.
+        req.predicate = NSPredicate(format: "title == %@ AND type == 'series'", title)
         
         let results = (try? context.fetch(req)) ?? []
         return deduplicateByUrl(results)
     }
     
-    /// Finds all "Series Containers" (Show-level entries) that match this title.
-    /// Used by ViewModel to trigger multi-ID ingestion.
-    func findMatchingSeriesContainers(title: String) -> [Channel] {
+    /// Finds all episodes belonging to a specific set of Series IDs.
+    /// This allows us to aggregate content from multiple provider entries (e.g. ID 123=English, ID 456=French).
+    /// Instead of searching by Title (which is fragile for episodes named "Chapter One"), we rely on the strict ID link.
+    func getEpisodes(for seriesIds: [String]) -> [Channel] {
+        guard !seriesIds.isEmpty else { return [] }
+        
         let req = NSFetchRequest<Channel>(entityName: "Channel")
-        req.predicate = NSPredicate(format: "title == %@ AND type == 'series'", title)
+        req.sortDescriptors = [
+            NSSortDescriptor(key: "season", ascending: true),
+            NSSortDescriptor(key: "episode", ascending: true)
+        ]
+        
+        // Fetch all episodes where seriesId is in our target list
+        req.predicate = NSPredicate(format: "seriesId IN %@ AND type == 'series_episode'", seriesIds)
         
         let results = (try? context.fetch(req)) ?? []
         return deduplicateByUrl(results)

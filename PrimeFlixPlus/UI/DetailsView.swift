@@ -88,7 +88,7 @@ struct DetailsView: View {
             .ignoresSafeArea()
         }
         
-        // 3. Listener for Play Trigger (from ViewModel)
+        // 3. Listener for Play Trigger (from ViewModel bubble-up)
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PlayChannel"))) { note in
             if let channel = note.object as? Channel {
                 onPlay(channel)
@@ -203,6 +203,8 @@ struct DetailsView: View {
             // Quality Badge (Shows Best Available)
             if let best = viewModel.movieVersions.first {
                 Badge(text: best.quality)
+            } else if let epQuality = viewModel.displayedEpisodes.first?.versions.first?.quality {
+                 Badge(text: epQuality) // Show quality of first episode if series
             }
             
             // Ratings (OMDB or TMDB)
