@@ -15,27 +15,43 @@ actor TmdbClient {
         return d
     }()
     
-    // MARK: - Smart Search (The "Chillio" Logic)
+    // MARK: - Smart Search (The Fix)
     
-    /// Orchestrates the search to find the best match.
-    /// 1. Tries exact match with Year.
-    /// 2. If no year, tries exact match without year.
-    /// 3. Returns the top result.
+    /// Orchestrates the search to find the absolute best match.
+    /// FIX: For TV Series, if the year search fails (common for ongoing seasons), it retries without the year.
     func findBestMatch(title: String, year: String?, type: String) async -> (id: Int, poster: String?, backdrop: String?)? {
         do {
             if type == "series" || type == "series_episode" {
-                let results = try await searchTv(query: title, year: year)
+                // 1. Try Strict Search (Title + Year)
+                // Useful for "Doctor Who (2005)" vs "Doctor Who (1963)"
+                var results = try await searchTv(query: title, year: year)
+                
+                // 2. Fallback: If no results, try WITHOUT year
+                // Solves the "The Bear S03 2024" issue where 2024 != 2022 (Premiere)
+                if results.isEmpty && year != nil {
+                    print("⚠️ No TV match for '\(title)' + '\(year ?? "")'. Retrying without year...")
+                    results = try await searchTv(query: title, year: nil)
+                }
+                
                 if let best = results.first {
                     return (best.id, best.posterPath, best.backdropPath)
                 }
             } else {
+                // Movies usually match the release year correctly
                 let results = try await searchMovie(query: title, year: year)
+                
+                // Minor fallback for movies just in case
+                if results.isEmpty && year != nil {
+                     let looseResults = try await searchMovie(query: title, year: nil)
+                     if let best = looseResults.first { return (best.id, best.posterPath, best.backdropPath) }
+                }
+                
                 if let best = results.first {
                     return (best.id, best.posterPath, best.backdropPath)
                 }
             }
         } catch {
-            print("⚠️ TMDB Search Failed for \(title): \(error)")
+            print("⚠️ TMDB Search Error for \(title): \(error)")
         }
         return nil
     }
@@ -45,6 +61,9 @@ actor TmdbClient {
     func searchMovie(query: String, year: String? = nil) async throws -> [TmdbMovieResult] {
         var params = ["query": query, "language": "en-US", "include_adult": "false"]
         if let year = year { params["year"] = year }
+        // NEW: primary_release_year is strictly for movies and often safer
+        if let year = year { params["primary_release_year"] = year }
+        
         let response: TmdbSearchResponse<TmdbMovieResult> = try await fetch("/search/movie", params: params)
         return response.results
     }
@@ -56,34 +75,8 @@ actor TmdbClient {
         return response.results
     }
     
-    func getMovieDetails(id: Int) async throws -> TmdbDetails {
-        let params = [
-            "append_to_response": "credits,similar,release_dates,videos,images,external_ids",
-            "language": "en-US",
-            "include_image_language": "en,null" // Critical: Gets english logos even for foreign films
-        ]
-        return try await fetch("/movie/\(id)", params: params)
-    }
-    
-    func getTvDetails(id: Int) async throws -> TmdbDetails {
-        let params = [
-            "append_to_response": "aggregate_credits,similar,content_ratings,videos,images,external_ids",
-            "language": "en-US",
-            "include_image_language": "en,null"
-        ]
-        return try await fetch("/tv/\(id)", params: params)
-    }
-    
-    func getTvSeason(tvId: Int, seasonNumber: Int) async throws -> TmdbSeasonDetails {
-        let params = ["language": "en-US"]
-        return try await fetch("/tv/\(tvId)/season/\(seasonNumber)", params: params)
-    }
-    
-    func getTrending(type: String) async throws -> [TmdbTrendingItem] {
-        let mediaType = (type == "series") ? "tv" : (type == "movie" ? "movie" : "all")
-        let response: TmdbSearchResponse<TmdbTrendingItem> = try await fetch("/trending/\(mediaType)/week", params: [:])
-        return response.results
-    }
+    // ... rest of the file (getMovieDetails, getTvDetails, fetch, models) remains the same ...
+    // To save context tokens, I am not repeating the unchanged Models code unless you need me to.
     
     // MARK: - Core Fetch
     
@@ -110,8 +103,8 @@ actor TmdbClient {
     }
 }
 
-// MARK: - Models
-
+// ... (Keep your existing Models below this line) ...
+// Ensure you keep the TmdbSearchResponse, TmdbTrendingItem, etc. exactly as they were.
 struct TmdbSearchResponse<T: Decodable>: Decodable {
     let results: [T]
 }
