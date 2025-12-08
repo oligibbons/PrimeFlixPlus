@@ -56,16 +56,30 @@ actor XtreamClient {
         return try await fetchWithRetry(url: url)
     }
     
-    func getSeriesEpisodes(input: XtreamInput, seriesId: Int) async throws -> [XtreamChannelInfo.Episode] {
+    // MARK: - Deep Details Fetch
+    
+    /// Fetches all episodes for a specific series.
+    /// Crucial for "Lazy Syncing" in DetailsViewModel.
+    func getSeriesEpisodes(input: XtreamInput, seriesId: String) async throws -> [XtreamChannelInfo.Episode] {
+        // action=get_series_info returns a complex object: { "seasons": [], "info": {}, "episodes": { "1": [...], "2": [...] } }
         let url = "\(input.basicUrl)/player_api.php?username=\(input.username)&password=\(input.password)&action=get_series_info&series_id=\(seriesId)"
+        
         do {
             let container: XtreamChannelInfo.SeriesInfoContainer = try await fetchWithRetry(url: url)
-            return container.episodes.flatMap { $0.value }.sorted {
+            
+            // Flatten the "Season Dictionary" into a single list of episodes
+            // The API returns episodes as a dictionary where Key = Season Number (String)
+            let allEpisodes = container.episodes.flatMap { (key, value) -> [XtreamChannelInfo.Episode] in
+                return value
+            }
+            
+            return allEpisodes.sorted {
                 if $0.season != $1.season { return $0.season < $1.season }
                 return $0.episodeNum < $1.episodeNum
             }
         } catch {
-            print("⚠️ Series Info Fetch Failed: \(error.localizedDescription)")
+            print("⚠️ Series Info Fetch Failed for ID \(seriesId): \(error.localizedDescription)")
+            // Return empty list instead of throwing to allow UI to degrade gracefully
             return []
         }
     }
@@ -82,13 +96,15 @@ actor XtreamClient {
         for (index, agent) in userAgents.enumerated() {
             do {
                 if index > 0 {
+                    // Exponential backoff: 1s, 2s, 4s...
                     let delay = UInt64(pow(2.0, Double(index))) * 1_000_000_000
                     try? await Task.sleep(nanoseconds: delay)
                 }
                 return try await performRequest(urlString: url, userAgent: agent)
             } catch {
                 lastError = error
-                // Retry if Firewall/Limit error
+                
+                // Retry specific network/server errors
                 if let xErr = error as? XtreamError, case .invalidResponse(let code, _) = xErr {
                     if [403, 401, 512, 513, 502, 504, 520].contains(code) {
                         continue
@@ -99,6 +115,7 @@ actor XtreamClient {
                 if nsErr.domain == NSURLErrorDomain && (nsErr.code == -1011 || nsErr.code == -1012 || nsErr.code == -1001) {
                     continue
                 }
+                // Don't retry DNS errors
                 if nsErr.domain == NSURLErrorDomain && nsErr.code == -1003 { throw error }
             }
         }
@@ -112,7 +129,7 @@ actor XtreamClient {
         request.httpMethod = "GET"
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("close", forHTTPHeaderField: "Connection")
-        request.timeoutInterval = 120
+        request.timeoutInterval = 60 // Shorter timeout for interactive fetches
         
         let (data, response) = try await session.data(for: request)
         
@@ -126,9 +143,9 @@ actor XtreamClient {
                 return try decoder.decode(T.self, from: data)
             } catch {
                 if let str = String(data: data, encoding: .utf8), str == "[]" {
-                    // Empty response is valid for some providers
-                    // We throw a specific parsing error that can be caught/ignored if needed
+                    return try decoder.decode(T.self, from: "{}".data(using: .utf8)!) // Handle empty array as object if needed, or throw
                 }
+                print("❌ Decoding Error for URL: \(urlString)")
                 throw XtreamError.parsingError
             }
         }

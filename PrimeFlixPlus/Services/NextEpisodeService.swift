@@ -16,7 +16,6 @@ class NextEpisodeService {
     
     func findNextEpisode(currentChannel: Channel) -> Channel? {
         // 1. Analyze Current Stream to establish "Sticky" preferences
-        // We capture the "Signature" of what the user is currently watching
         let currentRaw = currentChannel.canonicalTitle ?? currentChannel.title
         let currentInfo = TitleNormalizer.parse(rawTitle: currentRaw)
         
@@ -65,14 +64,11 @@ class NextEpisodeService {
         if candidates.isEmpty { return nil }
         
         // B. Rank Candidates based on "Stickiness" to current stream
-        // Logic: Keep the user on the same track (Lang/Quality) if possible.
-        
         let sorted = candidates.sorted { c1, c2 in
             let info1 = TitleNormalizer.parse(rawTitle: c1.canonicalTitle ?? c1.title)
             let info2 = TitleNormalizer.parse(rawTitle: c2.canonicalTitle ?? c2.title)
             
             // Criteria 1: Language Match (Highest Priority)
-            // If I'm watching French, I MUST get the French next episode.
             let lang1Match = (info1.language == currentInfo.language)
             let lang2Match = (info2.language == currentInfo.language)
             
@@ -81,7 +77,6 @@ class NextEpisodeService {
             }
             
             // Criteria 2: Exact Quality Match
-            // If I'm watching 4K, prefer 4K.
             let qual1Match = (info1.quality == currentInfo.quality)
             let qual2Match = (info2.quality == currentInfo.quality)
             
@@ -90,7 +85,6 @@ class NextEpisodeService {
             }
             
             // Criteria 3: Fallback to Highest Quality Score
-            // If exact match fails (e.g. 4K next ep missing), give me the best available (1080p).
             return info1.qualityScore > info2.qualityScore
         }
         
@@ -104,21 +98,17 @@ class NextEpisodeService {
         let req = NSFetchRequest<Channel>(entityName: "Channel")
         
         // Strategy 1: Strict Metadata (Xtream / Structured)
-        // Fast & Accurate if seriesId exists
         if let sid = seriesId, !sid.isEmpty, sid != "0" {
             req.predicate = NSPredicate(
                 format: "playlistUrl == %@ AND seriesId == %@ AND season == %d AND episode == %d",
                 playlistUrl, sid, season, episode
             )
-            // We do NOT limit to 1 here anymore; we want all versions to sort them.
             if let results = try? context.fetch(req), !results.isEmpty {
                 return results
             }
         }
         
         // Strategy 2: Fuzzy Title Matching (M3U / Unstructured)
-        // If seriesId is missing, we match by Title + Season + Episode columns
-        
         // Optimization: Prefix match to limit DB scan
         let prefix = String(showTitle.prefix(4))
         

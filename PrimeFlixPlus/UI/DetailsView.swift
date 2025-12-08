@@ -165,7 +165,7 @@ struct DetailsView: View {
                 
                 // --- Top-Level Version Selector (If multiple versions found) ---
                 if viewModel.availableVersions.count > 1 {
-                    versionSelectorButton
+                    versionSelector
                         .padding(.horizontal, 80)
                         .focusSection()
                 }
@@ -274,7 +274,7 @@ struct DetailsView: View {
         }
     }
     
-    private var versionSelectorButton: some View {
+    private var versionSelector: some View {
         Button(action: { viewModel.showVersionSelector = true }) {
             HStack {
                 Image(systemName: "square.stack.3d.up")

@@ -191,6 +191,7 @@ struct PlayerView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .zIndex(50)
                 .focusSection() // Ensures focus is trapped here
+                .focused($focusedField, equals: .miniDetails)
             }
             
             // 7. Track Selection Overlay
@@ -208,6 +209,7 @@ struct PlayerView: View {
                     // Trap focus
                     focusedField = .trackSelection
                 }
+                .focused($focusedField, equals: .trackSelection)
             }
             
             // 8. Version Selection Overlay (NEW)
@@ -224,6 +226,7 @@ struct PlayerView: View {
                 .onAppear {
                     focusedField = .versionSelection
                 }
+                .focused($focusedField, equals: .versionSelection)
             }
             
             // 9. Auto Play Overlay (Timer)
@@ -235,6 +238,7 @@ struct PlayerView: View {
                         // Trap focus immediately
                         focusedField = .autoPlayOverlay
                     }
+                    .focused($focusedField, equals: .autoPlayOverlay)
             }
             
             // 10. Controls Overlay
@@ -739,66 +743,56 @@ struct ControlsOverlayView: View {
                     }
                     Spacer()
                     
-                    // Versions Button (Only if alternatives exist)
-                    if !viewModel.alternativeVersions.isEmpty {
-                        Button(action: onShowVersions) {
-                            Image(systemName: "square.stack.3d.up.fill")
+                    // FOCUS FIX: Group buttons together for easier navigation
+                    HStack(spacing: 20) {
+                        // Versions Button (Only if alternatives exist)
+                        if !viewModel.alternativeVersions.isEmpty {
+                            Button(action: onShowVersions) {
+                                Image(systemName: "square.stack.3d.up.fill")
+                                    .font(.title)
+                                    .padding(15)
+                                    .background(Color.white.opacity(0.1))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.card) // Use standard style for focus effect
+                        }
+                        
+                        // Tracks Button
+                        Button(action: onShowTracks) {
+                            Image(systemName: "captions.bubble.fill")
                                 .font(.title)
                                 .padding(15)
                                 .background(Color.white.opacity(0.1))
                                 .clipShape(Circle())
                         }
-                        .buttonStyle(.plain)
-                        .focused(focusedField, equals: .upperControls)
-                        .onMoveCommand { direction in
-                            if direction == .down { focusedField.wrappedValue = .videoSurface }
-                        }
-                    }
-                    
-                    // Tracks Button
-                    Button(action: onShowTracks) {
-                        Image(systemName: "captions.bubble.fill")
-                            .font(.title)
-                            .padding(15)
-                            .background(Color.white.opacity(0.1))
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain) // Custom look
-                    .focused(focusedField, equals: .upperControls)
-                    // Logic: Down Arrow -> Back to Playhead
-                    .onMoveCommand { direction in
-                        if direction == .down {
-                            focusedField.wrappedValue = .videoSurface
-                        }
-                    }
-                    
-                    // Favorite Button
-                    Button(action: { viewModel.toggleFavorite() }) {
-                        HStack(spacing: 10) {
-                            Image(systemName: viewModel.isFavorite ? "heart.fill" : "heart")
-                                .font(.title3)
-                            if focusedField.wrappedValue == .upperControls {
-                                Text(viewModel.isFavorite ? "Saved" : "Favorite")
-                                    .font(CinemeltTheme.fontBody(20))
+                        .buttonStyle(.card)
+                        
+                        // Favorite Button
+                        Button(action: { viewModel.toggleFavorite() }) {
+                            HStack(spacing: 10) {
+                                Image(systemName: viewModel.isFavorite ? "heart.fill" : "heart")
+                                    .font(.title3)
+                                if focusedField.wrappedValue == .upperControls {
+                                    Text(viewModel.isFavorite ? "Saved" : "Favorite")
+                                        .font(CinemeltTheme.fontBody(20))
+                                }
                             }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .background(
+                                Capsule()
+                                    .fill(focusedField.wrappedValue == .upperControls ? CinemeltTheme.accent : Color.white.opacity(0.1))
+                            )
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(
-                            Capsule()
-                                .fill(focusedField.wrappedValue == .upperControls ? CinemeltTheme.accent : Color.white.opacity(0.1))
-                        )
+                        .buttonStyle(.plain) // This one uses custom styling logic
                     }
-                    .buttonStyle(.plain)
+                    // FOCUS FIX: Define this group as a focus section
+                    .focusSection()
                     .focused(focusedField, equals: .upperControls)
                     .onMoveCommand { direction in
                         if direction == .down {
                             focusedField.wrappedValue = .videoSurface
                         }
-                    }
-                    .onExitCommand {
-                        print("🔙 Menu on Controls -> Down to Playhead")
-                        focusedField.wrappedValue = .videoSurface
                     }
                 }
                 .padding(60)

@@ -18,18 +18,18 @@ class DetailsViewModel: ObservableObject {
     @Published var posterUrl: URL?
     @Published var backdropOpacity: Double = 0.0
     
-    // --- Versioning (Movies & Series Containers) ---
+    // --- Versioning ---
     struct VersionOption: Identifiable {
-        let id: String // URL acts as ID
+        let id: String
         let label: String
         let channel: Channel
-        let score: Int // For sorting
+        let score: Int
     }
     @Published var availableVersions: [VersionOption] = []
     @Published var selectedVersion: Channel?
     @Published var showVersionSelector: Bool = false
     
-    // --- Smart Play State ---
+    // --- Smart Play ---
     @Published var smartPlayTarget: MergedEpisode? = nil
     @Published var playButtonLabel: String = "Play Now"
     @Published var playButtonIcon: String = "play.fill"
@@ -52,17 +52,14 @@ class DetailsViewModel: ObservableObject {
     
     // --- Internal ---
     private var tmdbEpisodes: [Int: [TmdbEpisode]] = [:]
-    
-    // Holds ALL file variants for every episode in the show
-    // Key: "S01E01" -> [File1 (4K), File2 (1080p), File3 (French)]
     private var episodeRegistry: [String: [EpisodeVersion]] = [:]
     
-    // MARK: - Models (Internal)
+    // MARK: - Models
     
     struct EpisodeVersion: Identifiable {
         let id = UUID()
-        let channel: Channel // The actual Core Data object to play
-        let qualityLabel: String // "English 4K"
+        let channel: Channel
+        let qualityLabel: String
         let score: Int
     }
     
@@ -70,22 +67,15 @@ class DetailsViewModel: ObservableObject {
         let id: String // "S01E01"
         let season: Int
         let number: Int
-        
-        // Metadata (from TMDB)
         let title: String
         let overview: String
         let stillPath: URL?
-        
-        // Playable Files
         var versions: [EpisodeVersion]
-        
-        // State
         var isWatched: Bool = false
         var progress: Double = 0.0
         
         var displayTitle: String { "S\(season) • E\(number) - \(title)" }
         
-        // Helper to get the best default version based on user prefs
         func getBestVersion() -> EpisodeVersion? {
             return versions.max(by: { $0.score < $1.score })
         }
@@ -109,61 +99,98 @@ class DetailsViewModel: ObservableObject {
     }
     
     func loadData() async {
-        // Optimistic UI update
         withAnimation { self.isLoading = false }
         withAnimation(.easeIn(duration: 0.5)) { self.backdropOpacity = 1.0 }
         
-        // 1. Analyze Title (Clean it first!)
         let rawTitle = channel.canonicalTitle ?? channel.title
         let info = TitleNormalizer.parse(rawTitle: rawTitle)
         
-        // 2. Fetch Versions (Parallel)
+        // --- 1. EPISODE INGESTION (Lazy Sync) ---
+        if channel.type == "series" && channel.seriesId != nil && channel.seriesId != "0" {
+            await ingestXtreamEpisodes(seriesId: channel.seriesId!)
+        }
+        
+        // --- 2. FETCH VERSIONS (Core Data Aggregation) ---
         if channel.type == "series" || channel.type == "series_episode" {
             await fetchSeriesEcosystem(baseInfo: info)
         } else {
             await fetchMovieVersions()
         }
         
-        // 3. Fetch TMDB (Using CLEAN title)
-        // Critical Fix: Use `normalizedTitle` (e.g. "Severance") not raw title ("Severance S01E01")
+        // --- 3. TMDB METADATA ---
         await fetchTmdbData(title: info.normalizedTitle, type: channel.type)
         
-        // 4. Post-Process (Series Metadata Merging)
+        // --- 4. REFRESH UI ---
         if channel.type == "series" || channel.type == "series_episode" {
-            // Now that we have TMDB data, refresh the episode list titles
             await selectSeason(self.selectedSeason)
         }
         
-        // 5. Smart Play Calculation
         await recalculateSmartPlay()
+    }
+    
+    // MARK: - The "Lazy Sync" Engine
+    
+    private func ingestXtreamEpisodes(seriesId: String) async {
+        guard let repo = repository else { return }
+        
+        // Check if we already have episodes for this series ID to avoid re-fetching on every open
+        let hasEpisodes: Bool = await Task.detached {
+            let ctx = repo.container.newBackgroundContext()
+            let req = NSFetchRequest<Channel>(entityName: "Channel")
+            req.predicate = NSPredicate(format: "seriesId == %@ AND type == 'series_episode'", seriesId)
+            req.fetchLimit = 1
+            return (try? ctx.count(for: req)) ?? 0 > 0
+        }.value
+        
+        if hasEpisodes { return } // Cache hit, skip fetch
+        
+        // Fetch from API
+        let input = XtreamInput.decodeFromPlaylistUrl(channel.playlistUrl)
+        
+        guard let episodes = try? await xtreamClient.getSeriesEpisodes(input: input, seriesId: seriesId) else {
+            print("❌ Failed to lazy-load episodes for Series \(seriesId)")
+            return
+        }
+        
+        // We use the Show's cover for episodes initially
+        let showCover = self.channel.cover
+        
+        await Task.detached {
+            let ctx = repo.container.newBackgroundContext()
+            ctx.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+            
+            // Map to Channel Entities (Dictionary Batch Insert)
+            let objects = episodes.map { ep -> [String: Any] in
+                // Note: We access local variable 'showCover' captured by closure, not self.channel
+                let structItem = ChannelStruct.from(ep, seriesId: seriesId, playlistUrl: input.basicUrl, input: input, cover: showCover)
+                return structItem.toDictionary()
+            }
+            
+            let batchInsert = NSBatchInsertRequest(entity: Channel.entity(), objects: objects)
+            _ = try? ctx.execute(batchInsert)
+            try? ctx.save()
+            print("✅ Lazy-loaded \(objects.count) episodes for Series \(seriesId)")
+        }.value
     }
     
     // MARK: - Movie Logic
     
     private func fetchMovieVersions() async {
         guard let repo = repository else { return }
-        
-        // Fetch Siblings
         let service = VersioningService(context: repo.container.viewContext)
         let rawVersions = service.getVersions(for: channel)
         
-        // Generate Labels & Scores
         self.availableVersions = rawVersions.map { ch in
             let raw = ch.canonicalTitle ?? ch.title
             let info = TitleNormalizer.parse(rawTitle: raw)
-            
-            // Score: Prioritize Language match, then Resolution
             var score = info.qualityScore
             if let lang = info.language, lang.lowercased().contains(settings.preferredLanguage.lowercased()) {
                 score += 10000
             }
-            
             let label = "\(info.language ?? "Unknown") | \(info.quality)"
-            
             return VersionOption(id: ch.url, label: label, channel: ch, score: score)
         }.sorted { $0.score > $1.score }
         
-        // Auto-select best
         if let best = self.availableVersions.first {
             self.selectedVersion = best.channel
         }
@@ -171,66 +198,90 @@ class DetailsViewModel: ObservableObject {
     
     func userSelectedVersion(_ channel: Channel) {
         self.selectedVersion = channel
-        self.channel = channel // Update main reference for playback
+        self.channel = channel
         self.showVersionSelector = false
     }
     
-    // MARK: - Series Logic (The "Chillio" Fix)
+    // MARK: - Series Logic (Aggregation)
     
     private func fetchSeriesEcosystem(baseInfo: ContentInfo) async {
         guard let repo = repository else { return }
         
-        // A. Find ALL episodes for this show in the DB
-        // We search by the Normalized Title (e.g. "Severance")
         let cleanTitle = baseInfo.normalizedTitle
         
+        // FIX: Capture seriesId on MainActor BEFORE entering the background task.
+        // This avoids the "await inside synchronous filter" error.
+        let targetSeriesId = self.channel.seriesId
+        
+        // Fetch ALL candidate episodes from DB
         let allFiles: [Channel] = await Task.detached(priority: .userInitiated) {
             let ctx = repo.container.newBackgroundContext()
             let req = NSFetchRequest<Channel>(entityName: "Channel")
             
-            // "Severance%" matches "Severance", "Severance Fr", "Severance 4K"
-            // We search fairly broadly here, then filter strictly with Normalizer
-            req.predicate = NSPredicate(
-                format: "type == 'series_episode' AND title BEGINSWITH[cd] %@",
-                String(cleanTitle.prefix(4))
-            )
+            // 1. Strict ID Match (Xtream)
+            if let sid = targetSeriesId, sid != "0" {
+                req.predicate = NSPredicate(format: "seriesId == %@", sid)
+            }
+            // 2. Fallback: Fuzzy Name Match (M3U / Mixed Sources)
+            else {
+                req.predicate = NSPredicate(
+                    format: "type == 'series_episode' AND title BEGINSWITH[cd] %@",
+                    String(cleanTitle.prefix(4))
+                )
+            }
             
             let candidates = (try? ctx.fetch(req)) ?? []
             
-            // Strict Filter: Must match normalized title
+            // Strict Filter for Name Match
             return candidates.filter { ch in
+                // Strict ID Check (Thread-safe usage of captured 'targetSeriesId')
+                if let sid = targetSeriesId, sid != "0", ch.seriesId == sid {
+                    return true
+                }
+                
+                // Fuzzy Fallback
                 let info = TitleNormalizer.parse(rawTitle: ch.canonicalTitle ?? ch.title)
                 return TitleNormalizer.similarity(between: cleanTitle, and: info.normalizedTitle) > 0.85
             }
         }.value
         
-        // B. Group into Episode Buckets
+        // Grouping Logic
         var registry: [String: [EpisodeVersion]] = [:]
         var foundSeasons = Set<Int>()
         
         for file in allFiles {
-            // Extract S/E
-            let raw = file.canonicalTitle ?? file.title
-            let info = TitleNormalizer.parse(rawTitle: raw)
+            let s = Int(file.season)
+            let e = Int(file.episode)
             
-            if info.season == 0 && info.episode == 0 { continue }
+            if s == 0 && e == 0 { continue }
             
-            let key = String(format: "S%02dE%02d", info.season, info.episode)
-            foundSeasons.insert(info.season)
+            let key = String(format: "S%02dE%02d", s, e)
+            foundSeasons.insert(s)
             
             // Score
+            let raw = file.canonicalTitle ?? file.title
+            let info = TitleNormalizer.parse(rawTitle: raw)
             var score = info.qualityScore
-            if let lang = info.language, lang.lowercased().contains(settings.preferredLanguage.lowercased()) {
-                score += 10000 // Huge boost for preferred language
+            
+            // Accessing settings on MainActor inside async context is tricky,
+            // but we are currently on MainActor in 'fetchSeriesEcosystem' (async),
+            // so we should capture preferences before loop if strict.
+            // However, loop above was inside Task.detached. This loop is back on MainActor?
+            // Wait, 'fetchSeriesEcosystem' is async but NOT isolated to Task yet.
+            // The `allFiles` is awaited. So we are back on MainActor here. Safe.
+            if let lang = info.language, lang.lowercased().contains(self.settings.preferredLanguage.lowercased()) {
+                score += 10000
             }
             
-            let label = "\(info.language ?? "Unknown") \(info.quality)"
+            if file.seriesId != nil { score += 500 }
             
+            let label = "\(info.language ?? "Default") \(info.quality)"
             let version = EpisodeVersion(channel: file, qualityLabel: label, score: score)
+            
             registry[key, default: []].append(version)
         }
         
-        // Sort versions within buckets
+        // Sort versions
         for (key, _) in registry {
             registry[key]?.sort { $0.score > $1.score }
         }
@@ -238,7 +289,6 @@ class DetailsViewModel: ObservableObject {
         self.episodeRegistry = registry
         self.seasons = foundSeasons.sorted()
         
-        // Select first season or keep current if valid
         if !self.seasons.contains(self.selectedSeason), let first = self.seasons.first {
             self.selectedSeason = first
         }
@@ -247,30 +297,24 @@ class DetailsViewModel: ObservableObject {
     func selectSeason(_ season: Int) async {
         self.selectedSeason = season
         
-        // 1. Ensure TMDB data for this season is fetched
+        // Fetch TMDB data if missing
         if tmdbEpisodes[season] == nil, let tmdbId = tmdbDetails?.id {
             if let seasonDetails = try? await tmdbClient.getTvSeason(tvId: tmdbId, seasonNumber: season) {
                 tmdbEpisodes[season] = seasonDetails.episodes
             }
         }
         
-        // 2. Merge Local Files with TMDB Data
         var displayList: [MergedEpisode] = []
         let tmdbData = tmdbEpisodes[season] ?? []
         
-        // Get all SxxExx keys for this season present in our Local Files
+        // Iterate Local Files
         let seasonPrefix = String(format: "S%02d", season)
         let localKeys = episodeRegistry.keys.filter { $0.hasPrefix(seasonPrefix) }
-        
-        // We iterate LOCAL files primarily, so we don't show episodes we don't have
-        // (unless we want to show "Missing" episodes, but usually we just show what's playable)
         let sortedKeys = localKeys.sorted()
         
         for key in sortedKeys {
             guard let versions = episodeRegistry[key] else { continue }
             let epNum = Int(key.suffix(2)) ?? 0
-            
-            // Find Metadata
             let meta = tmdbData.first(where: { $0.episodeNumber == epNum })
             
             let stillUrl: URL?
@@ -302,35 +346,25 @@ class DetailsViewModel: ObservableObject {
         if episode.versions.count > 1 {
             self.episodeToPlay = episode
             self.showEpisodeVersionPicker = true
-        } else if let best = episode.getBestVersion() {
-            // Direct Play
-            // We need to signal the View to play this channel
-            // Since onPlay is a closure in View, we can update selectedVersion/Channel here?
-            // Actually, DetailsView uses a callback. We should likely expose a "requestPlay" publisher or return channel.
-            // For now, setting selectedVersion updates the "Main" play button, but the list needs direct action.
-            // The View handles the tap on the list item.
+        } else if episode.getBestVersion() != nil {
+            // Logic to trigger direct play is handled by the View's closure.
+            // We just ensure we don't open the picker.
         }
     }
     
-    func getPlayableChannel(version: EpisodeVersion, metadata: MergedEpisode) -> Channel {
-        // We return the actual Core Data object.
-        // We might want to inject the metadata titles temporarily into it if needed,
-        // but it's safer to just return the object.
-        return version.channel
+    // Added for Direct Play support
+    @Published var directPlayChannel: Channel? = nil
+    
+    func triggerDirectPlay(_ episode: MergedEpisode) {
+        if let best = episode.getBestVersion() {
+            self.directPlayChannel = best.channel
+        }
     }
     
     // MARK: - TMDB
     
     private func fetchTmdbData(title: String, type: String) async {
-        // Logic: Search for the CLEAN title (e.g. "Severance")
-        // If it's an episode/series type, search TV.
-        // If it's a movie, search Movie.
-        
         let searchType = (type == "series" || type == "series_episode") ? "series" : "movie"
-        
-        // Note: Year extraction is handled in TitleNormalizer, can be passed here if needed.
-        // For now, we trust the clean title search.
-        
         if let match = await tmdbClient.findBestMatch(title: title, year: nil, type: searchType) {
             if searchType == "series" {
                 if let details = try? await tmdbClient.getTvDetails(id: match.id) {
@@ -354,19 +388,14 @@ class DetailsViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Progress & History
-    
     private func updateProgressForDisplayedEpisodes() async {
         guard let repo = repository else { return }
-        
-        // Flatten all URLs for the current view
         let allUrls = displayedEpisodes.flatMap { $0.versions.map { $0.channel.url } }
         
         let progressMap: [String: Double] = await Task.detached(priority: .background) {
             let ctx = repo.container.newBackgroundContext()
             let req = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
             req.predicate = NSPredicate(format: "channelUrl IN %@", allUrls)
-            
             var map: [String: Double] = [:]
             if let results = try? ctx.fetch(req) {
                 for p in results {
@@ -378,8 +407,6 @@ class DetailsViewModel: ObservableObject {
             return map
         }.value
         
-        // Map back to Merged Episodes
-        // If ANY version is watched, the episode is watched.
         var updated = displayedEpisodes
         for i in 0..<updated.count {
             var maxProg = 0.0
@@ -393,19 +420,16 @@ class DetailsViewModel: ObservableObject {
     }
     
     private func recalculateSmartPlay() async {
-        // Basic Logic: Find first unwatched episode
         if let firstUnwatched = displayedEpisodes.first(where: { !$0.isWatched }) {
             self.smartPlayTarget = firstUnwatched
             self.playButtonLabel = "Continue S\(firstUnwatched.season) E\(firstUnwatched.number)"
         } else if let first = displayedEpisodes.first {
-            // All watched? Start over or show first
             self.smartPlayTarget = first
             self.playButtonLabel = "Start Series"
         }
     }
     
     private func checkWatchHistory() {
-        // Only for movies really, series handled above
         guard let repo = repository, channel.type == "movie" else { return }
         let url = channel.url
         Task.detached {
@@ -424,6 +448,10 @@ class DetailsViewModel: ObservableObject {
     func toggleFavorite() {
         repository?.toggleFavorite(channel)
         self.isFavorite.toggle()
+    }
+    
+    func getPlayableChannel(version: EpisodeVersion, metadata: MergedEpisode) -> Channel {
+        return version.channel
     }
     
     var similarContent: [TmdbMovieResult] {

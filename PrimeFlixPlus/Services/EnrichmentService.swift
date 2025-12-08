@@ -19,7 +19,6 @@ class EnrichmentService {
     func enrichLibrary(playlistUrl: String, onStatus: @escaping (String) -> Void) async {
         
         // 1. Identify candidates (Items missing metadata)
-        // We look for items with missing covers OR Series Episodes missing episode names
         var candidates: [Channel] = []
         
         await context.perform {
@@ -28,14 +27,12 @@ class EnrichmentService {
                 format: "playlistUrl == %@ AND (type == 'movie' OR type == 'series' OR type == 'series_episode')",
                 playlistUrl
             )
-            // Fetch everything to group them (Memory optimized by only fetching needed properties later if possible,
-            // but for grouping we need titles).
-            // Limiting to 5000 to prevent OOM on huge playlists.
+            // Limit fetch to prevent OOM on massive playlists, process in chunks if needed
             req.fetchLimit = 5000
             
             if let results = try? self.context.fetch(req) {
                 candidates = results.filter { ch in
-                    // Re-process if:
+                    // Process if:
                     // 1. Cover is missing
                     // 2. It's an episode and missing a proper Episode Name
                     if ch.cover == nil || ch.cover?.isEmpty == true { return true }
@@ -66,7 +63,7 @@ class EnrichmentService {
             guard let first = items.first else { continue }
             let type = (first.type == "series" || first.type == "series_episode") ? "series" : "movie"
             
-            // Extract Year from one of the items if possible
+            // Extract Year from one of the items if possible to help accuracy
             let year = items.compactMap { TitleNormalizer.parse(rawTitle: $0.canonicalTitle ?? $0.title).year }.first
             
             await processGroup(title: showTitle, year: year, type: type, items: items)
@@ -88,7 +85,7 @@ class EnrichmentService {
             // 1. Get Show Details (for generic description/backdrop)
             guard let showDetails = try? await tmdbClient.getTvDetails(id: match.id) else { return }
             
-            // 2. Identify needed seasons
+            // 2. Identify needed seasons to fetch
             let neededSeasons = Set(items.map { Int($0.season) }).filter { $0 > 0 }
             
             for seasonNum in neededSeasons {
@@ -132,9 +129,7 @@ class EnrichmentService {
                 for ch in items {
                     if ch.cover == nil { ch.cover = posterUrl }
                     if ch.backdrop == nil { ch.backdrop = backdropUrl }
-                    
-                    // Optional: Fetch detailed movie info for overview if needed,
-                    // but usually we fetch that on-demand in DetailsView to save bandwidth.
+                    // Movies usually don't need 'episodeName', title is sufficient
                 }
                 try? self.context.save()
             }
