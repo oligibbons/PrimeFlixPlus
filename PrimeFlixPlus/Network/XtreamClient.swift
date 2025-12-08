@@ -51,20 +51,8 @@ actor XtreamClient {
         return try await fetchWithRetry(url: buildUrl(input: input, action: "get_live_categories"))
     }
     
-    // CRITICAL FIX: Return type is explicitly [XtreamCategory]
     func getVodCategories(input: XtreamInput) async throws -> [XtreamCategory] {
-        // Some providers use get_vod_categories, result matches XtreamCategory structure
         let url = buildUrl(input: input, action: "get_vod_categories")
-        return try await fetchWithRetry(url: url)
-    }
-    
-    func getLiveStreams(input: XtreamInput, categoryId: String) async throws -> [XtreamChannelInfo.LiveStream] {
-        let url = "\(input.basicUrl)/player_api.php?username=\(input.username)&password=\(input.password)&action=get_live_streams&category_id=\(categoryId)"
-        return try await fetchWithRetry(url: url)
-    }
-    
-    func getVodStreams(input: XtreamInput, categoryId: String) async throws -> [XtreamChannelInfo.VodStream] {
-        let url = "\(input.basicUrl)/player_api.php?username=\(input.username)&password=\(input.password)&action=get_vod_streams&category_id=\(categoryId)"
         return try await fetchWithRetry(url: url)
     }
     
@@ -138,7 +126,8 @@ actor XtreamClient {
                 return try decoder.decode(T.self, from: data)
             } catch {
                 if let str = String(data: data, encoding: .utf8), str == "[]" {
-                    // Empty response handling if needed
+                    // Empty response is valid for some providers
+                    // We throw a specific parsing error that can be caught/ignored if needed
                 }
                 throw XtreamError.parsingError
             }

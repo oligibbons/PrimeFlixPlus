@@ -6,8 +6,8 @@ actor TmdbClient {
     // Auth
     private let accessToken = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiI1ODZlMmViYWQ4ODVmZWUxZGEwMThhZjFiYjkxYWRhZiIsIm5iZiI6MTc2NDUxNTY3NS4yMDYsInN1YiI6IjY5MmM1ZjViOGEyMTVlNzllZTFlYzQ3MyIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.2nxr5v2nfVh0rfuq8LUOWfD0csKfB1VConOAiMRszRY"
     private let apiKey = "586e2ebad885fee1da018af1bb91adaf"
-    
     private let baseUrl = "https://api.themoviedb.org/3"
+    
     private let session = URLSession.shared
     private let jsonDecoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -15,21 +15,32 @@ actor TmdbClient {
         return d
     }()
     
-    // MARK: - Trending (NEW)
+    // MARK: - Smart Search (The "Chillio" Logic)
     
-    func getTrending(type: String) async throws -> [TmdbTrendingItem] {
-        // Map our internal type to TMDB type
-        let mediaType: String
-        if type == "series" { mediaType = "tv" }
-        else if type == "movie" { mediaType = "movie" }
-        else { mediaType = "all" }
-        
-        // Use a generic response wrapper with our flexible item struct
-        let response: TmdbSearchResponse<TmdbTrendingItem> = try await fetch("/trending/\(mediaType)/week", params: [:])
-        return response.results
+    /// Orchestrates the search to find the best match.
+    /// 1. Tries exact match with Year.
+    /// 2. If no year, tries exact match without year.
+    /// 3. Returns the top result.
+    func findBestMatch(title: String, year: String?, type: String) async -> (id: Int, poster: String?, backdrop: String?)? {
+        do {
+            if type == "series" || type == "series_episode" {
+                let results = try await searchTv(query: title, year: year)
+                if let best = results.first {
+                    return (best.id, best.posterPath, best.backdropPath)
+                }
+            } else {
+                let results = try await searchMovie(query: title, year: year)
+                if let best = results.first {
+                    return (best.id, best.posterPath, best.backdropPath)
+                }
+            }
+        } catch {
+            print("⚠️ TMDB Search Failed for \(title): \(error)")
+        }
+        return nil
     }
     
-    // MARK: - Search
+    // MARK: - API Endpoints
     
     func searchMovie(query: String, year: String? = nil) async throws -> [TmdbMovieResult] {
         var params = ["query": query, "language": "en-US", "include_adult": "false"]
@@ -45,15 +56,21 @@ actor TmdbClient {
         return response.results
     }
     
-    // MARK: - Details
-    
     func getMovieDetails(id: Int) async throws -> TmdbDetails {
-        let params = ["append_to_response": "credits,similar,release_dates,videos", "language": "en-US"]
+        let params = [
+            "append_to_response": "credits,similar,release_dates,videos,images,external_ids",
+            "language": "en-US",
+            "include_image_language": "en,null" // Critical: Gets english logos even for foreign films
+        ]
         return try await fetch("/movie/\(id)", params: params)
     }
     
     func getTvDetails(id: Int) async throws -> TmdbDetails {
-        let params = ["append_to_response": "aggregate_credits,similar,content_ratings,videos", "language": "en-US"]
+        let params = [
+            "append_to_response": "aggregate_credits,similar,content_ratings,videos,images,external_ids",
+            "language": "en-US",
+            "include_image_language": "en,null"
+        ]
         return try await fetch("/tv/\(id)", params: params)
     }
     
@@ -62,7 +79,13 @@ actor TmdbClient {
         return try await fetch("/tv/\(tvId)/season/\(seasonNumber)", params: params)
     }
     
-    // MARK: - Core Fetch Logic
+    func getTrending(type: String) async throws -> [TmdbTrendingItem] {
+        let mediaType = (type == "series") ? "tv" : (type == "movie" ? "movie" : "all")
+        let response: TmdbSearchResponse<TmdbTrendingItem> = try await fetch("/trending/\(mediaType)/week", params: [:])
+        return response.results
+    }
+    
+    // MARK: - Core Fetch
     
     private func fetch<T: Decodable>(_ endpoint: String, params: [String: String]) async throws -> T {
         var urlComp = URLComponents(string: baseUrl + endpoint)!
@@ -93,18 +116,13 @@ struct TmdbSearchResponse<T: Decodable>: Decodable {
     let results: [T]
 }
 
-// Flexible struct for Trending that handles both "title" (Movie) and "name" (TV)
 struct TmdbTrendingItem: Decodable, Identifiable {
     let id: Int
     let title: String?
     let name: String?
-    let overview: String?
     let posterPath: String?
     let backdropPath: String?
-    
-    var displayTitle: String {
-        return title ?? name ?? "Unknown"
-    }
+    var displayTitle: String { title ?? name ?? "Unknown" }
 }
 
 struct TmdbMovieResult: Decodable, Identifiable {
@@ -125,7 +143,6 @@ struct TmdbTvResult: Decodable, Identifiable {
     let overview: String?
 }
 
-// Detailed Models used by DetailsViewModel
 struct TmdbDetails: Decodable {
     let id: Int
     let title: String?
@@ -146,13 +163,14 @@ struct TmdbDetails: Decodable {
     let videos: TmdbVideoResponse?
     let releaseDates: TmdbReleaseDates?
     let contentRatings: TmdbContentRatings?
-    
-    // TV Specific
-    let numberOfSeasons: Int?
-    let seasons: [TmdbSeason]?
+    let images: TmdbImages?
     
     var displayTitle: String { title ?? name ?? "Unknown" }
     var displayDate: String? { releaseDate ?? firstAirDate }
+    
+    var logoPath: String? {
+        images?.logos?.first(where: { $0.iso6391 == "en" })?.filePath ?? images?.logos?.first?.filePath
+    }
     
     var certification: String? {
         if let releases = releaseDates?.results.first(where: { $0.iso31661 == "US" }) {
@@ -162,10 +180,6 @@ struct TmdbDetails: Decodable {
             return ratings.rating
         }
         return nil
-    }
-    
-    var director: String? {
-        credits?.crew?.first(where: { $0.job == "Director" })?.name
     }
 }
 
@@ -184,15 +198,6 @@ struct TmdbCast: Decodable, Identifiable {
     let name: String
     let character: String?
     let profilePath: String?
-    let roles: [TmdbRole]?
-    
-    var displayRole: String {
-        return character ?? roles?.first?.character ?? ""
-    }
-}
-
-struct TmdbRole: Decodable {
-    let character: String
 }
 
 struct TmdbCrew: Decodable, Identifiable {
@@ -211,7 +216,6 @@ struct TmdbVideo: Decodable, Identifiable {
     let name: String
     let site: String
     let type: String
-    
     var isTrailer: Bool { type == "Trailer" && site == "YouTube" }
 }
 
@@ -234,12 +238,13 @@ struct TmdbTvRating: Decodable {
     let rating: String
 }
 
-struct TmdbSeason: Decodable, Identifiable {
-    let id: Int
-    let name: String
-    let seasonNumber: Int
-    let episodeCount: Int
-    let posterPath: String?
+struct TmdbImages: Decodable {
+    let logos: [TmdbImage]?
+    let backdrops: [TmdbImage]?
+}
+struct TmdbImage: Decodable {
+    let filePath: String
+    let iso6391: String?
 }
 
 struct TmdbSeasonDetails: Decodable {
@@ -255,4 +260,12 @@ struct TmdbEpisode: Decodable, Identifiable {
     let overview: String?
     let stillPath: String?
     let voteAverage: Double?
+}
+
+struct TmdbSeason: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let seasonNumber: Int
+    let episodeCount: Int
+    let posterPath: String?
 }
