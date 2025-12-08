@@ -62,13 +62,12 @@ struct DetailsView: View {
         // --- POPUPS & INTERACTION ---
         
         // 1. Version Selection Dialog
-        // FIXED: Uses correct struct path for selection
         .confirmationDialog(
             viewModel.pickerTitle,
             isPresented: $viewModel.showVersionPicker,
             titleVisibility: .visible
         ) {
-            ForEach(viewModel.pickerOptions) { option in
+            ForEach(viewModel.pickerOptions, id: \.id) { option in
                 Button(option.label) {
                     viewModel.onPickerSelect?(option.channelStruct)
                 }
@@ -327,6 +326,7 @@ struct DetailsView: View {
                                 EpisodeCard(episode: ep)
                             }
                             .buttonStyle(CinemeltCardButtonStyle())
+                            .frame(width: 600) // LAYOUT FIX: Prevent infinite expansion
                             .focused($focusedField, equals: .episode(ep.id))
                         }
                     }

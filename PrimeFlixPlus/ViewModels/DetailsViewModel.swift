@@ -30,7 +30,7 @@ class DetailsViewModel: ObservableObject {
     @Published var pickerTitle: String = ""
     @Published var pickerOptions: [VersionOption] = []
     
-    // UPDATED: Now passes ChannelStruct to allow safe handling from Views
+    // Pass ChannelStruct to allow safe handling from Views
     @Published var onPickerSelect: ((ChannelStruct) -> Void)? = nil
     
     @Published var playButtonLabel: String = "Play"
@@ -46,6 +46,7 @@ class DetailsViewModel: ObservableObject {
     // --- Internal ---
     private var seriesEcosystem: [Int: [Int: [ChannelStruct]]] = [:]
     private var tmdbSeasonCache: [Int: [TmdbEpisode]] = [:]
+    private var omdbSeasonCache: [Int: [OmdbEpisodeDetails]] = [:] // OMDB Cache
     
     // Stores metadata derived from Parent Containers
     private var seriesMetadataMap: [String: ContentInfo] = [:]
@@ -138,7 +139,6 @@ class DetailsViewModel: ObservableObject {
                 
                 // C. Ingest Missing Episodes
                 if !idsToSync.isEmpty {
-                    // FIX: Static call using 'DetailsViewModel' to avoid 'self' capture issues
                     await DetailsViewModel.ingestMissingEpisodes(containers: idsToSync, client: XtreamClient(), context: ctx)
                 }
                 
@@ -156,13 +156,15 @@ class DetailsViewModel: ObservableObject {
         // 2. Process Results
         self.seriesMetadataMap = result.metaMap
         
+        // CRITICAL: Fetch Metadata FIRST to ensure we have OMDB IDs for the season fallback
+        await fetchMetadata()
+        
         if isSeriesType {
             await processSeriesData(episodes: result.episodes)
         } else {
             processMovieVersions(structs: result.versions)
         }
         
-        await fetchMetadata()
         await recalculateSmartPlay()
         
         withAnimation { self.isLoading = false }
@@ -171,7 +173,6 @@ class DetailsViewModel: ObservableObject {
     
     // MARK: - Ingestion Logic
     
-    /// Static helper to ingest episodes safely on a background context
     private static func ingestMissingEpisodes(containers: [ChannelStruct], client: XtreamClient, context: NSManagedObjectContext) async {
         await withTaskGroup(of: Void.self) { group in
             for container in containers {
@@ -223,13 +224,32 @@ class DetailsViewModel: ObservableObject {
         self.selectedSeason = season
         guard let epMap = seriesEcosystem[season] else { return }
         
+        // 1. Fetch Metadata (Priority: Cache -> OMDB -> TMDB)
+        var omdbData: [OmdbEpisodeDetails] = []
         var tmdbData: [TmdbEpisode] = []
-        if let tmdbId = tmdbDetails?.id {
-            if let cached = tmdbSeasonCache[season] {
-                tmdbData = cached
-            } else if let fetched = try? await tmdbClient.getTvSeason(tvId: tmdbId, seasonNumber: season) {
-                tmdbData = fetched.episodes
-                tmdbSeasonCache[season] = tmdbData
+        
+        // A. Check Caches
+        if let oCached = omdbSeasonCache[season] {
+            omdbData = oCached
+        } else if let tCached = tmdbSeasonCache[season] {
+            tmdbData = tCached
+        } else {
+            // B. Try OMDB First (Primary Source for Series)
+            var omdbSuccess = false
+            if let imdbID = omdbDetails?.imdbID {
+                if let fetched = await omdbClient.getSeasonDetails(imdbID: imdbID, season: season) {
+                    omdbData = fetched
+                    omdbSeasonCache[season] = omdbData
+                    omdbSuccess = true
+                }
+            }
+            
+            // C. Try TMDB (Fallback)
+            if !omdbSuccess, let tmdbId = tmdbDetails?.id {
+                if let fetched = try? await tmdbClient.getTvSeason(tvId: tmdbId, seasonNumber: season) {
+                    tmdbData = fetched.episodes
+                    tmdbSeasonCache[season] = tmdbData
+                }
             }
         }
         
@@ -239,8 +259,51 @@ class DetailsViewModel: ObservableObject {
             guard let variants = epMap[epNum] else { continue }
             let processedVersions = processVersions(variants)
             
-            let meta = tmdbData.first(where: { $0.episodeNumber == epNum })
-            let still: URL? = meta?.stillPath.flatMap { URL(string: "https://image.tmdb.org/t/p/w500\($0)") }
+            // 2. Resolve Metadata
+            // Priority: OMDB -> TMDB -> Local Enriched -> Generic
+            var title = "Episode \(epNum)"
+            var overview = ""
+            var still: URL? = nil
+            
+            // Source 1: OMDB
+            if let meta = omdbData.first(where: { Int($0.episode ?? "0") == epNum }) {
+                title = meta.title
+                overview = meta.plot ?? ""
+                if let poster = meta.poster, poster != "N/A" {
+                    still = URL(string: poster)
+                }
+            }
+            // Source 2: TMDB
+            else if let meta = tmdbData.first(where: { $0.episodeNumber == epNum }) {
+                title = meta.name
+                overview = meta.overview ?? ""
+                if let path = meta.stillPath {
+                    still = URL(string: "https://image.tmdb.org/t/p/w500\(path)")
+                }
+            }
+            
+            // Source 3: Local Enriched / Fallback
+            // Find a variant that has a meaningful title or valid cover
+            // FIX: Using only properties that exist on ChannelStruct (title, cover)
+            let localData = variants.first(where: { c in
+                return c.cover != nil
+            })
+            
+            // If title is generic "Episode X", try to see if local title is better
+            if title.hasPrefix("Episode"), let localTitle = localData?.title {
+                if !localTitle.lowercased().contains("episode") {
+                    title = localTitle
+                }
+            }
+            
+            if still == nil {
+                if let localCover = localData?.cover {
+                    still = URL(string: localCover)
+                } else if let fallbackCover = self.posterUrl {
+                    // Ultimate Fallback: Use Show Poster if episode image is completely missing
+                    still = fallbackCover
+                }
+            }
             
             let (isWatched, progress) = await getCompositeProgress(for: variants)
             
@@ -248,8 +311,8 @@ class DetailsViewModel: ObservableObject {
                 id: "S\(season)E\(epNum)",
                 season: season,
                 number: epNum,
-                title: meta?.name ?? "Episode \(epNum)",
-                overview: meta?.overview ?? "",
+                title: title,
+                overview: overview,
                 stillPath: still,
                 versions: processedVersions,
                 isWatched: isWatched,
@@ -325,15 +388,12 @@ class DetailsViewModel: ObservableObject {
         } else if let only = movieVersions.first {
             triggerPlay(structItem: only.channelStruct)
         } else {
-            // Fallback to current channel
             triggerPlay(structItem: ChannelStruct(entity: channel))
         }
     }
     
-    // Safe Trigger using Struct
     private func triggerPlay(structItem: ChannelStruct) {
         guard let repo = repository else { return }
-        // Re-fetch object on Main Context for the Player
         let ctx = repo.container.viewContext
         let req = NSFetchRequest<Channel>(entityName: "Channel")
         req.predicate = NSPredicate(format: "url == %@", structItem.url)
@@ -383,28 +443,60 @@ class DetailsViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Metadata Fetcher (High Quality Image Update)
+    
     private func fetchMetadata() async {
         let info = TitleNormalizer.parse(rawTitle: channel.canonicalTitle ?? channel.title)
         async let tmdb = tmdbClient.findBestMatch(title: info.normalizedTitle, year: info.year, type: channel.type == "series" ? "series" : "movie")
         async let omdb = omdbClient.getSeriesMetadata(title: info.normalizedTitle, year: info.year)
         let (tmdbMatch, omdbData) = await (tmdb, omdb)
         
+        // 1. Assign Data Objects
+        if let omdb = omdbData { self.omdbDetails = omdb }
+        
         if let match = tmdbMatch {
             if channel.type == "series" {
                 if let details = try? await tmdbClient.getTvDetails(id: match.id) {
                     self.tmdbDetails = details
                     if let cast = details.aggregateCredits?.cast { self.cast = cast }
-                    if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
                 }
             } else {
                 if let details = try? await tmdbClient.getMovieDetails(id: match.id) {
                     self.tmdbDetails = details
                     if let cast = details.credits?.cast { self.cast = cast }
-                    if let bg = details.backdropPath { self.backgroundUrl = URL(string: "https://image.tmdb.org/t/p/original\(bg)") }
                 }
             }
         }
-        if let omdb = omdbData { self.omdbDetails = omdb }
+        
+        // 2. Resolve Background Image (High Quality Logic)
+        var newBg: URL? = nil
+        let isSeries = (channel.type == "series" || channel.type == "series_episode")
+        
+        if isSeries {
+            // Series Strategy: OMDB Poster (High Res) -> TMDB Backdrop -> Default
+            if let poster = self.omdbDetails?.poster, poster != "N/A" {
+                newBg = URL(string: getHighResOmdbImage(poster))
+            } else if let bg = self.tmdbDetails?.backdropPath {
+                newBg = URL(string: "https://image.tmdb.org/t/p/original\(bg)")
+            }
+        } else {
+            // Movie Strategy: TMDB Backdrop -> OMDB Poster -> Default
+            if let bg = self.tmdbDetails?.backdropPath {
+                newBg = URL(string: "https://image.tmdb.org/t/p/original\(bg)")
+            } else if let poster = self.omdbDetails?.poster, poster != "N/A" {
+                newBg = URL(string: getHighResOmdbImage(poster))
+            }
+        }
+        
+        if let highRes = newBg {
+             self.backgroundUrl = highRes
+        }
+    }
+    
+    /// Patches OMDB URLs to remove compression suffixes for highest resolution
+    private func getHighResOmdbImage(_ url: String) -> String {
+        return url.replacingOccurrences(of: "_SX300", with: "")
+                  .replacingOccurrences(of: "_SX3000", with: "")
     }
     
     func toggleFavorite() {
@@ -414,18 +506,5 @@ class DetailsViewModel: ObservableObject {
     
     func onPlaySmartTarget() {
         if let next = nextUpEpisode { onPlayEpisode(next) } else { onPlayMovie() }
-    }
-}
-
-// Helper Extension for playback reconstruction
-extension ChannelStruct {
-    func toChannel(context: NSManagedObjectContext) -> Channel {
-        let req = NSFetchRequest<Channel>(entityName: "Channel")
-        req.predicate = NSPredicate(format: "url == %@", self.url)
-        req.fetchLimit = 1
-        if let existing = try? context.fetch(req).first {
-            return existing
-        }
-        return Channel(context: context, playlistUrl: playlistUrl, url: url, title: title, group: group, type: type)
     }
 }

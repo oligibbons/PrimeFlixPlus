@@ -88,6 +88,61 @@ struct OmdbSearchItem: Codable {
     }
 }
 
+// MARK: - Season / Episode Models (NEW)
+
+struct OmdbSeasonResponse: Codable {
+    let title: String?
+    let season: String?
+    let episodes: [OmdbSimpleEpisode]?
+    let response: String
+    
+    enum CodingKeys: String, CodingKey {
+        case title = "Title"
+        case season = "Season"
+        case episodes = "Episodes"
+        case response = "Response"
+    }
+}
+
+struct OmdbSimpleEpisode: Codable {
+    let title: String
+    let released: String
+    let episode: String
+    let imdbRating: String
+    let imdbID: String
+    
+    enum CodingKeys: String, CodingKey {
+        case title = "Title"
+        case released = "Released"
+        case episode = "Episode"
+        case imdbRating
+        case imdbID
+    }
+}
+
+// Full details for a single episode (Used in Deep Fetch)
+struct OmdbEpisodeDetails: Codable, Identifiable {
+    let title: String
+    let released: String?
+    let episode: String?
+    let season: String?
+    let plot: String?
+    let poster: String?
+    let imdbID: String
+    
+    var id: String { imdbID }
+    
+    enum CodingKeys: String, CodingKey {
+        case title = "Title"
+        case released = "Released"
+        case episode = "Episode"
+        case season = "Season"
+        case plot = "Plot"
+        case poster = "Poster"
+        case imdbID
+    }
+}
+
 // MARK: - Client
 
 actor OmdbClient {
@@ -97,6 +152,7 @@ actor OmdbClient {
     
     // In-Memory Cache to protect API limits during a single session
     private var cache: [String: OmdbSeriesDetails] = [:]
+    private var seasonCache: [String: [OmdbEpisodeDetails]] = [:] // Key: "imdbID_seasonNum"
     
     // MARK: - Public API
     
@@ -123,7 +179,74 @@ actor OmdbClient {
         return nil
     }
     
+    /// Fetches Season Details (including Plot/Image for every episode)
+    /// Performs a "Deep Fetch" if necessary, as the standard Season API doesn't include Plot/Poster.
+    func getSeasonDetails(imdbID: String, season: Int) async -> [OmdbEpisodeDetails]? {
+        let cacheKey = "\(imdbID)_S\(season)"
+        if let cached = seasonCache[cacheKey] { return cached }
+        
+        // 1. Fetch the Season List (Lightweight)
+        // URL: ?i=tt123&Season=1
+        let queryItems = [
+            URLQueryItem(name: "apikey", value: apiKey),
+            URLQueryItem(name: "i", value: imdbID),
+            URLQueryItem(name: "Season", value: String(season))
+        ]
+        
+        guard let url = buildUrl(items: queryItems) else { return nil }
+        
+        do {
+            let (data, _) = try await session.data(from: url)
+            let seasonResp = try JSONDecoder().decode(OmdbSeasonResponse.self, from: data)
+            
+            guard let simpleEpisodes = seasonResp.episodes, !simpleEpisodes.isEmpty else { return nil }
+            
+            // 2. Deep Fetch (Heavyweight)
+            // Fetch full details for each episode in parallel to get Plot/Image
+            let fullEpisodes = await withTaskGroup(of: OmdbEpisodeDetails?.self) { group -> [OmdbEpisodeDetails] in
+                for ep in simpleEpisodes {
+                    group.addTask {
+                        return await self.fetchEpisodeDetails(imdbID: ep.imdbID)
+                    }
+                }
+                
+                var collected: [OmdbEpisodeDetails] = []
+                for await result in group {
+                    if let res = result { collected.append(res) }
+                }
+                // Re-sort by episode number
+                return collected.sorted { (Int($0.episode ?? "0") ?? 0) < (Int($1.episode ?? "0") ?? 0) }
+            }
+            
+            if !fullEpisodes.isEmpty {
+                seasonCache[cacheKey] = fullEpisodes
+                return fullEpisodes
+            }
+            
+        } catch {
+            print("⚠️ OMDB Season Fetch Error: \(error)")
+        }
+        return nil
+    }
+    
     // MARK: - Internal Steps
+    
+    private func fetchEpisodeDetails(imdbID: String) async -> OmdbEpisodeDetails? {
+        let queryItems = [
+            URLQueryItem(name: "apikey", value: apiKey),
+            URLQueryItem(name: "i", value: imdbID),
+            URLQueryItem(name: "plot", value: "short") // 'short' is usually enough for episodes
+        ]
+        
+        guard let url = buildUrl(items: queryItems) else { return nil }
+        
+        do {
+            let (data, _) = try await session.data(from: url)
+            return try JSONDecoder().decode(OmdbEpisodeDetails.self, from: data)
+        } catch {
+            return nil
+        }
+    }
     
     private func searchSeriesID(title: String, year: String?) async -> String? {
         var queryItems = [
@@ -145,10 +268,8 @@ actor OmdbClient {
             // Return first match
             return result.search?.first?.imdbID
         } catch {
-            print("⚠️ OMDB Search Error for \(title): \(error)")
             // Fallback: Try without year if it failed
             if year != nil {
-                print("🔄 Retrying OMDB search for \(title) without year...")
                 return await searchSeriesID(title: title, year: nil)
             }
             return nil
