@@ -83,6 +83,10 @@
 		D2AC8B482EE6265700D440C3 /* EnrichmentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B472EE6265700D440C3 /* EnrichmentService.swift */; };
 		D2AC8B4A2EE6267900D440C3 /* VLCPlayerEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B492EE6267900D440C3 /* VLCPlayerEngine.swift */; };
 		D2AC8B4C2EE6E60D00D440C3 /* OmdbClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B4B2EE6E60D00D440C3 /* OmdbClient.swift */; };
+		D2AC8B522EE7819600D440C3 /* ControlsOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B512EE7819600D440C3 /* ControlsOverlayView.swift */; };
+		D2AC8B542EE781F500D440C3 /* MiniDetailsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B532EE781F500D440C3 /* MiniDetailsOverlay.swift */; };
+		D2AC8B562EE7822800D440C3 /* SelectionOverlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B552EE7822800D440C3 /* SelectionOverlays.swift */; };
+		D2AC8B592EE784F100D440C3 /* PlayerSharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B582EE784F100D440C3 /* PlayerSharedComponents.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -199,6 +203,10 @@
 		D2AC8B472EE6265700D440C3 /* EnrichmentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentService.swift; sourceTree = "<group>"; };
 		D2AC8B492EE6267900D440C3 /* VLCPlayerEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLCPlayerEngine.swift; sourceTree = "<group>"; };
 		D2AC8B4B2EE6E60D00D440C3 /* OmdbClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmdbClient.swift; sourceTree = "<group>"; };
+		D2AC8B512EE7819600D440C3 /* ControlsOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlsOverlayView.swift; sourceTree = "<group>"; };
+		D2AC8B532EE781F500D440C3 /* MiniDetailsOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniDetailsOverlay.swift; sourceTree = "<group>"; };
+		D2AC8B552EE7822800D440C3 /* SelectionOverlays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionOverlays.swift; sourceTree = "<group>"; };
+		D2AC8B582EE784F100D440C3 /* PlayerSharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSharedComponents.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -381,9 +389,9 @@
 		D292D67A2EDF4D9100E8845A /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				D2AC8B4D2EE7814A00D440C3 /* Player */,
 				D292D67B2EDF4D9E00E8845A /* HomeView.swift */,
 				D292D67F2EDF56AF00E8845A /* SettingsView.swift */,
-				D292D6832EDF576500E8845A /* PlayerView.swift */,
 				D228AD122EDF66A3007C6114 /* AddPlaylistView.swift */,
 				D228AD142EDF67FB007C6114 /* NeonTextField.swift */,
 				D228AD162EDF7311007C6114 /* SyncStatusOverlay.swift */,
@@ -436,6 +444,34 @@
 				D2AC8B492EE6267900D440C3 /* VLCPlayerEngine.swift */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		D2AC8B4D2EE7814A00D440C3 /* Player */ = {
+			isa = PBXGroup;
+			children = (
+				D2AC8B572EE784DF00D440C3 /* Components */,
+				D292D6832EDF576500E8845A /* PlayerView.swift */,
+				D2AC8B4E2EE7815200D440C3 /* Overlays */,
+			);
+			path = Player;
+			sourceTree = "<group>";
+		};
+		D2AC8B4E2EE7815200D440C3 /* Overlays */ = {
+			isa = PBXGroup;
+			children = (
+				D2AC8B512EE7819600D440C3 /* ControlsOverlayView.swift */,
+				D2AC8B532EE781F500D440C3 /* MiniDetailsOverlay.swift */,
+				D2AC8B552EE7822800D440C3 /* SelectionOverlays.swift */,
+			);
+			path = Overlays;
+			sourceTree = "<group>";
+		};
+		D2AC8B572EE784DF00D440C3 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				D2AC8B582EE784F100D440C3 /* PlayerSharedComponents.swift */,
+			);
+			path = Components;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -582,6 +618,7 @@
 				D2AC8B3B2EE4A03100D440C3 /* TasteProfile.swift in Sources */,
 				D2AC8B462EE625D000D440C3 /* SyncEngine.swift in Sources */,
 				D2AC8AF62EE0ADE900D440C3 /* SearchViewModel.swift in Sources */,
+				D2AC8B522EE7819600D440C3 /* ControlsOverlayView.swift in Sources */,
 				D2AC8AFE2EE1475700D440C3 /* GlassTextField.swift in Sources */,
 				D2AC8B112EE22EAF00D440C3 /* ManageCategoriesView.swift in Sources */,
 				D292D6802EDF56AF00E8845A /* SettingsView.swift in Sources */,
@@ -599,6 +636,8 @@
 				D228AD0B2EDF5A22007C6114 /* Persistence.swift in Sources */,
 				D292D66F2EDF4B4100E8845A /* PrimeFlixRepository.swift in Sources */,
 				D292D6842EDF576500E8845A /* PlayerView.swift in Sources */,
+				D2AC8B592EE784F100D440C3 /* PlayerSharedComponents.swift in Sources */,
+				D2AC8B562EE7822800D440C3 /* SelectionOverlays.swift in Sources */,
 				D2AC8B2B2EE382B700D440C3 /* SmartLoadingView.swift in Sources */,
 				D292D6562EDF464100E8845A /* XtreamInput.swift in Sources */,
 				D292D6822EDF573F00E8845A /* PlayerViewModel.swift in Sources */,
@@ -606,6 +645,7 @@
 				D292D6672EDF4A0800E8845A /* M3UParser.swift in Sources */,
 				D292D6792EDF4C5800E8845A /* XtreamClient.swift in Sources */,
 				D2AC8B422EE6255700D440C3 /* VersioningService.swift in Sources */,
+				D2AC8B542EE781F500D440C3 /* MiniDetailsOverlay.swift in Sources */,
 				D292D6752EDF4C1800E8845A /* MovieCard.swift in Sources */,
 				D292D65A2EDF46EA00E8845A /* WatchProgress.swift in Sources */,
 				D2AC8B092EE1FAE000D440C3 /* ContinueWatchingViewModel.swift in Sources */,
