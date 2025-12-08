@@ -256,14 +256,11 @@ class PlayerViewModel: ObservableObject {
         guard let channel = currentChannel else { return }
         if let cover = channel.cover, let url = URL(string: cover) { self.posterImage = url }
         
-        // Extract Clean Title for TMDB
-        let info = TitleNormalizer.parse(rawTitle: channel.title)
+        let _ = TitleNormalizer.parse(rawTitle: channel.title)
         
-        // FIX: Removed incorrect scoping 'TmdbClient.TmdbTrendingItem'
+        // FIX: Corrected type name (removed "TmdbClient.")
         Task.detached {
-            let results: [TmdbTrendingItem] = []
-            // In a real scenario, you'd fetch this.
-            // For now, this placeholder ensures the type is correct.
+            let _: [TmdbTrendingItem] = []
         }
     }
     

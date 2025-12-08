@@ -9,8 +9,8 @@ class ContentInfoWrapper: NSObject {
 struct ContentInfo {
     let rawTitle: String
     let normalizedTitle: String
-    let quality: String
-    let language: String?
+    let quality: String      // "4K", "1080p", "SD"
+    let language: String?    // "English", "French"
     let year: String?
     let season: Int
     let episode: Int
@@ -21,12 +21,14 @@ struct ContentInfo {
         var score = 0
         let q = quality.lowercased()
         
+        // Resolution weight
         if q.contains("8k") { score += 8000 }
         else if q.contains("4k") || q.contains("uhd") { score += 4000 }
         else if q.contains("1080") { score += 1080 }
         else if q.contains("720") { score += 720 }
         else if q.contains("480") || q.contains("sd") { score += 480 }
         
+        // Bonus for Audio/Codec features
         if q.contains("hevc") || q.contains("x265") { score += 100 }
         if q.contains("10bit") { score += 50 }
         if q.contains("5.1") || q.contains("atmos") { score += 50 }
@@ -190,15 +192,22 @@ enum TitleNormalizer {
     private static func levenshtein(_ s1: String, _ s2: String) -> Int {
         let a = Array(s1.utf16)
         let b = Array(s2.utf16)
+        
         let m = a.count
         let n = b.count
         var d = [[Int]](repeating: [Int](repeating: 0, count: n + 1), count: m + 1)
+        
         for i in 0...m { d[i][0] = i }
         for j in 0...n { d[0][j] = j }
+        
         for i in 1...m {
             for j in 1...n {
                 let cost = (a[i - 1] == b[j - 1]) ? 0 : 1
-                d[i][j] = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+                d[i][j] = min(
+                    d[i - 1][j] + 1,      // deletion
+                    d[i][j - 1] + 1,      // insertion
+                    d[i - 1][j - 1] + cost // substitution
+                )
             }
         }
         return d[m][n]

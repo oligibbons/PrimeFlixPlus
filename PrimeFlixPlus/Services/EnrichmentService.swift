@@ -2,7 +2,7 @@ import Foundation
 import CoreData
 
 /// Service responsible for "Enriching" content with metadata and artwork from TMDB.
-/// Background worker that fixes missing covers for Movies AND Series.
+/// Background worker that fixes missing covers for Movies AND Series using Smart Fallback logic.
 class EnrichmentService {
     
     private let context: NSManagedObjectContext
@@ -23,17 +23,18 @@ class EnrichmentService {
         
         await context.perform {
             let req = NSFetchRequest<Channel>(entityName: "Channel")
-            // FIX: Now checking both 'movie' and 'series' types
+            // Target items from this playlist that are Movies or Series
             req.predicate = NSPredicate(
                 format: "playlistUrl == %@ AND (type == 'movie' OR type == 'series')",
                 playlistUrl
             )
-            req.fetchLimit = 2000
+            req.fetchLimit = 2000 // Process in chunks
             
             if let results = try? self.context.fetch(req) {
-                // Filter for missing or empty covers
+                // Filter: Only process items with no cover, or empty string
                 fetchedCandidates = results.filter { ch in
                     guard let c = ch.cover, !c.isEmpty else { return true }
+                    // Optional: Add logic to re-check items with generic placeholders if needed
                     return false
                 }.map { $0.objectID }
             }
@@ -42,7 +43,7 @@ class EnrichmentService {
         let candidates = fetchedCandidates
         if candidates.isEmpty { return }
         
-        // 2. Process in batches
+        // 2. Process in small batches to respect API limits
         let batchSize = 10
         let chunks = stride(from: 0, to: candidates.count, by: batchSize).map {
             Array(candidates[$0..<min($0 + batchSize, candidates.count)])
@@ -68,7 +69,7 @@ class EnrichmentService {
                     var rawTitle: String = ""
                     var type: String = "movie"
                     
-                    // A. Read Data
+                    // A. Read Data (Thread-safe)
                     await self.context.perform {
                         if let ch = try? self.context.existingObject(with: oid) as? Channel {
                             rawTitle = ch.canonicalTitle ?? ch.title
@@ -78,21 +79,18 @@ class EnrichmentService {
                     
                     if rawTitle.isEmpty { return (oid, nil) }
                     
-                    // B. Parse & Network Call
+                    // B. Parse Title (Using the new Anchor-Based Normalizer)
                     let info = TitleNormalizer.parse(rawTitle: rawTitle)
                     
-                    // FIX: Branch logic based on type
-                    if type == "series" {
-                        if let results = try? await self.tmdbClient.searchTv(query: info.normalizedTitle, year: info.year) {
-                            if let best = results.first, let path = best.posterPath {
-                                return (oid, "https://image.tmdb.org/t/p/w500\(path)")
-                            }
-                        }
-                    } else {
-                        if let results = try? await self.tmdbClient.searchMovie(query: info.normalizedTitle, year: info.year) {
-                            if let best = results.first, let path = best.posterPath {
-                                return (oid, "https://image.tmdb.org/t/p/w500\(path)")
-                            }
+                    // C. Smart Network Call
+                    // Uses the new findBestMatch which handles the "Year Mismatch" fallback automatically
+                    if let match = await self.tmdbClient.findBestMatch(
+                        title: info.normalizedTitle,
+                        year: info.year,
+                        type: type
+                    ) {
+                        if let poster = match.poster {
+                            return (oid, "https://image.tmdb.org/t/p/w500\(poster)")
                         }
                     }
                     
@@ -100,7 +98,7 @@ class EnrichmentService {
                 }
             }
             
-            // C. Collect Results
+            // D. Collect Results
             var updates: [(NSManagedObjectID, String)] = []
             for await (oid, newCover) in group {
                 if let cover = newCover {
@@ -108,7 +106,7 @@ class EnrichmentService {
                 }
             }
             
-            // D. Write Changes
+            // E. Write Changes (Thread-safe)
             if !updates.isEmpty {
                 await self.context.perform {
                     for (oid, cover) in updates {
@@ -121,4 +119,4 @@ class EnrichmentService {
             }
         }
     }
-} 
+}

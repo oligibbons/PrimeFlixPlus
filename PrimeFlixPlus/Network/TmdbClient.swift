@@ -15,19 +15,19 @@ actor TmdbClient {
         return d
     }()
     
-    // MARK: - Smart Search (The Fix)
+    // MARK: - Smart Search (The "Chillio" Logic)
     
-    /// Orchestrates the search to find the absolute best match.
-    /// FIX: For TV Series, if the year search fails (common for ongoing seasons), it retries without the year.
+    /// Orchestrates the search to find the best match.
+    /// 1. Tries strict match (Title + Year).
+    /// 2. If no TV results, retries WITHOUT year (fixes "The Bear S03 2024" issues).
+    /// 3. Returns the top result.
     func findBestMatch(title: String, year: String?, type: String) async -> (id: Int, poster: String?, backdrop: String?)? {
         do {
             if type == "series" || type == "series_episode" {
                 // 1. Try Strict Search (Title + Year)
-                // Useful for "Doctor Who (2005)" vs "Doctor Who (1963)"
                 var results = try await searchTv(query: title, year: year)
                 
                 // 2. Fallback: If no results, try WITHOUT year
-                // Solves the "The Bear S03 2024" issue where 2024 != 2022 (Premiere)
                 if results.isEmpty && year != nil {
                     print("⚠️ No TV match for '\(title)' + '\(year ?? "")'. Retrying without year...")
                     results = try await searchTv(query: title, year: nil)
@@ -51,7 +51,7 @@ actor TmdbClient {
                 }
             }
         } catch {
-            print("⚠️ TMDB Search Error for \(title): \(error)")
+            print("⚠️ TMDB Search Failed for \(title): \(error)")
         }
         return nil
     }
@@ -61,7 +61,7 @@ actor TmdbClient {
     func searchMovie(query: String, year: String? = nil) async throws -> [TmdbMovieResult] {
         var params = ["query": query, "language": "en-US", "include_adult": "false"]
         if let year = year { params["year"] = year }
-        // NEW: primary_release_year is strictly for movies and often safer
+        // NEW: primary_release_year is often safer for movies
         if let year = year { params["primary_release_year"] = year }
         
         let response: TmdbSearchResponse<TmdbMovieResult> = try await fetch("/search/movie", params: params)
@@ -75,8 +75,34 @@ actor TmdbClient {
         return response.results
     }
     
-    // ... rest of the file (getMovieDetails, getTvDetails, fetch, models) remains the same ...
-    // To save context tokens, I am not repeating the unchanged Models code unless you need me to.
+    func getMovieDetails(id: Int) async throws -> TmdbDetails {
+        let params = [
+            "append_to_response": "credits,similar,release_dates,videos,images,external_ids",
+            "language": "en-US",
+            "include_image_language": "en,null" // Critical: Gets english logos even for foreign films
+        ]
+        return try await fetch("/movie/\(id)", params: params)
+    }
+    
+    func getTvDetails(id: Int) async throws -> TmdbDetails {
+        let params = [
+            "append_to_response": "aggregate_credits,similar,content_ratings,videos,images,external_ids",
+            "language": "en-US",
+            "include_image_language": "en,null"
+        ]
+        return try await fetch("/tv/\(id)", params: params)
+    }
+    
+    func getTvSeason(tvId: Int, seasonNumber: Int) async throws -> TmdbSeasonDetails {
+        let params = ["language": "en-US"]
+        return try await fetch("/tv/\(tvId)/season/\(seasonNumber)", params: params)
+    }
+    
+    func getTrending(type: String) async throws -> [TmdbTrendingItem] {
+        let mediaType = (type == "series") ? "tv" : (type == "movie" ? "movie" : "all")
+        let response: TmdbSearchResponse<TmdbTrendingItem> = try await fetch("/trending/\(mediaType)/week", params: [:])
+        return response.results
+    }
     
     // MARK: - Core Fetch
     
@@ -103,8 +129,8 @@ actor TmdbClient {
     }
 }
 
-// ... (Keep your existing Models below this line) ...
-// Ensure you keep the TmdbSearchResponse, TmdbTrendingItem, etc. exactly as they were.
+// MARK: - Models
+
 struct TmdbSearchResponse<T: Decodable>: Decodable {
     let results: [T]
 }
