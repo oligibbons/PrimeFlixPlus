@@ -16,6 +16,7 @@ struct DetailsView: View {
         self.onBack = onBack
     }
     
+    // Focus Management
     @FocusState private var focusedField: FocusField?
     
     enum FocusField: Hashable {
@@ -24,7 +25,6 @@ struct DetailsView: View {
         case season(Int)
         case episode(String)
         case cast(Int)
-        case similar(Int)
     }
     
     var body: some View {
@@ -50,7 +50,7 @@ struct DetailsView: View {
         .task {
             await viewModel.loadData()
             
-            // Initial focus behavior: Force focus onto the Play button
+            // Initial focus: Default to Play button
             if focusedField == nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     focusedField = .play
@@ -59,31 +59,24 @@ struct DetailsView: View {
         }
         .onExitCommand { onBack() }
         
-        // --- SHEETS ---
+        // --- POPUPS & INTERACTION ---
         
-        // 1. Episode Version Picker
-        .confirmationDialog("Select Version", isPresented: $viewModel.showEpisodeVersionPicker, titleVisibility: .visible) {
-            if let ep = viewModel.episodeToPlay {
-                ForEach(ep.versions) { v in
-                    Button(v.qualityLabel.isEmpty ? "Default" : v.qualityLabel) {
-                        onPlay(viewModel.getPlayableChannel(version: v, metadata: ep))
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        
-        // 2. Top-Level Version Selector (Movies)
-        .confirmationDialog("Select Quality", isPresented: $viewModel.showVersionSelector, titleVisibility: .visible) {
-            ForEach(viewModel.availableVersions) { option in
+        // 1. Version Selection Dialog (Shared for Movies & Episodes)
+        // This is the critical fix: It listens to the unified 'showVersionPicker' from the new ViewModel
+        .confirmationDialog(
+            viewModel.pickerTitle,
+            isPresented: $viewModel.showVersionPicker,
+            titleVisibility: .visible
+        ) {
+            ForEach(viewModel.pickerOptions) { option in
                 Button(option.label) {
-                    viewModel.userSelectedVersion(option.channel)
+                    viewModel.onPickerSelect?(option.channel)
                 }
             }
             Button("Cancel", role: .cancel) {}
         }
         
-        // 3. Full Description Popup (New Feature)
+        // 2. Full Description Sheet
         .sheet(isPresented: $showFullDescription) {
             ScrollView {
                 Text(viewModel.omdbDetails?.plot ?? viewModel.tmdbDetails?.overview ?? viewModel.channel.overview ?? "")
@@ -93,6 +86,13 @@ struct DetailsView: View {
             }
             .background(CinemeltTheme.mainBackground)
             .ignoresSafeArea()
+        }
+        
+        // 3. Listener for Play Trigger (from ViewModel)
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PlayChannel"))) { note in
+            if let channel = note.object as? Channel {
+                onPlay(channel)
+            }
         }
     }
     
@@ -111,7 +111,7 @@ struct DetailsView: View {
                                 LinearGradient(
                                     stops: [
                                         .init(color: .black, location: 0),
-                                        .init(color: .black.opacity(0.4), location: 0.3), // Lighter top for text readability
+                                        .init(color: .black.opacity(0.4), location: 0.3),
                                         .init(color: CinemeltTheme.charcoal, location: 0.9)
                                     ],
                                     startPoint: .top,
@@ -133,7 +133,6 @@ struct DetailsView: View {
     private var loadingState: some View {
         VStack(spacing: 30) {
             CinemeltLoadingIndicator()
-            
             Text("Loading Details...")
                 .font(CinemeltTheme.fontBody(24))
                 .foregroundColor(CinemeltTheme.cream.opacity(0.6))
@@ -150,7 +149,6 @@ struct DetailsView: View {
                 
                 // --- Title & Metadata ---
                 VStack(alignment: .leading, spacing: 15) {
-                    // Title Priority: OMDB -> TMDB -> Channel
                     Text(viewModel.omdbDetails?.title ?? viewModel.tmdbDetails?.displayTitle ?? viewModel.channel.title)
                         .font(CinemeltTheme.fontTitle(90))
                         .foregroundColor(CinemeltTheme.cream)
@@ -159,7 +157,7 @@ struct DetailsView: View {
                     
                     metadataRow
                     
-                    // Description (Interactable - Click to Expand)
+                    // Description (Clickable)
                     Button(action: { showFullDescription = true }) {
                         Text(viewModel.omdbDetails?.plot ?? viewModel.tmdbDetails?.overview ?? viewModel.channel.overview ?? "No synopsis available.")
                             .font(CinemeltTheme.fontBody(28))
@@ -177,35 +175,22 @@ struct DetailsView: View {
                     .focused($focusedField, equals: .description)
                 }
                 .padding(.horizontal, 80)
-                .focusSection() // Creates a focus fence so you can enter from sidebar easily
+                .focusSection()
                 
-                // --- Buttons ---
+                // --- Action Buttons ---
                 actionButtons
                     .padding(.horizontal, 80)
                     .focusSection()
                 
-                // --- Top-Level Version Selector ---
-                if viewModel.availableVersions.count > 1 {
-                    versionSelectorButton
-                        .padding(.horizontal, 80)
-                        .focusSection()
-                }
-                
-                // --- Seasons/Episodes (Series Only) ---
-                // Moved up priority for Series to be accessible quickly
+                // --- Series Content (Seasons & Episodes) ---
                 if viewModel.channel.type == "series" || viewModel.channel.type == "series_episode" {
                     seriesContent
                         .zIndex(2)
                 }
                 
-                // --- Cast Rail ---
+                // --- Cast ---
                 if !viewModel.cast.isEmpty {
                     castRail
-                }
-                
-                // --- Similar Content Rail ---
-                if !viewModel.similarContent.isEmpty {
-                    similarContentRail
                 }
                 
                 Spacer(minLength: 150)
@@ -215,48 +200,20 @@ struct DetailsView: View {
     
     private var metadataRow: some View {
         HStack(spacing: 25) {
-            // Quality Badge
-            if let v = viewModel.selectedVersion {
-                Text(v.quality ?? "HD")
-                    .font(CinemeltTheme.fontTitle(20))
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(CinemeltTheme.accent)
-                    .cornerRadius(8)
+            // Quality Badge (Shows Best Available)
+            if let best = viewModel.movieVersions.first {
+                Badge(text: best.quality)
             }
             
-            // OMDB Ratings
-            if !viewModel.externalRatings.isEmpty {
-                ForEach(viewModel.externalRatings, id: \.source) { rating in
-                    HStack(spacing: 6) {
-                        if rating.source.contains("Rotten") {
-                            Image(systemName: "popcorn.fill").foregroundColor(.red)
-                        } else if rating.source.contains("Internet") {
-                            Text("IMDb").fontWeight(.bold).foregroundColor(.yellow)
-                        } else {
-                            Image(systemName: "star.fill").foregroundColor(.orange)
-                        }
-                        
-                        Text(rating.value)
-                            .font(CinemeltTheme.fontBody(24))
-                            .foregroundColor(CinemeltTheme.cream)
-                    }
-                }
-            } else if let score = viewModel.tmdbDetails?.voteAverage {
-                // Fallback TMDB Score
-                HStack(spacing: 8) {
-                    Image(systemName: "star.fill")
-                        .foregroundColor(CinemeltTheme.accent)
-                        .font(.caption)
-                    Text(String(format: "%.1f", score))
-                        .font(CinemeltTheme.fontBody(24))
-                        .foregroundColor(CinemeltTheme.cream)
+            // Ratings (OMDB or TMDB)
+            if let score = viewModel.omdbDetails?.imdbRating {
+                HStack(spacing: 6) {
+                    Text("IMDb").fontWeight(.bold).foregroundColor(.yellow)
+                    Text(score).font(CinemeltTheme.fontBody(24)).foregroundColor(CinemeltTheme.cream)
                 }
             }
             
-            // Year (Safe unwrap logic)
-            // FIX: Use .map on the optional String property, and explicitly convert the resulting Substring to a String.
+            // Year
             if let year = viewModel.omdbDetails?.year ?? viewModel.tmdbDetails?.displayDate.map({ String($0.prefix(4)) }) {
                 Text(year)
                     .font(CinemeltTheme.fontBody(24))
@@ -268,27 +225,15 @@ struct DetailsView: View {
                 Text(runtime)
                     .font(CinemeltTheme.fontBody(24))
                     .foregroundColor(.gray)
-            } else if let runtime = viewModel.tmdbDetails?.runtime, runtime > 0 {
-                Text(formatRuntime(runtime))
-                    .font(CinemeltTheme.fontBody(24))
-                    .foregroundColor(.gray)
             }
         }
     }
     
     private var actionButtons: some View {
         HStack(spacing: 30) {
-            // Play Button
+            // Smart Play Button
             Button(action: {
-                if let target = viewModel.smartPlayTarget {
-                    viewModel.onPlayEpisodeClicked(target)
-                } else {
-                    if viewModel.availableVersions.count > 1 {
-                        viewModel.showVersionSelector = true
-                    } else {
-                        onPlay(viewModel.selectedVersion ?? viewModel.channel)
-                    }
-                }
+                viewModel.onPlaySmartTarget()
             }) {
                 HStack(spacing: 15) {
                     Image(systemName: viewModel.playButtonIcon)
@@ -315,29 +260,80 @@ struct DetailsView: View {
             }
             .buttonStyle(CinemeltCardButtonStyle())
             .focused($focusedField, equals: .favorite)
+            
+            // Versions Button (Movies Only - Manual Override)
+            if !viewModel.movieVersions.isEmpty {
+                Button(action: { viewModel.onPlayMovie() }) {
+                    HStack {
+                        Image(systemName: "square.stack.3d.up")
+                        Text("Versions (\(viewModel.movieVersions.count))")
+                    }
+                    .font(CinemeltTheme.fontBody(22))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(12)
+                }
+                .buttonStyle(CinemeltCardButtonStyle())
+                .focused($focusedField, equals: .version)
+            }
         }
     }
     
-    private var versionSelectorButton: some View {
-        Button(action: { viewModel.showVersionSelector = true }) {
-            HStack {
-                Image(systemName: "square.stack.3d.up")
-                Text("Versions (\(viewModel.availableVersions.count))")
-                
-                if let selected = viewModel.selectedVersion,
-                   let option = viewModel.availableVersions.first(where: { $0.id == selected.url }) {
-                    Text("- \(option.label)")
-                        .foregroundColor(.gray)
+    private var seriesContent: some View {
+        VStack(alignment: .leading, spacing: 25) {
+            // Season Selector (Tabs)
+            if viewModel.seasons.count > 1 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 20) {
+                        ForEach(viewModel.seasons, id: \.self) { season in
+                            Button(action: { Task { await viewModel.loadSeasonContent(season) } }) {
+                                Text("Season \(season)")
+                                    .font(CinemeltTheme.fontTitle(22))
+                                    .foregroundColor(viewModel.selectedSeason == season ? .black : CinemeltTheme.cream)
+                                    .padding(.horizontal, 24)
+                                    .padding(.vertical, 10)
+                                    .background(
+                                        viewModel.selectedSeason == season ?
+                                        CinemeltTheme.accent : Color.white.opacity(0.05)
+                                    )
+                                    .cornerRadius(30)
+                            }
+                            .buttonStyle(CinemeltCardButtonStyle())
+                            .focused($focusedField, equals: .season(season))
+                        }
+                    }
+                    .padding(.horizontal, 80)
+                    .padding(.vertical, 20)
                 }
+                .focusSection()
             }
-            .font(CinemeltTheme.fontBody(22))
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(Color.white.opacity(0.05))
-            .cornerRadius(12)
+            
+            // Episode List
+            if viewModel.displayedEpisodes.isEmpty {
+                Text("No episodes available for this season.")
+                    .font(CinemeltTheme.fontBody(20))
+                    .foregroundColor(.gray)
+                    .padding(.horizontal, 80)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 50) {
+                        ForEach(viewModel.displayedEpisodes) { ep in
+                            Button(action: {
+                                viewModel.onPlayEpisode(ep)
+                            }) {
+                                EpisodeCard(episode: ep)
+                            }
+                            .buttonStyle(CinemeltCardButtonStyle())
+                            .focused($focusedField, equals: .episode(ep.id))
+                        }
+                    }
+                    .padding(.horizontal, 80)
+                    .padding(.vertical, 40)
+                }
+                .focusSection()
+            }
         }
-        .buttonStyle(CinemeltCardButtonStyle())
-        .focused($focusedField, equals: .version)
     }
     
     private var castRail: some View {
@@ -360,7 +356,6 @@ struct DetailsView: View {
                             .frame(width: 120, height: 120)
                             .clipShape(Circle())
                             .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 2))
-                            .shadow(radius: 5)
                             
                             Text(actor.name)
                                 .font(CinemeltTheme.fontBody(20))
@@ -377,146 +372,5 @@ struct DetailsView: View {
             }
         }
         .focusSection()
-    }
-    
-    private var similarContentRail: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("You Might Also Like")
-                .font(CinemeltTheme.fontTitle(32))
-                .foregroundColor(CinemeltTheme.cream)
-                .padding(.leading, 80)
-            
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 40) {
-                    ForEach(Array(viewModel.similarContent.enumerated()), id: \.element.id) { index, item in
-                        Button(action: {
-                            print("Selected similar content: \(item.title)")
-                        }) {
-                            SimplePosterCard(
-                                title: item.title,
-                                posterPath: item.posterPath
-                            )
-                        }
-                        .buttonStyle(CinemeltCardButtonStyle())
-                        .focused($focusedField, equals: .similar(index))
-                    }
-                }
-                .padding(.horizontal, 80)
-                .padding(.bottom, 20)
-            }
-        }
-        .focusSection()
-    }
-    
-    private var seriesContent: some View {
-        VStack(alignment: .leading, spacing: 25) {
-            // Season Selector
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 20) {
-                    ForEach(viewModel.seasons, id: \.self) { season in
-                        Button(action: { Task { await viewModel.selectSeason(season) } }) {
-                            Text("Season \(season)")
-                                .font(CinemeltTheme.fontTitle(22))
-                                .foregroundColor(viewModel.selectedSeason == season ? .black : CinemeltTheme.cream)
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 10)
-                                .background(
-                                    viewModel.selectedSeason == season ?
-                                    CinemeltTheme.accent : Color.white.opacity(0.05)
-                                )
-                                .cornerRadius(30)
-                        }
-                        .buttonStyle(CinemeltCardButtonStyle())
-                        .focused($focusedField, equals: .season(season))
-                    }
-                }
-                .padding(.horizontal, 80)
-                .padding(.vertical, 20)
-            }
-            .focusSection()
-            
-            // Episode List
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 50) {
-                    ForEach(viewModel.displayedEpisodes) { ep in
-                        Button(action: {
-                            viewModel.onPlayEpisodeClicked(ep)
-                        }) {
-                            EpisodeCard(episode: ep)
-                        }
-                        .buttonStyle(CinemeltCardButtonStyle())
-                        .focused($focusedField, equals: .episode(ep.id))
-                    }
-                }
-                .padding(.horizontal, 80)
-                .padding(.vertical, 40)
-            }
-            .focusSection()
-        }
-    }
-    
-    private func formatRuntime(_ minutes: Int) -> String {
-        let h = minutes / 60
-        let m = minutes % 60
-        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-    }
-}
-
-// MARK: - Helper Views
-
-struct SimplePosterCard: View {
-    let title: String
-    let posterPath: String?
-    
-    @FocusState private var isFocused: Bool
-    
-    private let width: CGFloat = 160
-    private let height: CGFloat = 240
-    
-    var body: some View {
-        Button(action: {
-            print("Selected similar content: \(title)")
-        }) {
-            ZStack(alignment: .bottom) {
-                // Image
-                if let path = posterPath {
-                    AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w300\(path)")) { img in
-                        img.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Circle().fill(Color.white.opacity(0.1))
-                            .overlay(Text(String(title.prefix(1))).font(.title)) // Use title here, not actor name prefix
-                    }
-                    .frame(width: width, height: height)
-                    .clipped()
-                } else {
-                    Rectangle().fill(Color.gray.opacity(0.3))
-                        .frame(width: width, height: height)
-                }
-                
-                // Focus Overlay
-                if isFocused {
-                    LinearGradient(
-                        colors: [.clear, CinemeltTheme.accent.opacity(0.8)],
-                        startPoint: .center,
-                        endPoint: .bottom
-                    )
-                    .transition(.opacity)
-                    
-                    Text(title)
-                        .font(CinemeltTheme.fontBody(18))
-                        .foregroundColor(.black)
-                        .lineLimit(2)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .cornerRadius(12)
-            .frame(width: width, height: height)
-        }
-        .buttonStyle(.card)
-        .focused($isFocused)
-        .scaleEffect(isFocused ? 1.1 : 1.0)
-        .shadow(color: isFocused ? CinemeltTheme.accent.opacity(0.5) : .black.opacity(0.3), radius: isFocused ? 20 : 5)
-        .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isFocused)
     }
 }
