@@ -63,6 +63,7 @@ struct SettingsView: View {
                     .background(Color.black.opacity(0.3))
                     .ignoresSafeArea()
             )
+            .focusSection() // FIX: Groups the sidebar as one navigation target
             
             // RIGHT PANE: Content Scroll
             NavigationView {
@@ -433,7 +434,7 @@ struct SettingsView: View {
                 .background(Color.clear)
             }
             .navigationViewStyle(.stack)
-            .focusSection()
+            .focusSection() // FIX: Groups the content area as one navigation target
         }
         .background(CinemeltTheme.mainBackground)
         .fullScreenCover(isPresented: $showOnboarding) {

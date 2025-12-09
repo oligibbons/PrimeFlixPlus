@@ -75,12 +75,14 @@ struct HomeView: View {
                     onSearch: { onSearch(viewModel.selectedTab) },
                     onSettings: onSettings
                 )
+                .focusSection() // FIX: Treats the header area as one navigation block
                 
                 // Tabs
                 HomeFilterBar(
                     selectedTab: viewModel.selectedTab,
                     onSelect: { tab in viewModel.selectTab(tab) }
                 )
+                .focusSection() // FIX: Treats the tab bar as one navigation block
                 
                 if viewModel.isLoading {
                     HomeLoadingState()
@@ -101,8 +103,6 @@ struct HomeView: View {
         }
         .coordinateSpace(name: "homeScrollSpace")
         .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
-            // Smoothly animate the offset change or set directly
-            // Direct set is usually better for scroll sync
             self.scrollOffset = value
         }
     }
@@ -293,7 +293,6 @@ struct HomeLanesView: View {
             }
         }
         .padding(.bottom, 100)
-        .focusSection()
     }
 }
 
@@ -346,6 +345,7 @@ struct HomeSectionRow: View {
                 .padding(.horizontal, 80)
                 .padding(.vertical, 60)
             }
+            .focusSection() // FIX: THIS IS THE MAGIC. It groups the horizontal row as a single navigation entity.
         }
     }
 }
@@ -393,6 +393,7 @@ struct HomeDrillDownView: View {
                     .padding(.horizontal, 80)
                     .padding(.bottom, 100)
                 }
+                .focusSection() // FIX: Ensures the grid is treated as a solid block
             }
         }
         .onExitCommand { onClose() }
@@ -440,6 +441,7 @@ struct HomeProfileSelector: View {
                     .buttonStyle(CinemeltCardButtonStyle())
                 }
             }
+            .focusSection() // FIX: Ensures horizontal movement stays in profile selector
         }
     }
 }

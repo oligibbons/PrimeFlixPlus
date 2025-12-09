@@ -40,7 +40,6 @@ struct SearchView: View {
                         }
                         .buttonStyle(.card)
                         
-                        // FIX: Updated to match GlassTextField signature (removed icon, added title/nextFocus)
                         GlassTextField(
                             title: "Search",
                             placeholder: viewModel.selectedScope == .library ? "Movies & Series" : "Channels",
@@ -69,6 +68,7 @@ struct SearchView: View {
                 .background(
                     LinearGradient(colors: [Color.black.opacity(0.8), Color.clear], startPoint: .top, endPoint: .bottom)
                 )
+                .focusSection() // FIX: Header block is now a distinct navigation target
                 
                 // MARK: - Results
                 ScrollView {
@@ -183,6 +183,7 @@ struct SearchView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 20)
                 }
+                .focusSection() // FIX: Categories list is a solid block
             }
         }
         
@@ -195,10 +196,8 @@ struct SearchView: View {
                 
                 LazyVGrid(columns: channelGridColumns, spacing: 50) {
                     ForEach(viewModel.liveChannels) { channel in
-                        // FIX: Replaced tap gesture with native tvOS Button for focus support
                         Button(action: { onPlay(channel) }) {
                             VStack(spacing: 15) {
-                                // FIX: Use 'cover' as 'logo' does not exist on Channel entity
                                 AsyncImage(url: URL(string: channel.cover ?? "")) { image in
                                     image.resizable().aspectRatio(contentMode: .fit)
                                 } placeholder: {
@@ -221,6 +220,7 @@ struct SearchView: View {
                     }
                 }
                 .padding(.bottom, 40)
+                .focusSection() // FIX: Channel Grid is a solid block
             }
         }
     }
@@ -237,13 +237,14 @@ struct ResultSection: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 40) {
                     ForEach(items) { item in
-                        // FIX: Removed invalid closure argument `_ in`
                         MovieCard(channel: item, onClick: { onPlay(item) })
                     }
                 }
                 .padding(.vertical, 40)
                 .padding(.horizontal, 20)
             }
+            .focusSection() // FIX: Result rows are solid blocks
         }
     }
 }
+

@@ -12,7 +12,7 @@ struct PlayerView: View {
     // Focus Management
     enum PlayerFocus: Hashable {
         case videoSurface   // The scrubber/play bar
-        case upperControls  // The entire top row (Settings, Tracks, etc.)
+        // Note: 'upperControls' removed as we moved buttons to Mini Details
         
         // Overlays (Modals)
         case miniDetails
@@ -53,31 +53,25 @@ struct PlayerView: View {
             statusLayers
             overlaysLayer
             
-            // 4. Controls
+            // 4. Controls (Now OSD Only)
             if viewModel.showControls && !areOverlaysActive {
                 ControlsOverlayView(
                     viewModel: viewModel,
                     channel: channel,
-                    focusedField: $focusedField,
-                    onShowTracks: {
-                        withAnimation { viewModel.showTrackSelection = true }
-                        focusedField = .trackSelection
-                    },
-                    onShowVersions: {
-                        withAnimation { viewModel.showVersionSelection = true }
-                        focusedField = .versionSelection
-                    },
-                    onShowSettings: {
-                        withAnimation { viewModel.showVideoSettings = true }
-                        focusedField = .videoSettings
-                    }
+                    focusedField: $focusedField
                 )
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
             }
         }
         .onAppear {
             viewModel.configure(repository: repository, channel: channel)
-            // Initial focus logic handled by Resume Check in ViewModel
+            
+            // Force focus to surface on load to prevent getting stuck
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if focusedField == nil {
+                    focusedField = .videoSurface
+                }
+            }
         }
         .onDisappear {
             viewModel.cleanup()
@@ -88,18 +82,44 @@ struct PlayerView: View {
                 onPlayChannel?(nextChannel)
             }
         }
-        .onChange(of: viewModel.showControls) { show in
-            if show && !areOverlaysActive { focusedField = .videoSurface }
+        // CENTRALIZED EXIT COMMAND (Fixes Dashboard Crash)
+        .onExitCommand {
+            handleExit()
         }
-        .onChange(of: viewModel.showResumePrompt) { show in
-            if show { focusedField = .resumePrompt }
-            else { focusedField = .videoSurface }
+    }
+    
+    // MARK: - Centralized Logic
+    
+    private func handleExit() {
+        if areOverlaysActive {
+            // Priority 1: Close any open modals
+            withAnimation {
+                viewModel.showMiniDetails = false
+                viewModel.showTrackSelection = false
+                viewModel.showVersionSelection = false
+                viewModel.showVideoSettings = false
+                viewModel.showResumePrompt = false
+                viewModel.showAutoPlay = false
+            }
+            // Return focus to the scrubber
+            focusedField = .videoSurface
+        } else if viewModel.showControls {
+            // Priority 2: If Controls visible (OSD), hide them
+            withAnimation {
+                viewModel.showControls = false
+            }
+        } else {
+            // Priority 3: Actual Back Navigation
+            viewModel.cleanup()
+            onBack()
         }
     }
     
     private func interactionLayer(geo: GeometryProxy) -> some View {
-        Color.clear
+        // FIX: Use nearly-invisible black instead of clear to ensure focus engine hit-testing works reliably
+        Color.black.opacity(0.001)
             .contentShape(Rectangle())
+            // Only focusable if we aren't showing a modal overlay
             .focusable(!areOverlaysActive)
             .focused($focusedField, equals: .videoSurface)
             .background(
@@ -131,28 +151,20 @@ struct PlayerView: View {
                 switch direction {
                 case .left: viewModel.seekBackward()
                 case .right: viewModel.seekForward()
-                case .up:
-                    if viewModel.showControls {
-                        // FIX: Just signal we want "Upper Controls".
-                        // The ControlsOverlayView will decide WHICH button gets focus (Settings).
-                        focusedField = .upperControls
-                    } else {
-                        viewModel.triggerControls(forceShow: true)
-                    }
                 case .down:
+                    // Down -> Open Mini Details (Settings are now here)
                     withAnimation {
                         viewModel.showMiniDetails = true
                         focusedField = .miniDetails
                     }
+                case .up:
+                    // Up -> Just wake up OSD controls, no focus change
+                    viewModel.triggerControls(forceShow: true)
                 @unknown default: break
                 }
             }
             .onPlayPauseCommand {
                 if !areOverlaysActive { viewModel.togglePlayPause() }
-            }
-            .onExitCommand {
-                viewModel.cleanup()
-                onBack()
             }
     }
     
@@ -224,6 +236,22 @@ struct PlayerView: View {
                 onClose: {
                     withAnimation { viewModel.showMiniDetails = false }
                     focusedField = .videoSurface
+                },
+                // NEW: Wire up the settings buttons that are now in Mini Details
+                onShowTracks: {
+                    withAnimation { viewModel.showTrackSelection = true }
+                    focusedField = .trackSelection
+                },
+                onShowVersions: {
+                    withAnimation { viewModel.showVersionSelection = true }
+                    focusedField = .versionSelection
+                },
+                onShowSettings: {
+                    withAnimation { viewModel.showVideoSettings = true }
+                    focusedField = .videoSettings
+                },
+                onToggleFavorite: {
+                    viewModel.toggleFavorite()
                 }
             )
             .zIndex(50)
