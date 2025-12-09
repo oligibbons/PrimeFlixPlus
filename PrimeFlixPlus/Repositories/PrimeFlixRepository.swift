@@ -53,7 +53,7 @@ class PrimeFlixRepository: ObservableObject {
     
     // MARK: - Discovery and Search (CRITICAL PASSTHROUGH FUNCTIONS)
 
-    /// [FIXED] Delegates the hybrid search logic to ChannelRepository using a dedicated background context.
+    /// Delegates the hybrid search logic to ChannelRepository using a dedicated background context.
     /// This method is called by SearchViewModel to run the fuzzy and filtered search.
     func searchHybrid(query: String, filters: ChannelRepository.SearchFilters) async -> ChannelRepository.SearchResults {
         // Run the entire fetch and ranking operation on a detached background task.
@@ -65,8 +65,7 @@ class PrimeFlixRepository: ObservableObject {
         }.value
     }
     
-    /// [NEW] Delegates the reverse search logic (finding local matches for external API titles).
-    /// This is used for Actor/Director search results.
+    /// Delegates the reverse search logic (finding local matches for external API titles).
     func findMatches(for titles: [String], limit: Int = 20) async -> [Channel] {
         return await Task.detached(priority: .utility) {
             let bgContext = self.container.newBackgroundContext()
@@ -108,6 +107,7 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     func getVersions(for channel: Channel) -> [Channel] {
+        // Instantiate service on the fly for the UI thread
         let service = VersioningService(context: container.viewContext)
         return service.getVersions(for: channel)
     }
@@ -275,8 +275,9 @@ class PrimeFlixRepository: ObservableObject {
     
     // MARK: - Legacy Passthroughs
     
+    // FIX 1: The original working implementation from the user's initial code
     func toggleFavorite(_ channel: Channel) {
-        channelRepo.toggleFavorite(channel) // Delegate to internal repo (assuming channelRepo has this method)
+        channel.isFavorite.toggle()
         try? container.viewContext.save()
         self.objectWillChange.send()
     }

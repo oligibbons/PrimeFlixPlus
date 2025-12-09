@@ -20,7 +20,7 @@ struct SearchFilterBar: View {
                         get: { viewModel.activeFilters.only4K },
                         set: {
                             viewModel.activeFilters.only4K = $0
-                            // Trigger search immediately when filter changes
+                            // FIX: Explicitly trigger search on filter change
                             viewModel.triggerImmediateSearch()
                         }
                     ),
@@ -36,6 +36,7 @@ struct SearchFilterBar: View {
                         set: {
                             viewModel.activeFilters.onlyMovies = $0
                             if $0 { viewModel.activeFilters.onlySeries = false } // Mutually exclusive suggestion
+                            // FIX: Explicitly trigger search on filter change
                             viewModel.triggerImmediateSearch()
                         }
                     ),
@@ -51,6 +52,7 @@ struct SearchFilterBar: View {
                         set: {
                             viewModel.activeFilters.onlySeries = $0
                             if $0 { viewModel.activeFilters.onlyMovies = false }
+                            // FIX: Explicitly trigger search on filter change
                             viewModel.triggerImmediateSearch()
                         }
                     ),
@@ -65,6 +67,7 @@ struct SearchFilterBar: View {
                         get: { viewModel.activeFilters.onlyLive },
                         set: {
                             viewModel.activeFilters.onlyLive = $0
+                            // FIX: Explicitly trigger search on filter change
                             viewModel.triggerImmediateSearch()
                         }
                     ),
@@ -81,6 +84,7 @@ struct SearchFilterBar: View {
                     Button(action: {
                         withAnimation {
                             viewModel.activeFilters = .init() // Reset to defaults
+                            // FIX: Explicitly trigger search on reset
                             viewModel.triggerImmediateSearch()
                         }
                     }) {

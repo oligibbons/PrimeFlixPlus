@@ -74,6 +74,7 @@ class SearchViewModel: ObservableObject {
             .store(in: &cancellables)
             
         // 3. Filter changes trigger immediate search (via the @Published binding to activeFilters)
+        // This is necessary if the filter toggles don't call triggerImmediateSearch explicitly.
         $activeFilters
             .dropFirst()
             .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
@@ -123,7 +124,7 @@ class SearchViewModel: ObservableObject {
         self.personMatch = nil
         self.personCredits = []
         
-        // Map UI Scope to Repository Filters (Merge with active UI filters)
+        // 1. Map UI Scope to Repository Filters
         var filters = activeFilters // Start with filters set by SearchFilterBar
         switch selectedScope {
         case .movies: filters.onlyMovies = true
@@ -132,12 +133,16 @@ class SearchViewModel: ObservableObject {
         case .all: break
         }
         
+        // FIX 2: Capture the filters struct to pass into the detached context as a constant.
+        let searchFilters = filters
+
         // --- PARALLEL EXECUTION START ---
         
         // Task A: Local Hybrid Search (Fuzzy Matching)
-        // CRITICAL: This requires the exposed searchHybrid in PrimeFlixRepository.swift
-        async let localResults = Task.detached(priority: .userInitiated) {
-            return await repo.searchHybrid(query: query, filters: filters)
+        // Runs on background thread via Repository
+        async let localResults = Task.detached(priority: .userInitiated) { [searchFilters] in
+            // Use searchFilters inside the detached task
+            return await repo.searchHybrid(query: query, filters: searchFilters)
         }.value
         
         // Task B: Remote Person Search (API)
@@ -174,7 +179,7 @@ class SearchViewModel: ObservableObject {
             }
             
             // Auto-save history if successful search
-            if !hasNoResults && query.count > 1 {
+            if !hasNoResults {
                 addToHistory(query)
             }
         }
@@ -205,10 +210,12 @@ class SearchViewModel: ObservableObject {
                 .prefix(50) // Limit to top 50 works to prevent massive DB query
                 .map { $0.displayTitle }
             
-            // Cross-reference with Local DB safely
+            // Cross-reference with Local DB
+            // Using a detached task with a new context to perform the read safely
             return await Task.detached {
                 let bgContext = repo.container.newBackgroundContext()
                 let readRepo = ChannelRepository(context: bgContext)
+                // Calls findMatches now present in ChannelRepository
                 return readRepo.findMatches(for: Array(candidateTitles))
             }.value
             
