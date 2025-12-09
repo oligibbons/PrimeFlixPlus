@@ -18,7 +18,11 @@ struct SearchFilterBar: View {
                     icon: "4k.tv.fill",
                     isOn: Binding(
                         get: { viewModel.activeFilters.only4K },
-                        set: { viewModel.activeFilters.only4K = $0 }
+                        set: {
+                            viewModel.activeFilters.only4K = $0
+                            // Trigger search immediately when filter changes
+                            viewModel.triggerImmediateSearch()
+                        }
                     ),
                     id: "4k"
                 )
@@ -32,6 +36,7 @@ struct SearchFilterBar: View {
                         set: {
                             viewModel.activeFilters.onlyMovies = $0
                             if $0 { viewModel.activeFilters.onlySeries = false } // Mutually exclusive suggestion
+                            viewModel.triggerImmediateSearch()
                         }
                     ),
                     id: "movies"
@@ -46,6 +51,7 @@ struct SearchFilterBar: View {
                         set: {
                             viewModel.activeFilters.onlySeries = $0
                             if $0 { viewModel.activeFilters.onlyMovies = false }
+                            viewModel.triggerImmediateSearch()
                         }
                     ),
                     id: "series"
@@ -57,7 +63,10 @@ struct SearchFilterBar: View {
                     icon: "antenna.radiowaves.left.and.right",
                     isOn: Binding(
                         get: { viewModel.activeFilters.onlyLive },
-                        set: { viewModel.activeFilters.onlyLive = $0 }
+                        set: {
+                            viewModel.activeFilters.onlyLive = $0
+                            viewModel.triggerImmediateSearch()
+                        }
                     ),
                     id: "live"
                 )
@@ -72,6 +81,7 @@ struct SearchFilterBar: View {
                     Button(action: {
                         withAnimation {
                             viewModel.activeFilters = .init() // Reset to defaults
+                            viewModel.triggerImmediateSearch()
                         }
                     }) {
                         HStack(spacing: 8) {
@@ -148,6 +158,7 @@ struct ResultSection: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 40) {
                     ForEach(items) { item in
+                        // Assuming MovieCard is defined in MovieCard.swift
                         MovieCard(channel: item, onClick: { onPlay(item) })
                     }
                 }

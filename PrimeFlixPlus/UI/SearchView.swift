@@ -22,6 +22,7 @@ struct SearchView: View {
     ]
     
     // MARK: - Initializer
+    // NOTE: Default scope is set to .all as per new requirements
     init(initialScope: SearchViewModel.SearchScope = .all, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
         _viewModel = StateObject(wrappedValue: SearchViewModel())
         self.onPlay = onPlay
@@ -82,10 +83,7 @@ struct SearchView: View {
                     }
                     .focusSection()
                     
-                    // Row C: Smart Filters
-                    // We only show this if the user isn't in the "Discovery" state (query is empty),
-                    // OR if you prefer to always allow filtering, keep it visible.
-                    // Here we show it always to allow pre-filtering (e.g., "4K Only").
+                    // Row C: Smart Filters (Requires SearchFilterBar.swift component)
                     SearchFilterBar(viewModel: viewModel)
                         .padding(.top, 10)
                         .focusSection()
@@ -109,8 +107,9 @@ struct SearchView: View {
                             }
                             .padding(.top, 100)
                         }
-                        // B. Zero State (Discovery Engine)
+                        // B. Zero State (Discovery Engine/Tags/History)
                         else if viewModel.query.isEmpty {
+                            // Requires SearchDiscoveryView.swift component
                             SearchDiscoveryView(
                                 viewModel: viewModel,
                                 onTagSelected: { tag in
@@ -147,7 +146,7 @@ struct SearchView: View {
     private var resultsContent: some View {
         LazyVStack(alignment: .leading, spacing: 60) {
             
-            // 1. Person Spotlight (Circular)
+            // 1. Person Spotlight (Circular Reverse Search Result)
             if let person = viewModel.personMatch, !viewModel.personCredits.isEmpty {
                 VStack(alignment: .center, spacing: 20) {
                     // Circular Profile Image
@@ -174,7 +173,7 @@ struct SearchView: View {
                             .foregroundColor(.gray)
                     }
                     
-                    // The "Collection" Rail
+                    // The "Collection" Rail (Requires ResultSection component)
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: 40) {
                             ForEach(viewModel.personCredits) { channel in

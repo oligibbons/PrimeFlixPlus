@@ -32,6 +32,7 @@ struct SearchDiscoveryView: View {
         VStack(alignment: .leading, spacing: 40) {
             
             // 1. Recent History (If available)
+            // Note: This relies on the new logic in SearchViewModel
             if !viewModel.searchHistory.isEmpty {
                 VStack(alignment: .leading, spacing: 15) {
                     HStack {
@@ -69,6 +70,7 @@ struct SearchDiscoveryView: View {
                         .padding(.horizontal, 50)
                         .padding(.vertical, 20) // Focus bloom space
                     }
+                    .focusSection()
                 }
             }
             
@@ -111,6 +113,7 @@ struct SearchDiscoveryView: View {
                                 .padding(.vertical, 14)
                                 .background(
                                     ZStack {
+                                        // Uses the Glass Surface definition from CinemeltStyle.swift
                                         CinemeltTheme.glassSurface
                                         // Subtle gradient overlay for "Chips"
                                         LinearGradient(
@@ -133,6 +136,7 @@ struct SearchDiscoveryView: View {
                 .padding(.horizontal, 50)
                 .padding(.vertical, 20)
             }
+            .focusSection()
         }
     }
 }

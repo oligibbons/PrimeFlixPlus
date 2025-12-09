@@ -30,10 +30,12 @@ class SearchViewModel: ObservableObject {
     // History
     @Published var searchHistory: [String] = []
     
+    // Filters (MUST be internal to allow SearchFilterBar access)
+    @Published var activeFilters: ChannelRepository.SearchFilters = .init()
+    
     // MARK: - UI State
     @Published var isLoading: Bool = false
     @Published var hasNoResults: Bool = false
-    @Published var activeFilters: ChannelRepository.SearchFilters = .init()
     
     // MARK: - Dependencies
     private var repository: PrimeFlixRepository?
@@ -70,9 +72,34 @@ class SearchViewModel: ObservableObject {
                 self?.triggerImmediateSearch()
             }
             .store(in: &cancellables)
+            
+        // 3. Filter changes trigger immediate search (via the @Published binding to activeFilters)
+        $activeFilters
+            .dropFirst()
+            .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                // Only trigger if a query exists, otherwise filters are applied to empty set (cleaner UX)
+                if !(self?.query.isEmpty ?? true) {
+                    self?.triggerImmediateSearch()
+                }
+            }
+            .store(in: &cancellables)
     }
     
-    // MARK: - Search Orchestration
+    // MARK: - Public/Internal Actions
+    
+    // CRITICAL FIX: Changed from private to internal so SearchFilterBar can call it.
+    internal func triggerImmediateSearch() {
+        let currentQuery = query
+        // Only proceed if a search term exists or filters are active (if the user tries to filter the empty discovery view)
+        guard !currentQuery.isEmpty || activeFilters.hasActiveFilters else { return }
+        
+        searchTask?.cancel()
+        
+        searchTask = Task {
+            await performHybridSearch(query: currentQuery)
+        }
+    }
     
     private func handleQueryChange(_ newQuery: String) {
         if newQuery.isEmpty {
@@ -88,16 +115,6 @@ class SearchViewModel: ObservableObject {
         }
     }
     
-    private func triggerImmediateSearch() {
-        let currentQuery = query
-        guard !currentQuery.isEmpty else { return }
-        
-        searchTask?.cancel()
-        searchTask = Task {
-            await performHybridSearch(query: currentQuery)
-        }
-    }
-    
     private func performHybridSearch(query: String) async {
         guard let repo = repository else { return }
         
@@ -106,8 +123,8 @@ class SearchViewModel: ObservableObject {
         self.personMatch = nil
         self.personCredits = []
         
-        // Map UI Scope to Repository Filters
-        var filters = ChannelRepository.SearchFilters()
+        // Map UI Scope to Repository Filters (Merge with active UI filters)
+        var filters = activeFilters // Start with filters set by SearchFilterBar
         switch selectedScope {
         case .movies: filters.onlyMovies = true
         case .series: filters.onlySeries = true
@@ -118,7 +135,7 @@ class SearchViewModel: ObservableObject {
         // --- PARALLEL EXECUTION START ---
         
         // Task A: Local Hybrid Search (Fuzzy Matching)
-        // Runs on background thread via Repository
+        // CRITICAL: This requires the exposed searchHybrid in PrimeFlixRepository.swift
         async let localResults = Task.detached(priority: .userInitiated) {
             return await repo.searchHybrid(query: query, filters: filters)
         }.value
@@ -157,7 +174,7 @@ class SearchViewModel: ObservableObject {
             }
             
             // Auto-save history if successful search
-            if !hasNoResults {
+            if !hasNoResults && query.count > 1 {
                 addToHistory(query)
             }
         }
@@ -188,14 +205,7 @@ class SearchViewModel: ObservableObject {
                 .prefix(50) // Limit to top 50 works to prevent massive DB query
                 .map { $0.displayTitle }
             
-            // Cross-reference with Local DB
-            // We need a thread-safe way to call the repository's batch lookup
-            // Since repo methods are now MainActor (or context-bound), we use the repo's context wrapper logic.
-            // Note: In Step 2, we added `findMatches` to ChannelRepository.
-            // We need to access the underlying ChannelRepository instance safely.
-            // Since PrimeFlixRepository wraps it, we'll add a passthrough or use the bg context pattern.
-            
-            // Using a detached task with a new context to perform the read safely
+            // Cross-reference with Local DB safely
             return await Task.detached {
                 let bgContext = repo.container.newBackgroundContext()
                 let readRepo = ChannelRepository(context: bgContext)
@@ -256,11 +266,4 @@ class SearchViewModel: ObservableObject {
         self.hasNoResults = false
         self.isLoading = false
     }
-}
-
-// MARK: - Repository Extension
-// Helper to bridge the new repo method if it wasn't exposed in PrimeFlixRepository
-extension PrimeFlixRepository {
-    // We need to expose the internal container to allow the ViewModel to create background contexts
-    // (This is already public in the original file, just ensuring visibility for the detached task above)
 }

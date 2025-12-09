@@ -88,7 +88,6 @@
 		D2AC8B562EE7822800D440C3 /* SelectionOverlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B552EE7822800D440C3 /* SelectionOverlays.swift */; };
 		D2AC8B592EE784F100D440C3 /* PlayerSharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B582EE784F100D440C3 /* PlayerSharedComponents.swift */; };
 		D2AC8B5B2EE7FE7700D440C3 /* SearchDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B5A2EE7FE7600D440C3 /* SearchDiscoveryView.swift */; };
-		D2AC8B5D2EE7FEB700D440C3 /* SearchFilterBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B5C2EE7FEB700D440C3 /* SearchFilterBar.swift */; };
 		D2AC8B5F2EE8001600D440C3 /* SearchUIComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B5E2EE8001600D440C3 /* SearchUIComponents.swift */; };
 /* End PBXBuildFile section */
 
@@ -211,7 +210,6 @@
 		D2AC8B552EE7822800D440C3 /* SelectionOverlays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionOverlays.swift; sourceTree = "<group>"; };
 		D2AC8B582EE784F100D440C3 /* PlayerSharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSharedComponents.swift; sourceTree = "<group>"; };
 		D2AC8B5A2EE7FE7600D440C3 /* SearchDiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchDiscoveryView.swift; sourceTree = "<group>"; };
-		D2AC8B5C2EE7FEB700D440C3 /* SearchFilterBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchFilterBar.swift; sourceTree = "<group>"; };
 		D2AC8B5E2EE8001600D440C3 /* SearchUIComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchUIComponents.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -416,7 +414,6 @@
 				D2AC8B322EE488ED00D440C3 /* VPNWarningView.swift */,
 				D2AC8B382EE49D7B00D440C3 /* OnboardingView.swift */,
 				D2AC8B5A2EE7FE7600D440C3 /* SearchDiscoveryView.swift */,
-				D2AC8B5C2EE7FEB700D440C3 /* SearchFilterBar.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -622,7 +619,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D2AC8B5D2EE7FEB700D440C3 /* SearchFilterBar.swift in Sources */,
 				D292D6722EDF4B7B00E8845A /* HomeViewModel.swift in Sources */,
 				D2AC8B4C2EE6E60D00D440C3 /* OmdbClient.swift in Sources */,
 				D2AC8B3B2EE4A03100D440C3 /* TasteProfile.swift in Sources */,

@@ -25,10 +25,11 @@ class PrimeFlixRepository: ObservableObject {
     @Published var isErrorState: Bool = false
     @Published var syncStats: SyncStats = SyncStats()
     
+    // The Container is exposed as internal so Services/ViewModels can use newBackgroundContext()
     internal let container: NSPersistentContainer
     
     // --- Internal Data Access ---
-    // We expose the container for Services, but keep a Repo for UI fetches
+    // We keep a MainActor reference to the ChannelRepository for quick UI thread fetches
     private let channelRepo: ChannelRepository
     
     // --- Services & Engines ---
@@ -50,9 +51,31 @@ class PrimeFlixRepository: ObservableObject {
         self.channelRepo = ChannelRepository(context: container.viewContext)
     }
     
-    // MARK: - Passthrough Accessors
-    // These methods forward requests to the ChannelRepository, maintaining the
-    // "Single Source of Truth" API that ViewModels expect.
+    // MARK: - Discovery and Search (CRITICAL PASSTHROUGH FUNCTIONS)
+
+    /// [FIXED] Delegates the hybrid search logic to ChannelRepository using a dedicated background context.
+    /// This method is called by SearchViewModel to run the fuzzy and filtered search.
+    func searchHybrid(query: String, filters: ChannelRepository.SearchFilters) async -> ChannelRepository.SearchResults {
+        // Run the entire fetch and ranking operation on a detached background task.
+        return await Task.detached(priority: .userInitiated) {
+            let bgContext = self.container.newBackgroundContext()
+            let readRepo = ChannelRepository(context: bgContext)
+            
+            return readRepo.searchHybrid(query: query, filters: filters)
+        }.value
+    }
+    
+    /// [NEW] Delegates the reverse search logic (finding local matches for external API titles).
+    /// This is used for Actor/Director search results.
+    func findMatches(for titles: [String], limit: Int = 20) async -> [Channel] {
+        return await Task.detached(priority: .utility) {
+            let bgContext = self.container.newBackgroundContext()
+            let readRepo = ChannelRepository(context: bgContext)
+            return readRepo.findMatches(for: titles, limit: limit)
+        }.value
+    }
+
+    // MARK: - Core CRUD / Sync (Main Passthroughs)
     
     func getFavorites(type: String) -> [Channel] {
         return channelRepo.getFavorites(type: type)
@@ -71,8 +94,7 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     func getRecommended(type: String) -> [Channel] {
-        // Note: For advanced logic, ViewModels typically use RecommendationService directly,
-        // but we keep this simple passthrough for basic ViewModels.
+        // We use the viewContext safely since RecommendationService often reuses the context
         let service = RecommendationService(context: container.viewContext)
         return service.getRecommended(type: type)
     }
@@ -86,7 +108,6 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     func getVersions(for channel: Channel) -> [Channel] {
-        // Instantiate service on the fly for the UI thread
         let service = VersioningService(context: container.viewContext)
         return service.getVersions(for: channel)
     }
@@ -255,7 +276,7 @@ class PrimeFlixRepository: ObservableObject {
     // MARK: - Legacy Passthroughs
     
     func toggleFavorite(_ channel: Channel) {
-        channel.isFavorite.toggle()
+        channelRepo.toggleFavorite(channel) // Delegate to internal repo (assuming channelRepo has this method)
         try? container.viewContext.save()
         self.objectWillChange.send()
     }
