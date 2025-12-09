@@ -11,18 +11,11 @@ class ChannelRepository {
     
     // MARK: - Search Engine Data Structures
     
-    /// The comprehensive SearchResults struct used by the new `searchHybrid` function.
     struct SearchResults {
         let movies: [Channel]
         let series: [Channel]
         let live: [Channel]
-        let peopleMatches: [Channel] // Content related to actor/director search (Future use)
-    }
-    
-    /// The dedicated return type for the legacy search method (kept for backward compatibility).
-    struct LegacySearchResults {
-        let movies: [Channel]
-        let series: [Channel]
+        let peopleMatches: [Channel]
     }
     
     struct SearchFilters {
@@ -31,7 +24,6 @@ class ChannelRepository {
         var onlyMovies: Bool = false
         var onlySeries: Bool = false
         
-        // Helper to check if any specific filter is active
         var hasActiveFilters: Bool {
             return only4K || onlyLive || onlyMovies || onlySeries
         }
@@ -39,62 +31,38 @@ class ChannelRepository {
     
     // MARK: - Core Mutators
     
-    /// Implementation of the missing method to toggle a channel's favorite status.
     func toggleFavorite(_ channel: Channel) {
         channel.isFavorite.toggle()
-        // Note: Caller (PrimeFlixRepository) handles the save.
+        // Note: Caller (PrimeFlixRepository) handles the save context.save()
     }
 
     // MARK: - Search Operations
     
-    /// **[LEGACY METHOD]** Retained for compatibility with older ViewModels.
-    func search(query: String) -> LegacySearchResults {
-        guard !query.isEmpty else { return LegacySearchResults(movies: [], series: []) }
-        
-        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let request = NSFetchRequest<Channel>(entityName: "Channel")
-        request.predicate = NSPredicate(format: "title CONTAINS[cd] %@", normalizedQuery)
-        request.fetchLimit = 200
-        
-        var movies: [Channel] = []
-        var series: [Channel] = []
-        
-        context.performAndWait {
-            if let results = try? context.fetch(request) {
-                let deduplicated = self.deduplicateChannels(results)
-                
-                for ch in deduplicated {
-                    if ch.type == "movie" { movies.append(ch) }
-                    else if ch.type == "series" || ch.type == "series_episode" { series.append(ch) }
-                }
-            }
-        }
-        
-        // **FIX:** Use the LegacySearchResults struct.
-        return LegacySearchResults(movies: movies, series: series)
-    }
-    
     /// The "Hybrid" Search Function.
-    /// Performs broad database fetching followed by refined in-memory fuzzy matching.
+    /// 1. Tries a "Tokenized AND" search (Strict but flexible order).
+    /// 2. If no results, falls back to "Tokenized OR" (Broad) + Fuzzy Sorting.
     func searchHybrid(query: String, filters: SearchFilters) -> SearchResults {
-        guard !query.isEmpty || filters.hasActiveFilters else { return SearchResults(movies: [], series: [], live: [], peopleMatches: []) }
-        
-        let rawTerms = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let isShortQuery = rawTerms.count < 3
-        let request = NSFetchRequest<Channel>(entityName: "Channel")
-        
-        var predicates: [NSPredicate] = []
-        if !rawTerms.isEmpty {
-            if isShortQuery {
-                predicates.append(NSPredicate(format: "title BEGINSWITH[cd] %@", rawTerms))
-            } else {
-                predicates.append(NSPredicate(format: "title CONTAINS[cd] %@", rawTerms))
-            }
+        // 1. Basic Validation
+        let rawTerms = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawTerms.isEmpty || filters.hasActiveFilters else {
+            return SearchResults(movies: [], series: [], live: [], peopleMatches: [])
         }
         
-        // 2. Apply Filters (Logical AND)
+        // 2. Prepare Tokens
+        // "Batman Begins" -> ["Batman", "Begins"]
+        let tokens = rawTerms.components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty }
+            .map { $0.lowercased() }
+        
+        // 3. Build Predicate (Stage 1: Strict Token Match)
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
+        request.fetchLimit = 400 // Cap fetch to prevent OOM
+        
+        var baseSubPredicates: [NSPredicate] = []
+        
+        // Filter Logic
         if filters.only4K {
-            predicates.append(NSPredicate(format: "quality CONTAINS[cd] '4K' OR quality CONTAINS[cd] 'UHD'"))
+            baseSubPredicates.append(NSPredicate(format: "quality CONTAINS[cd] '4K' OR quality CONTAINS[cd] 'UHD'"))
         }
         
         var typePredicates: [NSPredicate] = []
@@ -103,27 +71,57 @@ class ChannelRepository {
         if filters.onlySeries { typePredicates.append(NSPredicate(format: "type == 'series' OR type == 'series_episode'")) }
         
         if !typePredicates.isEmpty {
-            predicates.append(NSCompoundPredicate(orPredicateWithSubpredicates: typePredicates))
+            baseSubPredicates.append(NSCompoundPredicate(orPredicateWithSubpredicates: typePredicates))
         }
         
-        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-        request.fetchLimit = 300
+        // Title Logic (AND)
+        // Title must contain Token A AND Token B
+        var titlePredicates: [NSPredicate] = []
+        for token in tokens {
+            titlePredicates.append(NSPredicate(format: "title CONTAINS[cd] %@", token))
+        }
+        
+        // Combine: (Filters) AND (Token A AND Token B)
+        var strictPredicates = baseSubPredicates
+        strictPredicates.append(NSCompoundPredicate(andPredicateWithSubpredicates: titlePredicates))
+        
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: strictPredicates)
+        
+        var results: [Channel] = []
+        
+        context.performAndWait {
+            results = (try? context.fetch(request)) ?? []
+        }
+        
+        // 4. Fallback Logic (Stage 2: Fuzzy / OR Match)
+        // If strict search returned nothing, try matching ANY token
+        if results.isEmpty && tokens.count > 1 {
+            var loosePredicates = baseSubPredicates
+            
+            // Title must contain Token A OR Token B
+            let orTitlePredicate = NSCompoundPredicate(orPredicateWithSubpredicates: titlePredicates)
+            loosePredicates.append(orTitlePredicate)
+            
+            request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: loosePredicates)
+            
+            context.performAndWait {
+                results = (try? context.fetch(request)) ?? []
+            }
+        }
+        
+        // 5. In-Memory Ranking & Categorization
+        // We perform fuzzy sorting here because Core Data cannot do Levenshtein distance
+        let ranked = self.rankByRelevance(candidates: results, query: rawTerms)
+        let deduplicated = self.deduplicateChannels(ranked)
         
         var movies: [Channel] = []
         var series: [Channel] = []
         var live: [Channel] = []
         
-        context.performAndWait {
-            if let results = try? context.fetch(request) {
-                let ranked = self.rankByRelevance(candidates: results, query: rawTerms)
-                let deduplicated = self.deduplicateChannels(ranked)
-                
-                for ch in deduplicated {
-                    if ch.type == "movie" { movies.append(ch) }
-                    else if ch.type == "series" || ch.type == "series_episode" { series.append(ch) }
-                    else if ch.type == "live" { live.append(ch) }
-                }
-            }
+        for ch in deduplicated {
+            if ch.type == "movie" { movies.append(ch) }
+            else if ch.type == "series" || ch.type == "series_episode" { series.append(ch) }
+            else if ch.type == "live" { live.append(ch) }
         }
         
         return SearchResults(movies: movies, series: series, live: live, peopleMatches: [])
@@ -177,7 +175,6 @@ class ChannelRepository {
         request.sortDescriptors = [
             NSSortDescriptor(key: "addedAt", ascending: false)
         ]
-        // Fetch extra to account for deduplication removal
         request.fetchLimit = limit * 4
         
         let raw = (try? context.fetch(request)) ?? []
@@ -225,7 +222,6 @@ class ChannelRepository {
                         results.append(channel)
                     }
                 } else if channel.type == "series" || channel.type == "series_episode" {
-                    // Use Normalized Title as Key to prevent duplicate entries for same show
                     let info = TitleNormalizer.parse(rawTitle: channel.title)
                     let seriesKey = info.normalizedTitle
                     
@@ -235,7 +231,6 @@ class ChannelRepository {
                         results.append(channel)
                         processedSeriesMap[seriesKey] = true
                     } else {
-                        // Finished? Find next
                         if let nextEp = nextEpService.findNextEpisode(currentChannel: channel) {
                             results.append(nextEp)
                             processedSeriesMap[seriesKey] = true
@@ -268,6 +263,7 @@ class ChannelRepository {
         return deduplicateChannels(raw)
     }
     
+    // FIXED: Changed `type` to String to allow callers to pass `type.rawValue` directly
     func getGroups(playlistUrl: String, type: String) -> [String] {
         let request = NSFetchRequest<NSDictionary>(entityName: "Channel")
         request.predicate = NSPredicate(format: "playlistUrl == %@ AND type == %@", playlistUrl, type)
@@ -278,39 +274,6 @@ class ChannelRepository {
         
         guard let results = try? context.fetch(request) as? [[String: Any]] else { return [] }
         return results.compactMap { $0["group"] as? String }
-    }
-    
-    // MARK: - Live Search Utilities
-    
-    func searchLiveContent(query: String) -> (categories: [String], channels: [Channel]) {
-        guard !query.isEmpty else { return ([], []) }
-        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // 1. Search Groups
-        let groupReq = NSFetchRequest<NSDictionary>(entityName: "Channel")
-        groupReq.resultType = .dictionaryResultType
-        groupReq.returnsDistinctResults = true
-        groupReq.propertiesToFetch = ["group"]
-        groupReq.predicate = NSPredicate(format: "type == 'live' AND group CONTAINS[cd] %@", normalizedQuery)
-        
-        var groups: [String] = []
-        context.performAndWait {
-            if let results = try? context.fetch(groupReq) {
-                groups = results.compactMap { $0["group"] as? String }
-            }
-        }
-        
-        // 2. Search Channels
-        let chanReq = NSFetchRequest<Channel>(entityName: "Channel")
-        chanReq.predicate = NSPredicate(format: "type == 'live' AND title CONTAINS[cd] %@", normalizedQuery)
-        chanReq.fetchLimit = 50
-        
-        var channels: [Channel] = []
-        context.performAndWait {
-            channels = (try? context.fetch(chanReq)) ?? []
-        }
-        
-        return (groups, channels)
     }
     
     // MARK: - Helpers
@@ -324,33 +287,35 @@ class ChannelRepository {
     
     // MARK: - Deduplication Engine
     
-    /// **[INTERNAL LOGIC]** Groups channels by their `normalizedTitle` and returns the single best version for display.
     private func deduplicateChannels(_ channels: [Channel]) -> [Channel] {
         var groups: [String: [Channel]] = [:]
         
-        // 1. Grouping
         for channel in channels {
             let info = TitleNormalizer.parse(rawTitle: channel.canonicalTitle ?? channel.title)
-            // Key is the clean title (e.g. "SEVERANCE")
             let key = info.normalizedTitle.uppercased()
             groups[key, default: []].append(channel)
         }
         
-        // 2. Selection (Best Candidate)
         var unique: [Channel] = []
         for (_, variants) in groups {
-            // Sort variants to find the "best" one to display
-            // Criteria:
-            // 1. Has metadata (cover/backdrop)
-            // 2. Highest Quality Score
-            
             if let best = variants.max(by: { a, b in
-                let aHasCover = a.cover != nil
-                let bHasCover = b.cover != nil
-                if aHasCover != bHasCover { return aHasCover ? false : true } // Prefer existing cover
+                let aHasCover = (a.cover != nil && !a.cover!.isEmpty)
+                let bHasCover = (b.cover != nil && !b.cover!.isEmpty)
+                
+                if aHasCover != bHasCover {
+                    return !aHasCover
+                }
+                
+                let aIsSeries = (a.type == "series")
+                let bIsSeries = (b.type == "series")
+                
+                if aIsSeries != bIsSeries {
+                    return !aIsSeries
+                }
                 
                 let infoA = TitleNormalizer.parse(rawTitle: a.canonicalTitle ?? a.title)
                 let infoB = TitleNormalizer.parse(rawTitle: b.canonicalTitle ?? b.title)
+                
                 return infoA.qualityScore < infoB.qualityScore
             }) {
                 unique.append(best)
@@ -360,15 +325,17 @@ class ChannelRepository {
         return unique
     }
     
-    /// **[INTERNAL LOGIC]** Ranks content by how closely it matches the user's query.
     private func rankByRelevance(candidates: [Channel], query: String) -> [Channel] {
         return candidates.sorted { c1, c2 in
-            // Assuming TitleNormalizer.similarity is defined elsewhere to return a score (e.g., 0.0 to 1.0)
             let score1 = TitleNormalizer.similarity(between: query, and: c1.title)
             let score2 = TitleNormalizer.similarity(between: query, and: c2.title)
             
-            // If scores are very close, prioritize the "Shortest Title" (more exact match)
             if abs(score1 - score2) < 0.1 {
+                let c1HasCover = (c1.cover != nil && !c1.cover!.isEmpty)
+                let c2HasCover = (c2.cover != nil && !c2.cover!.isEmpty)
+                if c1HasCover != c2HasCover {
+                    return c1HasCover
+                }
                 return c1.title.count < c2.title.count
             }
             return score1 > score2

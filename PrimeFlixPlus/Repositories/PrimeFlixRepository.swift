@@ -41,6 +41,7 @@ class PrimeFlixRepository: ObservableObject {
         return SyncEngine(container: container, xtreamClient: xtreamClient)
     }()
     
+    // Dedicated Background Service for Bulk Updates
     private lazy var enrichmentService: EnrichmentService = {
         return EnrichmentService(context: container.newBackgroundContext(), tmdbClient: tmdbClient)
     }()
@@ -71,6 +72,38 @@ class PrimeFlixRepository: ObservableObject {
             let bgContext = self.container.newBackgroundContext()
             let readRepo = ChannelRepository(context: bgContext)
             return readRepo.findMatches(for: titles, limit: limit)
+        }.value
+    }
+    
+    // MARK: - Active Enrichment (NEW)
+    
+    /// Triggers an immediate metadata fetch for specific items (e.g. Search Results).
+    /// Safe to call from Main Actor; handles thread confinement automatically.
+    func enrichContent(items: [Channel]) async {
+        guard !items.isEmpty else { return }
+        
+        // 1. Extract IDs on Main Thread to pass safely across boundaries
+        let objectIDs = items.map { $0.objectID }
+        
+        // 2. Perform work on Background Thread
+        await Task.detached(priority: .background) {
+            let bgContext = self.container.newBackgroundContext()
+            // Important: Use merge policy to handle potential conflicts during save
+            bgContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+            
+            // 3. Re-fetch objects in the correct context
+            // 'existingObject' is safer than 'object(with:)' as it ensures the data exists
+            let bgItems = objectIDs.compactMap { try? bgContext.existingObject(with: $0) as? Channel }
+            
+            guard !bgItems.isEmpty else { return }
+            
+            // 4. Create a temporary service instance bound to this context
+            let service = EnrichmentService(context: bgContext, tmdbClient: self.tmdbClient)
+            
+            // 5. Run Enrichment
+            // We ignore status callbacks for search enrichment to keep UI clean
+            await service.enrichLibrary(specificItems: bgItems, onStatus: { _ in })
+            
         }.value
     }
 
@@ -229,7 +262,6 @@ class PrimeFlixRepository: ObservableObject {
             
             // Run Enrichment if needed (First time or content changed)
             if hasChanges || isFirstTime {
-                // FIXED: Use new 'enrichLibrary' method for Episodes support
                 await enrichmentService.enrichLibrary(
                     playlistUrl: playlistUrl,
                     onStatus: { msg in
@@ -275,9 +307,8 @@ class PrimeFlixRepository: ObservableObject {
     
     // MARK: - Legacy Passthroughs
     
-    // FIX 1: The original working implementation from the user's initial code
     func toggleFavorite(_ channel: Channel) {
-        channel.isFavorite.toggle()
+        channelRepo.toggleFavorite(channel)
         try? container.viewContext.save()
         self.objectWillChange.send()
     }

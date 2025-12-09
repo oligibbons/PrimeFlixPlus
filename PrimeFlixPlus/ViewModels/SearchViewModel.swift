@@ -25,12 +25,12 @@ class SearchViewModel: ObservableObject {
     
     // Smart Collections (The "Reverse Search" Result)
     @Published var personMatch: TmdbPersonResult? = nil
-    @Published var personCredits: [Channel] = [] // e.g. "Tom Cruise Movies" available locally
+    @Published var personCredits: [Channel] = []
     
     // History
     @Published var searchHistory: [String] = []
     
-    // Filters (MUST be internal to allow SearchFilterBar access)
+    // Filters (Must be exposed for SearchFilterBar)
     @Published var activeFilters: ChannelRepository.SearchFilters = .init()
     
     // MARK: - UI State
@@ -55,16 +55,16 @@ class SearchViewModel: ObservableObject {
     
     private func setupSubscriptions() {
         // 1. Debounced Search Trigger
-        // We wait 0.8s after typing stops to protect API limits and reduce database thrashing
+        // Wait 0.6s to avoid hammering the DB while typing
         $query
             .removeDuplicates()
-            .debounce(for: .milliseconds(800), scheduler: RunLoop.main)
+            .debounce(for: .milliseconds(600), scheduler: RunLoop.main)
             .sink { [weak self] newQuery in
                 self?.handleQueryChange(newQuery)
             }
             .store(in: &cancellables)
         
-        // 2. Scope/Filter Trigger (Immediate)
+        // 2. Scope Change (Immediate)
         $selectedScope
             .dropFirst()
             .receive(on: RunLoop.main)
@@ -73,13 +73,11 @@ class SearchViewModel: ObservableObject {
             }
             .store(in: &cancellables)
             
-        // 3. Filter changes trigger immediate search (via the @Published binding to activeFilters)
-        // This is necessary if the filter toggles don't call triggerImmediateSearch explicitly.
+        // 3. Filter Change (Immediate)
         $activeFilters
-            .dropFirst()
+            .dropFirst() // Skip initial value
             .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
             .sink { [weak self] _ in
-                // Only trigger if a query exists, otherwise filters are applied to empty set (cleaner UX)
                 if !(self?.query.isEmpty ?? true) {
                     self?.triggerImmediateSearch()
                 }
@@ -87,16 +85,13 @@ class SearchViewModel: ObservableObject {
             .store(in: &cancellables)
     }
     
-    // MARK: - Public/Internal Actions
+    // MARK: - Actions
     
-    // CRITICAL FIX: Changed from private to internal so SearchFilterBar can call it.
     internal func triggerImmediateSearch() {
         let currentQuery = query
-        // Only proceed if a search term exists or filters are active (if the user tries to filter the empty discovery view)
         guard !currentQuery.isEmpty || activeFilters.hasActiveFilters else { return }
         
         searchTask?.cancel()
-        
         searchTask = Task {
             await performHybridSearch(query: currentQuery)
         }
@@ -108,9 +103,7 @@ class SearchViewModel: ObservableObject {
             return
         }
         
-        // Cancel any pending task (Fast Typing)
         searchTask?.cancel()
-        
         searchTask = Task {
             await performHybridSearch(query: newQuery)
         }
@@ -124,8 +117,8 @@ class SearchViewModel: ObservableObject {
         self.personMatch = nil
         self.personCredits = []
         
-        // 1. Map UI Scope to Repository Filters
-        var filters = activeFilters // Start with filters set by SearchFilterBar
+        // 1. Prepare Filters
+        var filters = activeFilters
         switch selectedScope {
         case .movies: filters.onlyMovies = true
         case .series: filters.onlySeries = true
@@ -133,37 +126,30 @@ class SearchViewModel: ObservableObject {
         case .all: break
         }
         
-        // FIX 2: Capture the filters struct to pass into the detached context as a constant.
+        // Capture for async closure
         let searchFilters = filters
 
-        // --- PARALLEL EXECUTION START ---
+        // --- PARALLEL EXECUTION ---
         
-        // Task A: Local Hybrid Search (Fuzzy Matching)
-        // Runs on background thread via Repository
-        async let localResults = Task.detached(priority: .userInitiated) { [searchFilters] in
-            // Use searchFilters inside the detached task
-            return await repo.searchHybrid(query: query, filters: searchFilters)
-        }.value
+        // Task A: Local Database Search (The "Hybrid" Logic)
+        async let localResults = repo.searchHybrid(query: query, filters: searchFilters)
         
         // Task B: Remote Person Search (API)
-        // Only run if scope allows (not Live TV) and query is long enough
-        let shouldSearchPeople = (selectedScope != .live) && (query.count > 3)
-        
+        // Only run if scope allows and query is substantial
+        let shouldSearchPeople = (selectedScope != .live) && (query.count > 2)
         async let remotePerson: TmdbPersonResult? = shouldSearchPeople ? findBestPersonMatch(query: query) : nil
         
-        // --- AWAIT RESULTS ---
+        // --- AWAIT & PROCESS ---
         
         let (local, person) = await (localResults, remotePerson)
         
-        // --- SYNTHESIS ---
-        
-        // If we found a person, fetch their credits and cross-reference locally
+        // If we found a person, fetch their filmography and check our DB
         var creditsFound: [Channel] = []
         if let person = person {
             creditsFound = await resolvePersonCredits(personId: person.id, repo: repo)
         }
         
-        // Update UI on Main Actor
+        // Update UI
         if !Task.isCancelled {
             withAnimation(.easeInOut) {
                 self.movies = local.movies
@@ -178,23 +164,30 @@ class SearchViewModel: ObservableObject {
                 self.isLoading = false
             }
             
-            // Auto-save history if successful search
             if !hasNoResults {
                 addToHistory(query)
+                
+                // --- CRITICAL FIX: Trigger Image Enrichment ---
+                // We collect all the results we just found and ask the Repo to fetch covers for them immediately.
+                // This ensures that "Unknown" images get fixed right before the user's eyes.
+                let allItems = local.movies + local.series + creditsFound
+                if !allItems.isEmpty {
+                    Task.detached(priority: .background) {
+                        await repo.enrichContent(items: allItems)
+                    }
+                }
             }
         }
     }
     
-    // MARK: - Reverse Search Logic
+    // MARK: - Person Logic
     
     private func findBestPersonMatch(query: String) async -> TmdbPersonResult? {
-        // We only want the top result to keep the UI clean
-        // e.g. "Tom Cru" -> "Tom Cruise"
         do {
             let results = try await tmdbClient.searchPerson(query: query)
+            // Return the first valid person
             return results.first
         } catch {
-            print("Person Search Error: \(error)")
             return nil
         }
     }
@@ -203,29 +196,21 @@ class SearchViewModel: ObservableObject {
         do {
             let credits = try await tmdbClient.getPersonCredits(personId: personId)
             
-            // Extract titles from Cast (and high-profile Crew jobs if needed)
-            // Filter by popularity to prioritize famous works
+            // Extract titles from Cast/Crew, prioritized by popularity
             let candidateTitles = credits.cast
                 .sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
-                .prefix(50) // Limit to top 50 works to prevent massive DB query
+                .prefix(50)
                 .map { $0.displayTitle }
             
-            // Cross-reference with Local DB
-            // Using a detached task with a new context to perform the read safely
-            return await Task.detached {
-                let bgContext = repo.container.newBackgroundContext()
-                let readRepo = ChannelRepository(context: bgContext)
-                // Calls findMatches now present in ChannelRepository
-                return readRepo.findMatches(for: Array(candidateTitles))
-            }.value
+            // Cross-reference with Local DB using the new efficient finder
+            return await repo.findMatches(for: Array(candidateTitles))
             
         } catch {
-            print("Credit Resolution Error: \(error)")
             return []
         }
     }
     
-    // MARK: - History Management
+    // MARK: - History
     
     private let historyKey = "user_search_history"
     
@@ -243,7 +228,6 @@ class SearchViewModel: ObservableObject {
         }
         current.insert(clean, at: 0)
         
-        // Cap at 10 items
         if current.count > 10 {
             current = Array(current.prefix(10))
         }
@@ -257,11 +241,10 @@ class SearchViewModel: ObservableObject {
         UserDefaults.standard.removeObject(forKey: historyKey)
     }
     
-    // MARK: - UI Helpers
+    // MARK: - Helpers
     
     func selectHistoryItem(_ term: String) {
         self.query = term
-        // The subscription will handle the search triggering
     }
     
     func clearResults() {
