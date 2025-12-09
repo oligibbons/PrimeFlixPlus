@@ -160,37 +160,6 @@ class ChannelRepository {
         return Array(matches.prefix(limit))
     }
     
-    func searchLiveContent(query: String) -> (categories: [String], channels: [Channel]) {
-        guard !query.isEmpty else { return ([], []) }
-        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // 1. Search Groups
-        let groupReq = NSFetchRequest<NSDictionary>(entityName: "Channel")
-        groupReq.resultType = .dictionaryResultType
-        groupReq.returnsDistinctResults = true
-        groupReq.propertiesToFetch = ["group"]
-        groupReq.predicate = NSPredicate(format: "type == 'live' AND group CONTAINS[cd] %@", normalizedQuery)
-        
-        var groups: [String] = []
-        context.performAndWait {
-            if let results = try? context.fetch(groupReq) {
-                groups = results.compactMap { $0["group"] as? String }
-            }
-        }
-        
-        // 2. Search Channels
-        let chanReq = NSFetchRequest<Channel>(entityName: "Channel")
-        chanReq.predicate = NSPredicate(format: "type == 'live' AND title CONTAINS[cd] %@", normalizedQuery)
-        chanReq.fetchLimit = 50
-        
-        var channels: [Channel] = []
-        context.performAndWait {
-            channels = (try? context.fetch(chanReq)) ?? []
-        }
-        
-        return (groups, channels)
-    }
-    
     // MARK: - Standard Lists (Deduplicated)
     
     func getFavorites(type: String) -> [Channel] {
@@ -311,7 +280,7 @@ class ChannelRepository {
         return results.compactMap { $0["group"] as? String }
     }
     
-    // MARK: - Search
+    // MARK: - Live Search Utilities
     
     func searchLiveContent(query: String) -> (categories: [String], channels: [Channel]) {
         guard !query.isEmpty else { return ([], []) }
