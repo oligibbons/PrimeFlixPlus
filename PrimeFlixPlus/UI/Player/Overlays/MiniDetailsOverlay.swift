@@ -173,7 +173,7 @@ struct MiniDetailsOverlay: View {
                         .buttonStyle(CinemeltCardButtonStyle())
                         .focused($focusedButton, equals: "tracks")
                         
-                        // 2. Settings
+                        // 2. Settings (Triggers the new Optimization Overlay)
                         Button(action: onShowSettings) {
                             VStack {
                                 Image(systemName: "gearshape.fill")

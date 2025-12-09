@@ -108,7 +108,14 @@ class SettingsViewModel: ObservableObject {
     @AppStorage("autoHideForeign") var autoHideForeign: Bool = false
     @AppStorage("defaultPlaybackSpeed") var defaultPlaybackSpeed: Double = 1.0
     
-    // NEW: Default Playback Settings
+    // --- Playback Optimization Settings ---
+    
+    // NEW: Capacity Limit (MB). Default 300MB.
+    // 300MB = ~40s of 4K, or ~3m of 1080p.
+    @AppStorage("bufferMemoryLimit") var bufferMemoryLimit: Int = 300
+    
+    @AppStorage("useHardwareDecoding") var useHardwareDecoding: Bool = true
+    @AppStorage("maxStreamResolution") var maxStreamResolution: String = "Unlimited"
     @AppStorage("defaultDeinterlace") var defaultDeinterlace: Bool = false
     @AppStorage("defaultAspectRatio") var defaultAspectRatio: String = "Default"
     
@@ -119,6 +126,16 @@ class SettingsViewModel: ObservableObject {
     ]
     
     let availableResolutions = ["4K UHD", "1080p", "720p", "SD"]
+    
+    // Optimization Presets (RAM Allocations)
+    let bufferOptions: [(String, Int)] = [
+        ("Light (100 MB)", 100),
+        ("Standard (200 MB)", 200),
+        ("High (300 MB)", 300),
+        ("Ultra (500 MB)", 500)
+    ]
+    
+    let resolutionCaps = ["Unlimited", "1080p", "720p"]
     
     // --- State ---
     @Published var playlists: [Playlist] = []
@@ -155,6 +172,17 @@ class SettingsViewModel: ObservableObject {
     
     // --- Actions ---
     
+    func applyStreamOptimize() {
+        // "Stream Optimize" - Maximum Performance Preset
+        // 400MB is safe for ATV 4K (has 3GB+ RAM), allows huge buffer for 1080p
+        self.bufferMemoryLimit = 400
+        self.useHardwareDecoding = true
+        self.maxStreamResolution = "1080p" // Prioritize smoothness over pixel count
+        self.defaultDeinterlace = true
+        
+        objectWillChange.send()
+    }
+    
     func deletePlaylist(_ playlist: Playlist) {
         repository?.deletePlaylist(playlist)
         loadPlaylists()
@@ -177,12 +205,8 @@ class SettingsViewModel: ObservableObject {
         URLCache.shared.removeAllCachedResponses()
     }
     
-    // MARK: - Sync Actions
-    
     func forceUpdate() {
-        Task {
-            await repository?.syncAll(force: true)
-        }
+        Task { await repository?.syncAll(force: true) }
     }
     
     func nuclearResync() {
@@ -194,11 +218,8 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Auto-Hide Logic
-    
     func runAutoHidingLogic() {
         guard autoHideForeign else { return }
-        
         if allCategories.isEmpty { loadCategories() }
         
         let language = preferredLanguage
@@ -207,7 +228,6 @@ class SettingsViewModel: ObservableObject {
         }
         
         guard !foreignCategories.isEmpty else { return }
-        
         CategoryPreferences.shared.bulkHide(foreignCategories)
         objectWillChange.send()
     }

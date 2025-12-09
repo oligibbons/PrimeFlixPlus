@@ -4,6 +4,7 @@ import TVVLCKit
 
 /// A robust, SwiftUI-friendly wrapper around VLCMediaPlayer.
 /// Includes Watchdog logic, Safe Seeking, Resume support, AV Sync, and Video Settings.
+/// OPTIMIZATION UPDATE: Implements Dynamic RAM-Based Buffering and Hardware Decoding Control.
 class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     // MARK: - Published State
@@ -51,7 +52,10 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     // MARK: - Playback Control
     
-    func load(url: String, isLive: Bool, is4K: Bool, startTime: Double = 0) {
+    /// Loads media with Dynamic RAM Buffering calculation.
+    /// - Parameters:
+    ///   - quality: Used to estimate bitrate (e.g., "4K", "1080p").
+    func load(url: String, isLive: Bool, quality: String?, startTime: Double = 0) {
         self.error = nil
         self.duration = 0
         self.currentTime = startTime // Optimistic set
@@ -65,20 +69,73 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         
         let media = VLCMedia(url: mediaUrl)
         
-        // Optimized Caching
-        let cacheSize = isLive ? 5000 : (is4K ? 15000 : 4000)
-        let options: [String: Any] = [
-            "network-caching": cacheSize,
+        // --- SMART BUFFERING LOGIC ---
+        
+        // 1. Get User RAM Cap (Default 300MB if not set)
+        // This setting ensures we never exceed safe memory limits on the Apple TV.
+        let memoryLimitMB = UserDefaults.standard.integer(forKey: "bufferMemoryLimit")
+        let limit = memoryLimitMB > 0 ? memoryLimitMB : 300
+        
+        // 2. Estimate Bitrate (Mbps) based on Quality Tag
+        // These are conservative "High Quality" estimates to ensure safety.
+        // A 4K Remux might spike to 80-100Mbps, so we use a safe average of 60Mbps.
+        let estimatedBitrate: Double
+        if let q = quality {
+            if q.contains("4K") || q.contains("UHD") {
+                estimatedBitrate = 60.0 // 4K Remux average
+            } else if q.contains("1080") {
+                estimatedBitrate = 15.0 // High quality 1080p
+            } else if q.contains("720") {
+                estimatedBitrate = 6.0
+            } else {
+                estimatedBitrate = 4.0 // SD/Unknown
+            }
+        } else {
+            estimatedBitrate = isLive ? 10.0 : 15.0 // Default assumptions
+        }
+        
+        // 3. Calculate Duration Capacity
+        // Formula: (MB * 8 bits) / Mbps = Seconds
+        // Example: (300MB * 8) / 15Mbps = 160 seconds buffer
+        let capacitySeconds = (Double(limit) * 8.0) / estimatedBitrate
+        
+        // 4. Apply Constraints
+        // Live TV needs a floor (3s) to handle jitter, but a ceiling (30s) to avoid huge lag behind live edge.
+        // VOD uses the full calculated capacity, capped at 300s (5 mins) to prevent seek issues.
+        let finalCacheMs: Int
+        if isLive {
+            let clamped = min(max(capacitySeconds, 3.0), 30.0)
+            finalCacheMs = Int(clamped * 1000)
+        } else {
+            let clamped = min(capacitySeconds, 300.0)
+            finalCacheMs = Int(clamped * 1000)
+        }
+        
+        print("[StreamOptimizer] RAM Cap: \(limit)MB | Quality: \(quality ?? "Unknown") | Bitrate Est: \(estimatedBitrate)Mbps | Buffer: \(finalCacheMs)ms")
+        
+        // --- HARDWARE SETTINGS ---
+        
+        // Default to true (Hardware) as it's standard for Apple TV.
+        // Disabling this is a "Secret Weapon" for fixing green/glitchy streams.
+        let useHardware = UserDefaults.standard.object(forKey: "useHardwareDecoding") as? Bool ?? true
+        
+        var options: [String: Any] = [
+            "network-caching": finalCacheMs,
             "clock-jitter": 0,
             "clock-synchro": 0,
             "http-reconnect": true
         ]
-        media.addOptions(options)
+        
+        if !useHardware {
+            options["avcodec-hw"] = "none"
+        }
         
         // Start Time Optimization
         if startTime > 0 {
-            media.addOptions(["start-time": "\(startTime)"])
+            options["start-time"] = "\(startTime)"
         }
+        
+        media.addOptions(options)
         
         player.media = media
         player.play()
@@ -116,12 +173,10 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.rate = rate
     }
     
-    // MARK: - Video Settings (NEW)
+    // MARK: - Video Settings (Dynamic)
     
     func setDeinterlace(_ enabled: Bool) {
-        // TVVLCKit uses setDeinterlaceFilter to toggle.
-        // "blend" is a good general-purpose deinterlacing filter.
-        // Passing nil disables it.
+        // "blend" is a safe, performant deinterlacing filter for tvOS
         player.setDeinterlaceFilter(enabled ? "blend" : nil)
     }
     
@@ -129,11 +184,10 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if ratio == "Default" {
             player.videoAspectRatio = nil
         } else if ratio == "Fill" {
-            // "Fill" isn't a standard VLC aspect ratio.
-            // On TV, usually you want to force 16:9 to fill the screen if the content is weird.
+            // Force 16:9 to fill typical TV screens
             player.videoAspectRatio = UnsafeMutablePointer<Int8>(mutating: ("16:9" as NSString).utf8String)
         } else {
-            // Pass specific ratios like "16:9", "4:3", "2.35:1"
+            // Custom ratios
             player.videoAspectRatio = UnsafeMutablePointer<Int8>(mutating: (ratio as NSString).utf8String)
         }
     }

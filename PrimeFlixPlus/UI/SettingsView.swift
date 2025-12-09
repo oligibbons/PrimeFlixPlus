@@ -50,7 +50,7 @@ struct SettingsView: View {
                 Spacer()
                 
                 // Version Info
-                Text("Cinemelt v1.5")
+                Text("Cinemelt v1.6 (Optimized)")
                     .font(CinemeltTheme.fontBody(18))
                     .foregroundColor(.gray)
                     .padding(.horizontal, 20)
@@ -63,7 +63,7 @@ struct SettingsView: View {
                     .background(Color.black.opacity(0.3))
                     .ignoresSafeArea()
             )
-            .focusSection() // FIX: Groups the sidebar as one navigation target
+            .focusSection()
             
             // RIGHT PANE: Content Scroll
             NavigationView {
@@ -193,132 +193,140 @@ struct SettingsView: View {
                         .padding(40)
                         .cinemeltGlass()
                         
-                        // --- SECTION 3: PLAYBACK ---
-                        VStack(alignment: .leading, spacing: 25) {
-                            Text("Playback")
-                                .font(CinemeltTheme.fontTitle(32))
-                                .foregroundColor(CinemeltTheme.accent)
-                                .cinemeltGlow()
+                        // --- SECTION 3: PLAYBACK OPTIMIZATION (NEW) ---
+                        VStack(alignment: .leading, spacing: 30) {
+                            HStack {
+                                Text("Playback Optimization")
+                                    .font(CinemeltTheme.fontTitle(32))
+                                    .foregroundColor(CinemeltTheme.accent)
+                                    .cinemeltGlow()
+                                
+                                Spacer()
+                                
+                                // The "Magic Button"
+                                Button(action: { viewModel.applyStreamOptimize() }) {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "wand.and.stars")
+                                        Text("Auto-Optimize")
+                                    }
+                                    .font(CinemeltTheme.fontBody(20))
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 10)
+                                    .background(CinemeltTheme.accent.opacity(0.2))
+                                    .cornerRadius(10)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(CinemeltTheme.accent, lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(CinemeltCardButtonStyle())
+                            }
                             
-                            // Row 1: Quality & Speed
-                            HStack(alignment: .top, spacing: 40) {
-                                VStack(alignment: .leading, spacing: 15) {
-                                    Text("Preferred Quality")
+                            // 1. Buffer Capacity (RAM)
+                            VStack(alignment: .leading, spacing: 15) {
+                                HStack {
+                                    Image(systemName: "memorychip")
+                                        .foregroundColor(CinemeltTheme.cream)
+                                    Text("Buffer Capacity (RAM)")
                                         .font(CinemeltTheme.fontBody(22))
-                                        .foregroundColor(CinemeltTheme.cream.opacity(0.8))
-                                    
-                                    HStack(spacing: 20) {
-                                        ForEach(viewModel.availableResolutions, id: \.self) { res in
-                                            Button(action: { viewModel.preferredResolution = res }) {
-                                                Text(res)
-                                                    .font(CinemeltTheme.fontBody(20))
-                                                    .fontWeight(viewModel.preferredResolution == res ? .bold : .regular)
-                                                    .padding(.horizontal, 24)
+                                        .foregroundColor(CinemeltTheme.cream)
+                                    Spacer()
+                                    Text("\(viewModel.bufferMemoryLimit) MB")
+                                        .font(CinemeltTheme.fontBody(22))
+                                        .fontWeight(.bold)
+                                        .foregroundColor(CinemeltTheme.accent)
+                                }
+                                
+                                // Custom Segmented Control for Buffer
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 15) {
+                                        ForEach(viewModel.bufferOptions, id: \.1) { label, value in
+                                            Button(action: { viewModel.bufferMemoryLimit = value }) {
+                                                Text(label)
+                                                    .font(CinemeltTheme.fontBody(18))
+                                                    .fontWeight(viewModel.bufferMemoryLimit == value ? .bold : .regular)
+                                                    .padding(.horizontal, 20)
                                                     .padding(.vertical, 12)
                                                     .background(
-                                                        viewModel.preferredResolution == res ?
+                                                        viewModel.bufferMemoryLimit == value ?
                                                         CinemeltTheme.accent : Color.white.opacity(0.05)
                                                     )
                                                     .cornerRadius(12)
                                             }
                                             .buttonStyle(CinemeltCardButtonStyle())
-                                            .foregroundColor(viewModel.preferredResolution == res ? .black : CinemeltTheme.cream)
+                                            .foregroundColor(viewModel.bufferMemoryLimit == value ? .black : CinemeltTheme.cream)
                                         }
                                     }
+                                    .padding(5)
                                 }
                                 
-                                Spacer()
-                                
-                                VStack(alignment: .leading, spacing: 15) {
-                                    Text("Default Speed")
-                                        .font(CinemeltTheme.fontBody(22))
-                                        .foregroundColor(CinemeltTheme.cream.opacity(0.8))
-                                    
-                                    ScrollView(.horizontal, showsIndicators: false) {
-                                        HStack(spacing: 15) {
-                                            ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
-                                                Button(action: { viewModel.defaultPlaybackSpeed = speed }) {
-                                                    Text("\(String(format: "%g", speed))x")
-                                                        .font(CinemeltTheme.fontBody(20))
-                                                        .fontWeight(viewModel.defaultPlaybackSpeed == speed ? .bold : .regular)
-                                                        .padding(.horizontal, 20)
-                                                        .padding(.vertical, 12)
-                                                        .background(
-                                                            viewModel.defaultPlaybackSpeed == speed ?
-                                                            CinemeltTheme.accent : Color.white.opacity(0.05)
-                                                        )
-                                                        .cornerRadius(12)
-                                                }
-                                                .buttonStyle(CinemeltCardButtonStyle())
-                                                .foregroundColor(viewModel.defaultPlaybackSpeed == speed ? .black : CinemeltTheme.cream)
-                                            }
-                                        }
-                                        .padding(10)
-                                    }
-                                    .frame(maxWidth: 600)
-                                }
+                                Text("Higher capacity allows longer pre-loading but uses more device memory.")
+                                    .font(CinemeltTheme.fontBody(16))
+                                    .foregroundColor(.gray)
                             }
                             
                             Divider().background(Color.white.opacity(0.1))
                             
-                            // Row 2: Default Video Settings (NEW)
+                            // 2. Hardware Decoding & Max Resolution
                             HStack(alignment: .top, spacing: 40) {
-                                // Deinterlace
                                 VStack(alignment: .leading, spacing: 15) {
-                                    Text("Deinterlace Mode")
+                                    Text("Hardware Decoding")
                                         .font(CinemeltTheme.fontBody(22))
-                                        .foregroundColor(CinemeltTheme.cream.opacity(0.8))
+                                        .foregroundColor(CinemeltTheme.cream)
                                     
-                                    Button(action: { viewModel.defaultDeinterlace.toggle() }) {
+                                    Button(action: { viewModel.useHardwareDecoding.toggle() }) {
                                         HStack {
-                                            Text(viewModel.defaultDeinterlace ? "Always On" : "Auto (Live Only)")
+                                            Text(viewModel.useHardwareDecoding ? "Enabled (Recommended)" : "Disabled (Software)")
                                                 .font(CinemeltTheme.fontBody(20))
-                                                .fontWeight(viewModel.defaultDeinterlace ? .bold : .regular)
-                                            
                                             Spacer()
-                                            
-                                            Image(systemName: viewModel.defaultDeinterlace ? "checkmark.circle.fill" : "circle")
-                                                .foregroundColor(viewModel.defaultDeinterlace ? CinemeltTheme.accent : .gray)
+                                            Image(systemName: viewModel.useHardwareDecoding ? "cpu.fill" : "cpu")
+                                                .foregroundColor(viewModel.useHardwareDecoding ? CinemeltTheme.accent : .gray)
                                         }
-                                        .padding(.horizontal, 20)
-                                        .padding(.vertical, 12)
+                                        .padding(15)
                                         .background(Color.white.opacity(0.05))
                                         .cornerRadius(12)
-                                        .frame(width: 250)
+                                        .frame(width: 350)
                                     }
                                     .buttonStyle(CinemeltCardButtonStyle())
+                                    
+                                    Text("Disable if video shows green artifacts.")
+                                        .font(CinemeltTheme.fontBody(16))
+                                        .foregroundColor(.gray)
                                 }
                                 
                                 Spacer()
                                 
-                                // Aspect Ratio
                                 VStack(alignment: .leading, spacing: 15) {
-                                    Text("Default Aspect Ratio")
+                                    Text("Resolution Cap")
                                         .font(CinemeltTheme.fontBody(22))
-                                        .foregroundColor(CinemeltTheme.cream.opacity(0.8))
+                                        .foregroundColor(CinemeltTheme.cream)
                                     
                                     ScrollView(.horizontal, showsIndicators: false) {
                                         HStack(spacing: 15) {
-                                            ForEach(["Default", "16:9", "4:3", "Fill"], id: \.self) { ratio in
-                                                Button(action: { viewModel.defaultAspectRatio = ratio }) {
-                                                    Text(ratio)
+                                            ForEach(viewModel.resolutionCaps, id: \.self) { res in
+                                                Button(action: { viewModel.maxStreamResolution = res }) {
+                                                    Text(res)
                                                         .font(CinemeltTheme.fontBody(20))
-                                                        .fontWeight(viewModel.defaultAspectRatio == ratio ? .bold : .regular)
+                                                        .fontWeight(viewModel.maxStreamResolution == res ? .bold : .regular)
                                                         .padding(.horizontal, 20)
                                                         .padding(.vertical, 12)
                                                         .background(
-                                                            viewModel.defaultAspectRatio == ratio ?
+                                                            viewModel.maxStreamResolution == res ?
                                                             CinemeltTheme.accent : Color.white.opacity(0.05)
                                                         )
                                                         .cornerRadius(12)
                                                 }
                                                 .buttonStyle(CinemeltCardButtonStyle())
-                                                .foregroundColor(viewModel.defaultAspectRatio == ratio ? .black : CinemeltTheme.cream)
+                                                .foregroundColor(viewModel.maxStreamResolution == res ? .black : CinemeltTheme.cream)
                                             }
                                         }
-                                        .padding(10)
+                                        .padding(5)
                                     }
-                                    .frame(maxWidth: 600)
+                                    .frame(maxWidth: 500)
+                                    
+                                    Text("Automatically skips versions higher than this limit.")
+                                        .font(CinemeltTheme.fontBody(16))
+                                        .foregroundColor(.gray)
                                 }
                             }
                         }
@@ -434,7 +442,7 @@ struct SettingsView: View {
                 .background(Color.clear)
             }
             .navigationViewStyle(.stack)
-            .focusSection() // FIX: Groups the content area as one navigation target
+            .focusSection()
         }
         .background(CinemeltTheme.mainBackground)
         .fullScreenCover(isPresented: $showOnboarding) {

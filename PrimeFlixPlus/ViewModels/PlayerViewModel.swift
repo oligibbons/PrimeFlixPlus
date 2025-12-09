@@ -139,12 +139,15 @@ class PlayerViewModel: ObservableObject {
         guard let channel = currentChannel else { return }
         self.showResumePrompt = false
         
-        // 1. Load Engine
+        // 1. Load Engine with Optimization Data
         playerEngine.setRate(self.playbackRate)
+        
+        // OPTIMIZATION UPDATE: Pass the specific 'quality' string (e.g. "4K")
+        // This allows the Engine to calculate the correct RAM buffer size.
         playerEngine.load(
             url: channel.url,
             isLive: channel.type == "live",
-            is4K: channel.quality?.contains("4K") ?? false,
+            quality: channel.quality, // Pass string directly
             startTime: time
         )
         
@@ -169,7 +172,6 @@ class PlayerViewModel: ObservableObject {
         self.subtitleDelay = 0
         
         // 3. Push to Engine
-        // Note: Engine must support these methods
         playerEngine.setDeinterlace(self.isDeinterlaceEnabled)
         playerEngine.setAspectRatio(self.aspectRatio)
         
@@ -260,8 +262,8 @@ class PlayerViewModel: ObservableObject {
         playerEngine.setRate(speed)
     }
     
-    func setAudioTrack(index: Int) { playerEngine.setAudioTrack(index) }
-    func setSubtitleTrack(index: Int) { playerEngine.setSubtitleTrack(index) }
+    func setAudioTrack(_ index: Int) { playerEngine.setAudioTrack(index) }
+    func setSubtitleTrack(_ index: Int) { playerEngine.setSubtitleTrack(index) }
     
     // MARK: - Sync & Video Actions
     

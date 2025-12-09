@@ -81,84 +81,148 @@ struct ResumePromptOverlay: View {
     }
 }
 
-// MARK: - Video Settings Overlay (NEW)
+// MARK: - Video Settings Overlay (Optimized)
 struct VideoSettingsOverlay: View {
     @ObservedObject var viewModel: PlayerViewModel
     var onClose: () -> Void
     
+    // Direct Access to Global Settings for Troubleshooting
+    @AppStorage("useHardwareDecoding") var useHardwareDecoding: Bool = true
+    @AppStorage("bufferMemoryLimit") var bufferMemoryLimit: Int = 300
+    
     var body: some View {
         ZStack {
-            Color.black.opacity(0.9).ignoresSafeArea()
+            Color.black.opacity(0.95).ignoresSafeArea()
             
-            HStack(spacing: 80) {
+            HStack(alignment: .top, spacing: 60) {
                 
-                // 1. Deinterlacing
-                VStack(spacing: 20) {
-                    Image(systemName: "lines.measurement.horizontal")
-                        .font(.system(size: 50))
-                        .foregroundColor(viewModel.isDeinterlaceEnabled ? CinemeltTheme.accent : .gray)
-                    
-                    Text("Deinterlace")
+                // Column 1: Picture Settings (Live)
+                VStack(spacing: 30) {
+                    Text("Picture")
                         .font(CinemeltTheme.fontTitle(32))
                         .foregroundColor(CinemeltTheme.cream)
                     
-                    Text("Fixes lines in sports/live TV")
-                        .font(CinemeltTheme.fontBody(20))
-                        .foregroundColor(.gray)
-                        .multilineTextAlignment(.center)
-                        .frame(height: 50)
-                    
-                    Button(action: { viewModel.toggleDeinterlace() }) {
-                        Text(viewModel.isDeinterlaceEnabled ? "On" : "Off")
-                            .font(CinemeltTheme.fontTitle(24))
-                            .frame(width: 120)
-                            .padding(.vertical, 10)
-                            .background(viewModel.isDeinterlaceEnabled ? CinemeltTheme.accent : Color.white.opacity(0.1))
-                            .cornerRadius(12)
-                            .foregroundColor(viewModel.isDeinterlaceEnabled ? .black : .white)
+                    // Deinterlace
+                    settingButton(
+                        icon: "lines.measurement.horizontal",
+                        title: "Deinterlace",
+                        status: viewModel.isDeinterlaceEnabled ? "On" : "Off",
+                        isActive: viewModel.isDeinterlaceEnabled
+                    ) {
+                        viewModel.toggleDeinterlace()
                     }
-                    .buttonStyle(CinemeltCardButtonStyle())
-                }
-                .padding(40)
-                .background(Color.white.opacity(0.05))
-                .cornerRadius(20)
-                
-                // 2. Aspect Ratio
-                VStack(spacing: 20) {
-                    Image(systemName: "aspectratio.fill")
-                        .font(.system(size: 50))
-                        .foregroundColor(CinemeltTheme.cream)
                     
-                    Text("Aspect Ratio")
-                        .font(CinemeltTheme.fontTitle(32))
-                        .foregroundColor(CinemeltTheme.cream)
-                    
-                    Text("Adjust video fit")
-                        .font(CinemeltTheme.fontBody(20))
-                        .foregroundColor(.gray)
-                        .frame(height: 50)
-                    
-                    HStack(spacing: 15) {
-                        ForEach(["Default", "16:9", "4:3", "Fill"], id: \.self) { ratio in
-                            Button(action: { viewModel.setAspectRatio(ratio) }) {
-                                Text(ratio)
-                                    .font(CinemeltTheme.fontBody(20))
-                                    .padding(.horizontal, 15)
-                                    .padding(.vertical, 10)
-                                    .background(viewModel.aspectRatio == ratio ? CinemeltTheme.accent : Color.white.opacity(0.1))
-                                    .cornerRadius(8)
-                                    .foregroundColor(viewModel.aspectRatio == ratio ? .black : .white)
-                            }
-                            .buttonStyle(CinemeltCardButtonStyle())
+                    // Aspect Ratio
+                    settingButton(
+                        icon: "aspectratio.fill",
+                        title: "Aspect Ratio",
+                        status: viewModel.aspectRatio,
+                        isActive: viewModel.aspectRatio != "Default"
+                    ) {
+                        // Cycle Ratios
+                        let ratios = ["Default", "16:9", "4:3", "Fill"]
+                        if let idx = ratios.firstIndex(of: viewModel.aspectRatio) {
+                            let next = ratios[(idx + 1) % ratios.count]
+                            viewModel.setAspectRatio(next)
+                        } else {
+                            viewModel.setAspectRatio("Default")
                         }
                     }
                 }
-                .padding(40)
-                .background(Color.white.opacity(0.05))
-                .cornerRadius(20)
+                .frame(width: 300)
+                
+                Divider().background(Color.white.opacity(0.1))
+                
+                // Column 2: Performance (Requires Restart)
+                VStack(spacing: 30) {
+                    VStack(spacing: 5) {
+                        Text("Performance")
+                            .font(CinemeltTheme.fontTitle(32))
+                            .foregroundColor(CinemeltTheme.cream)
+                        Text("Changes apply on next playback")
+                            .font(CinemeltTheme.fontBody(16))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    // Hardware Decoding Toggle
+                    settingButton(
+                        icon: "cpu",
+                        title: "Hardware Decoding",
+                        status: useHardwareDecoding ? "Enabled" : "Disabled",
+                        isActive: useHardwareDecoding
+                    ) {
+                        useHardwareDecoding.toggle()
+                    }
+                    
+                    // Buffer Toggle (Cycle)
+                    settingButton(
+                        icon: "memorychip",
+                        title: "Buffer Cap",
+                        status: "\(bufferMemoryLimit) MB",
+                        isActive: bufferMemoryLimit > 200
+                    ) {
+                        // Cycle: 100 -> 300 -> 500 -> 100
+                        if bufferMemoryLimit == 100 { bufferMemoryLimit = 300 }
+                        else if bufferMemoryLimit == 300 { bufferMemoryLimit = 500 }
+                        else { bufferMemoryLimit = 100 }
+                    }
+                    
+                    // "Optimize Connection" Magic Button
+                    Button(action: {
+                        // Apply Safe Defaults
+                        useHardwareDecoding = true
+                        bufferMemoryLimit = 300 // Safe middle ground
+                        viewModel.isDeinterlaceEnabled = true
+                        viewModel.toggleDeinterlace() // Toggle twice to force refresh if needed or just set
+                        viewModel.setDeinterlace(true)
+                    }) {
+                        HStack {
+                            Image(systemName: "wand.and.stars")
+                            Text("Optimize Connection")
+                        }
+                        .font(CinemeltTheme.fontBody(20))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(CinemeltTheme.accent)
+                        .cornerRadius(12)
+                    }
+                    .buttonStyle(CinemeltCardButtonStyle())
+                }
+                .frame(width: 300)
             }
+            .padding(50)
+            .background(Color.white.opacity(0.05))
+            .cornerRadius(30)
         }
         .onExitCommand { onClose() }
+    }
+    
+    // Helper Component for consistency
+    private func settingButton(icon: String, title: String, status: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundColor(isActive ? CinemeltTheme.accent : .gray)
+                    .frame(width: 40)
+                
+                VStack(alignment: .leading) {
+                    Text(title)
+                        .font(CinemeltTheme.fontBody(18))
+                        .foregroundColor(.gray)
+                    Text(status)
+                        .font(CinemeltTheme.fontBody(22))
+                        .fontWeight(.bold)
+                        .foregroundColor(CinemeltTheme.cream)
+                }
+                Spacer()
+            }
+            .padding()
+            .background(Color.white.opacity(0.1))
+            .cornerRadius(12)
+        }
+        .buttonStyle(CinemeltCardButtonStyle())
     }
 }
 
@@ -169,7 +233,7 @@ struct TrackSelectionOverlay: View {
     
     var body: some View {
         ZStack {
-            Color.black.opacity(0.9).ignoresSafeArea()
+            Color.black.opacity(0.95).ignoresSafeArea()
             
             HStack(alignment: .top, spacing: 80) {
                 

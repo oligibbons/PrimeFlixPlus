@@ -12,7 +12,6 @@ struct PlayerView: View {
     // Focus Management
     enum PlayerFocus: Hashable {
         case videoSurface   // The scrubber/play bar
-        // Note: 'upperControls' removed as we moved buttons to Mini Details
         
         // Overlays (Modals)
         case miniDetails
@@ -82,7 +81,7 @@ struct PlayerView: View {
                 onPlayChannel?(nextChannel)
             }
         }
-        // CENTRALIZED EXIT COMMAND (Fixes Dashboard Crash)
+        // CENTRALIZED EXIT COMMAND
         .onExitCommand {
             handleExit()
         }
@@ -152,7 +151,7 @@ struct PlayerView: View {
                 case .left: viewModel.seekBackward()
                 case .right: viewModel.seekForward()
                 case .down:
-                    // Down -> Open Mini Details (Settings are now here)
+                    // Down -> Open Mini Details
                     withAnimation {
                         viewModel.showMiniDetails = true
                         focusedField = .miniDetails
@@ -237,7 +236,7 @@ struct PlayerView: View {
                     withAnimation { viewModel.showMiniDetails = false }
                     focusedField = .videoSurface
                 },
-                // NEW: Wire up the settings buttons that are now in Mini Details
+                // NEW: Connect Buttons to Overlays
                 onShowTracks: {
                     withAnimation { viewModel.showTrackSelection = true }
                     focusedField = .trackSelection
@@ -282,6 +281,7 @@ struct PlayerView: View {
             .focused($focusedField, equals: .versionSelection)
         }
         
+        // NEW: Video Settings Overlay
         if viewModel.showVideoSettings {
             VideoSettingsOverlay(
                 viewModel: viewModel,

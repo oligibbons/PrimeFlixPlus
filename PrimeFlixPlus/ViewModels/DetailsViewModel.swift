@@ -259,6 +259,11 @@ class DetailsViewModel: ObservableObject {
             guard let variants = epMap[epNum] else { continue }
             let processedVersions = processVersions(variants)
             
+            // OPTIMIZATION: If the resolution cap filters out ALL versions of this episode,
+            // we skip adding it to the UI to avoid "Unplayable" states.
+            // Exception: If you prefer to show it grayed out, remove this check.
+            if processedVersions.isEmpty { continue }
+            
             // 2. Resolve Metadata
             // Priority: OMDB -> TMDB -> Local Enriched -> Generic
             var title = "Episode \(epNum)"
@@ -284,7 +289,6 @@ class DetailsViewModel: ObservableObject {
             
             // Source 3: Local Enriched / Fallback
             // Find a variant that has a meaningful title or valid cover
-            // FIX: Using only properties that exist on ChannelStruct (title, cover)
             let localData = variants.first(where: { c in
                 return c.cover != nil
             })
@@ -324,13 +328,15 @@ class DetailsViewModel: ObservableObject {
         withAnimation { self.displayedEpisodes = list }
     }
     
-    // MARK: - Version Metadata Logic
+    // MARK: - Version Metadata Logic (Optimized)
     
     private func processVersions(_ structs: [ChannelStruct]) -> [VersionOption] {
         let preferredLang = UserDefaults.standard.string(forKey: "preferredLanguage") ?? "English"
         let preferredRes = UserDefaults.standard.string(forKey: "preferredResolution") ?? "4K"
+        let maxRes = UserDefaults.standard.string(forKey: "maxStreamResolution") ?? "Unlimited"
         
-        return structs.map { ch in
+        // Use compactMap to filter out nil results (capped items)
+        return structs.compactMap { ch -> VersionOption? in
             var quality = ch.quality ?? "HD"
             var language = "Unknown"
             
@@ -342,6 +348,24 @@ class DetailsViewModel: ObservableObject {
             let epInfo = TitleNormalizer.parse(rawTitle: ch.canonicalTitle ?? ch.title)
             if language == "Unknown", let eLang = epInfo.language { language = eLang }
             if quality == "HD" && !epInfo.quality.isEmpty { quality = epInfo.quality }
+            
+            // --- OPTIMIZATION FILTERING ---
+            // "Creative Solution": We strictly filter out files that exceed the user's connection cap.
+            if maxRes != "Unlimited" {
+                let is4K = quality.contains("4K") || quality.contains("UHD") || quality.contains("2160")
+                let is1080p = quality.contains("1080") || quality.contains("FHD")
+                
+                // If Cap is 1080p, reject 4K
+                if maxRes == "1080p" && is4K {
+                    return nil
+                }
+                
+                // If Cap is 720p, reject 1080p and 4K
+                if maxRes == "720p" && (is4K || is1080p) {
+                    return nil
+                }
+            }
+            // ------------------------------
             
             var score = 0
             if quality.contains("4K") { score += 4000 } else if quality.contains("1080") { score += 1080 }
@@ -360,6 +384,18 @@ class DetailsViewModel: ObservableObject {
     
     private func processMovieVersions(structs: [ChannelStruct]) {
         self.movieVersions = processVersions(structs)
+        
+        // Safety Fallback: If the user sets a strict cap (e.g. 720p) but the movie
+        // ONLY exists in 4K, the list would be empty.
+        // In this specific edge case, we restore the original list to prevent broken UI.
+        if self.movieVersions.isEmpty && !structs.isEmpty {
+            // Re-run mapping without filtering
+            let fallback = structs.map { ch -> VersionOption in
+                let q = ch.quality ?? "HD"
+                return VersionOption(id: ch.url, channelStruct: ch, quality: q, language: "Unknown", score: 0)
+            }
+            self.movieVersions = fallback
+        }
     }
     
     // MARK: - Playback Triggers
