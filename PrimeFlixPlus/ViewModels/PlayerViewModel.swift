@@ -143,7 +143,6 @@ class PlayerViewModel: ObservableObject {
         playerEngine.setRate(self.playbackRate)
         
         // OPTIMIZATION UPDATE: Pass the specific 'quality' string (e.g. "4K")
-        // This allows the Engine to calculate the correct RAM buffer size.
         playerEngine.load(
             url: channel.url,
             isLive: channel.type == "live",
@@ -155,9 +154,7 @@ class PlayerViewModel: ObservableObject {
         let defDeinterlace = UserDefaults.standard.bool(forKey: "defaultDeinterlace")
         let defRatio = UserDefaults.standard.string(forKey: "defaultAspectRatio") ?? "Default"
         
-        // Deinterlace Logic:
-        // If Default is TRUE (Always On) -> Enable
-        // If Default is FALSE (Auto) -> Enable ONLY if Live TV
+        // Deinterlace Logic
         if defDeinterlace {
             self.isDeinterlaceEnabled = true
         } else {
@@ -262,8 +259,9 @@ class PlayerViewModel: ObservableObject {
         playerEngine.setRate(speed)
     }
     
-    func setAudioTrack(_ index: Int) { playerEngine.setAudioTrack(index) }
-    func setSubtitleTrack(_ index: Int) { playerEngine.setSubtitleTrack(index) }
+    // FIX: Updated signatures to match SelectionOverlays calls (removed _)
+    func setAudioTrack(index: Int) { playerEngine.setAudioTrack(index) }
+    func setSubtitleTrack(index: Int) { playerEngine.setSubtitleTrack(index) }
     
     // MARK: - Sync & Video Actions
     
@@ -273,6 +271,12 @@ class PlayerViewModel: ObservableObject {
     func toggleDeinterlace() {
         isDeinterlaceEnabled.toggle()
         playerEngine.setDeinterlace(isDeinterlaceEnabled)
+    }
+    
+    // FIX: Added direct setter required by Settings Overlay
+    func setDeinterlace(_ enabled: Bool) {
+        self.isDeinterlaceEnabled = enabled
+        playerEngine.setDeinterlace(enabled)
     }
     
     func setAspectRatio(_ ratio: String) {
