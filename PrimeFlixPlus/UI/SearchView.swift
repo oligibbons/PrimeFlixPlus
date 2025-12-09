@@ -7,16 +7,23 @@ struct SearchView: View {
     var onPlay: (Channel) -> Void
     var onBack: () -> Void
     
-    @FocusState private var isSearchFieldFocused: Bool
-    @FocusState private var focusedScope: SearchViewModel.SearchScope?
+    // Focus State
+    @FocusState private var focusedField: SearchFocus?
     
-    let channelGridColumns = [
+    enum SearchFocus: Hashable {
+        case searchBar
+        case scope(SearchViewModel.SearchScope)
+        case result(String)
+    }
+    
+    // Grid Layout for Results
+    let gridLayout = [
         GridItem(.adaptive(minimum: 220, maximum: 260), spacing: 40)
     ]
     
     // MARK: - Initializer
-    init(initialScope: SearchViewModel.SearchScope = .library, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
-        _viewModel = StateObject(wrappedValue: SearchViewModel(initialScope: initialScope))
+    init(initialScope: SearchViewModel.SearchScope = .all, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
+        _viewModel = StateObject(wrappedValue: SearchViewModel())
         self.onPlay = onPlay
         self.onBack = onBack
     }
@@ -25,10 +32,11 @@ struct SearchView: View {
         ZStack {
             CinemeltTheme.mainBackground.ignoresSafeArea()
             
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(spacing: 0) {
                 
-                // MARK: - Header & Input
-                VStack(spacing: 25) {
+                // MARK: - 1. Search Header (Input, Scopes, Filters)
+                VStack(spacing: 20) {
+                    // Row A: Back + Input
                     HStack(spacing: 20) {
                         Button(action: onBack) {
                             Image(systemName: "arrow.left")
@@ -41,210 +49,184 @@ struct SearchView: View {
                         .buttonStyle(.card)
                         
                         GlassTextField(
-                            title: "Search",
-                            placeholder: viewModel.selectedScope == .library ? "Movies & Series" : "Channels",
+                            title: "Search Library",
+                            placeholder: "Title, Actor, or Director...",
                             text: $viewModel.query,
-                            nextFocus: {
-                                // Optional: Handle explicit submit if needed
-                            }
+                            nextFocus: { /* Submit action if needed */ }
                         )
-                        .focused($isSearchFieldFocused)
+                        .focused($focusedField, equals: .searchBar)
                         .submitLabel(.search)
                     }
                     
-                    // Scope Picker
-                    Picker("Search Scope", selection: $viewModel.selectedScope) {
-                        ForEach(SearchViewModel.SearchScope.allCases, id: \.self) { scope in
-                            Text(scope.rawValue).tag(scope)
+                    // Row B: Scope Picker (Tabs)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 15) {
+                            ForEach(SearchViewModel.SearchScope.allCases, id: \.self) { scope in
+                                Button(action: { viewModel.selectedScope = scope }) {
+                                    Text(scope.rawValue)
+                                        .font(CinemeltTheme.fontBody(20))
+                                        .foregroundColor(viewModel.selectedScope == scope ? .black : CinemeltTheme.cream)
+                                        .padding(.horizontal, 24)
+                                        .padding(.vertical, 10)
+                                        .background(
+                                            viewModel.selectedScope == scope ?
+                                            CinemeltTheme.accent : Color.white.opacity(0.1)
+                                        )
+                                        .cornerRadius(12)
+                                }
+                                .buttonStyle(CinemeltCardButtonStyle())
+                                .focused($focusedField, equals: .scope(scope))
+                            }
                         }
+                        .padding(5)
                     }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 500)
-                    .focused($focusedScope, equals: viewModel.selectedScope)
+                    .focusSection()
+                    
+                    // Row C: Smart Filters
+                    // We only show this if the user isn't in the "Discovery" state (query is empty),
+                    // OR if you prefer to always allow filtering, keep it visible.
+                    // Here we show it always to allow pre-filtering (e.g., "4K Only").
+                    SearchFilterBar(viewModel: viewModel)
+                        .padding(.top, 10)
+                        .focusSection()
                 }
-                .padding(.horizontal, 50)
-                .padding(.top, 40)
-                .padding(.bottom, 40)
+                .padding(50)
                 .background(
-                    LinearGradient(colors: [Color.black.opacity(0.8), Color.clear], startPoint: .top, endPoint: .bottom)
+                    LinearGradient(colors: [Color.black.opacity(0.9), Color.clear], startPoint: .top, endPoint: .bottom)
                 )
-                .focusSection() // FIX: Header block is now a distinct navigation target
+                .zIndex(2)
                 
-                // MARK: - Results
+                // MARK: - 2. Main Content Area
                 ScrollView {
                     VStack(alignment: .leading, spacing: 50) {
                         
+                        // A. Loading State
                         if viewModel.isLoading {
                             HStack {
                                 Spacer()
-                                ProgressView().tint(CinemeltTheme.accent).scaleEffect(2.0)
+                                CinemeltLoadingIndicator().scaleEffect(1.5)
                                 Spacer()
                             }
                             .padding(.top, 100)
-                        } else if viewModel.query.isEmpty {
-                            emptyStateView
-                        } else if viewModel.hasNoResults {
-                            noResultsView
-                        } else {
-                            if viewModel.selectedScope == .library {
-                                libraryResults
-                            } else {
-                                liveTvResults
-                            }
+                        }
+                        // B. Zero State (Discovery Engine)
+                        else if viewModel.query.isEmpty {
+                            SearchDiscoveryView(
+                                viewModel: viewModel,
+                                onTagSelected: { tag in
+                                    viewModel.query = tag
+                                }
+                            )
+                            .transition(.opacity)
+                        }
+                        // C. No Results
+                        else if viewModel.hasNoResults {
+                            noResultsPlaceholder
+                        }
+                        // D. Results
+                        else {
+                            resultsContent
                         }
                     }
                     .padding(.horizontal, 50)
                     .padding(.bottom, 100)
                 }
+                .focusSection()
             }
         }
         .onAppear {
             viewModel.configure(repository: repository)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                isSearchFieldFocused = true
+                if focusedField == nil { focusedField = .searchBar }
             }
         }
     }
     
-    // MARK: - View Components
+    // MARK: - Result Views
     
-    private var emptyStateView: some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 20) {
-                Image(systemName: "sparkle.magnifyingglass")
-                    .font(.system(size: 80))
-                    .foregroundColor(CinemeltTheme.accent.opacity(0.3))
-                Text("What are we watching?")
-                    .font(CinemeltTheme.fontTitle(36))
-                    .foregroundColor(CinemeltTheme.cream)
-                Text("Search for content across your library.")
-                    .font(CinemeltTheme.fontBody(20))
-                    .foregroundColor(.gray)
+    private var resultsContent: some View {
+        LazyVStack(alignment: .leading, spacing: 60) {
+            
+            // 1. Person Spotlight (Circular)
+            if let person = viewModel.personMatch, !viewModel.personCredits.isEmpty {
+                VStack(alignment: .center, spacing: 20) {
+                    // Circular Profile Image
+                    if let path = person.profilePath, let url = URL(string: "https://image.tmdb.org/t/p/w400\(path)") {
+                        AsyncImage(url: url) { img in
+                            img.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Circle().fill(Color.white.opacity(0.1))
+                        }
+                        .frame(width: 180, height: 180)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(CinemeltTheme.accent, lineWidth: 4))
+                        .shadow(color: CinemeltTheme.accent.opacity(0.5), radius: 20)
+                    }
+                    
+                    VStack(spacing: 5) {
+                        Text(person.name)
+                            .font(CinemeltTheme.fontTitle(40))
+                            .foregroundColor(CinemeltTheme.cream)
+                            .cinemeltGlow()
+                        
+                        Text("Known for \(person.role)")
+                            .font(CinemeltTheme.fontBody(20))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    // The "Collection" Rail
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: 40) {
+                            ForEach(viewModel.personCredits) { channel in
+                                MovieCard(channel: channel) { onPlay(channel) }
+                                    .focused($focusedField, equals: .result(channel.id))
+                            }
+                        }
+                        .padding(.horizontal, 40)
+                        .padding(.vertical, 40)
+                    }
+                    .focusSection()
+                }
+                .padding(.vertical, 20)
+                .background(Color.white.opacity(0.03))
+                .cornerRadius(20)
             }
-            Spacer()
+            
+            // 2. Movies
+            if !viewModel.movies.isEmpty {
+                ResultSection(title: "Movies", items: viewModel.movies, onPlay: onPlay)
+            }
+            
+            // 3. Series
+            if !viewModel.series.isEmpty {
+                ResultSection(title: "Series", items: viewModel.series, onPlay: onPlay)
+            }
+            
+            // 4. Live TV
+            if !viewModel.liveChannels.isEmpty {
+                ResultSection(title: "Live Channels", items: viewModel.liveChannels, onPlay: onPlay)
+            }
         }
-        .padding(.top, 100)
     }
     
-    private var noResultsView: some View {
+    // MARK: - Placeholders
+    
+    private var noResultsPlaceholder: some View {
         HStack {
             Spacer()
             VStack(spacing: 15) {
-                Image(systemName: "exclamationmark.magnifyingglass")
+                Image(systemName: "eye.slash.fill")
                     .font(.system(size: 60))
                     .foregroundColor(.gray)
                 Text("No matches found")
                     .font(CinemeltTheme.fontTitle(28))
                     .foregroundColor(CinemeltTheme.cream)
+                Text("Try adjusting filters or search terms.")
+                    .font(CinemeltTheme.fontBody(20))
+                    .foregroundColor(.gray)
             }
             Spacer()
         }
         .padding(.top, 80)
     }
-    
-    @ViewBuilder
-    private var libraryResults: some View {
-        if !viewModel.movies.isEmpty {
-            ResultSection(title: "Movies", items: viewModel.movies, onPlay: onPlay)
-        }
-        if !viewModel.series.isEmpty {
-            ResultSection(title: "Series", items: viewModel.series, onPlay: onPlay)
-        }
-    }
-    
-    @ViewBuilder
-    private var liveTvResults: some View {
-        if !viewModel.liveCategories.isEmpty {
-            VStack(alignment: .leading, spacing: 15) {
-                Text("Matching Categories")
-                    .font(CinemeltTheme.fontTitle(28))
-                    .foregroundColor(CinemeltTheme.accent)
-                    .padding(.leading, 10)
-                
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 20) {
-                        ForEach(viewModel.liveCategories, id: \.self) { category in
-                            Button(action: {
-                                withAnimation { viewModel.refineSearch(to: category) }
-                            }) {
-                                Text(category)
-                                    .font(CinemeltTheme.fontBody(20))
-                                    .fontWeight(.medium)
-                                    .foregroundColor(CinemeltTheme.cream)
-                                    .padding(.horizontal, 24)
-                                    .padding(.vertical, 12)
-                                    .background(Color.white.opacity(0.1))
-                                    .cornerRadius(12)
-                            }
-                            .buttonStyle(.card)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 20)
-                }
-                .focusSection() // FIX: Categories list is a solid block
-            }
-        }
-        
-        if !viewModel.liveChannels.isEmpty {
-            VStack(alignment: .leading, spacing: 25) {
-                Text("Channels")
-                    .font(CinemeltTheme.fontTitle(32))
-                    .foregroundColor(CinemeltTheme.cream)
-                    .cinemeltGlow()
-                
-                LazyVGrid(columns: channelGridColumns, spacing: 50) {
-                    ForEach(viewModel.liveChannels) { channel in
-                        Button(action: { onPlay(channel) }) {
-                            VStack(spacing: 15) {
-                                AsyncImage(url: URL(string: channel.cover ?? "")) { image in
-                                    image.resizable().aspectRatio(contentMode: .fit)
-                                } placeholder: {
-                                    Image(systemName: "tv").font(.system(size: 40)).foregroundColor(.gray.opacity(0.3))
-                                }
-                                .frame(width: 120, height: 120)
-                                .background(Color.white.opacity(0.05))
-                                .cornerRadius(20)
-                                .shadow(radius: 5)
-                                
-                                Text(channel.title)
-                                    .font(CinemeltTheme.fontBody(18))
-                                    .foregroundColor(CinemeltTheme.cream)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.center)
-                            }
-                        }
-                        .buttonStyle(.card)
-                        .padding(10)
-                    }
-                }
-                .padding(.bottom, 40)
-                .focusSection() // FIX: Channel Grid is a solid block
-            }
-        }
-    }
 }
-
-struct ResultSection: View {
-    let title: String
-    let items: [Channel]
-    let onPlay: (Channel) -> Void
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            Text(title).font(CinemeltTheme.fontTitle(32)).foregroundColor(CinemeltTheme.cream)
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 40) {
-                    ForEach(items) { item in
-                        MovieCard(channel: item, onClick: { onPlay(item) })
-                    }
-                }
-                .padding(.vertical, 40)
-                .padding(.horizontal, 20)
-            }
-            .focusSection() // FIX: Result rows are solid blocks
-        }
-    }
-}
-

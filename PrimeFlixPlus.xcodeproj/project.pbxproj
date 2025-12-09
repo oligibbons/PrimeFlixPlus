@@ -87,6 +87,9 @@
 		D2AC8B542EE781F500D440C3 /* MiniDetailsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B532EE781F500D440C3 /* MiniDetailsOverlay.swift */; };
 		D2AC8B562EE7822800D440C3 /* SelectionOverlays.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B552EE7822800D440C3 /* SelectionOverlays.swift */; };
 		D2AC8B592EE784F100D440C3 /* PlayerSharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B582EE784F100D440C3 /* PlayerSharedComponents.swift */; };
+		D2AC8B5B2EE7FE7700D440C3 /* SearchDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B5A2EE7FE7600D440C3 /* SearchDiscoveryView.swift */; };
+		D2AC8B5D2EE7FEB700D440C3 /* SearchFilterBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B5C2EE7FEB700D440C3 /* SearchFilterBar.swift */; };
+		D2AC8B5F2EE8001600D440C3 /* SearchUIComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B5E2EE8001600D440C3 /* SearchUIComponents.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -207,6 +210,9 @@
 		D2AC8B532EE781F500D440C3 /* MiniDetailsOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniDetailsOverlay.swift; sourceTree = "<group>"; };
 		D2AC8B552EE7822800D440C3 /* SelectionOverlays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionOverlays.swift; sourceTree = "<group>"; };
 		D2AC8B582EE784F100D440C3 /* PlayerSharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSharedComponents.swift; sourceTree = "<group>"; };
+		D2AC8B5A2EE7FE7600D440C3 /* SearchDiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchDiscoveryView.swift; sourceTree = "<group>"; };
+		D2AC8B5C2EE7FEB700D440C3 /* SearchFilterBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchFilterBar.swift; sourceTree = "<group>"; };
+		D2AC8B5E2EE8001600D440C3 /* SearchUIComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchUIComponents.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -382,6 +388,7 @@
 				D292D6742EDF4C1800E8845A /* MovieCard.swift */,
 				D292D6762EDF4C3300E8845A /* HomeComponents.swift */,
 				D2AC8AFF2EE148C100D440C3 /* EpisodeCard.swift */,
+				D2AC8B5E2EE8001600D440C3 /* SearchUIComponents.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -408,6 +415,8 @@
 				D2AC8B2C2EE481D100D440C3 /* NetworkSpeedTestView.swift */,
 				D2AC8B322EE488ED00D440C3 /* VPNWarningView.swift */,
 				D2AC8B382EE49D7B00D440C3 /* OnboardingView.swift */,
+				D2AC8B5A2EE7FE7600D440C3 /* SearchDiscoveryView.swift */,
+				D2AC8B5C2EE7FEB700D440C3 /* SearchFilterBar.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -613,10 +622,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D2AC8B5D2EE7FEB700D440C3 /* SearchFilterBar.swift in Sources */,
 				D292D6722EDF4B7B00E8845A /* HomeViewModel.swift in Sources */,
 				D2AC8B4C2EE6E60D00D440C3 /* OmdbClient.swift in Sources */,
 				D2AC8B3B2EE4A03100D440C3 /* TasteProfile.swift in Sources */,
 				D2AC8B462EE625D000D440C3 /* SyncEngine.swift in Sources */,
+				D2AC8B5F2EE8001600D440C3 /* SearchUIComponents.swift in Sources */,
 				D2AC8AF62EE0ADE900D440C3 /* SearchViewModel.swift in Sources */,
 				D2AC8B522EE7819600D440C3 /* ControlsOverlayView.swift in Sources */,
 				D2AC8AFE2EE1475700D440C3 /* GlassTextField.swift in Sources */,
@@ -650,6 +661,7 @@
 				D292D65A2EDF46EA00E8845A /* WatchProgress.swift in Sources */,
 				D2AC8B092EE1FAE000D440C3 /* ContinueWatchingViewModel.swift in Sources */,
 				D292D6542EDF45FE00E8845A /* XtreamModels.swift in Sources */,
+				D2AC8B5B2EE7FE7700D440C3 /* SearchDiscoveryView.swift in Sources */,
 				D2AC8B352EE49CD300D440C3 /* UserPreferencesRepository.swift in Sources */,
 				D2AC8AFC2EE141AE00D440C3 /* SidebarView.swift in Sources */,
 				D2AC8B442EE625AF00D440C3 /* NextEpisodeService.swift in Sources */,

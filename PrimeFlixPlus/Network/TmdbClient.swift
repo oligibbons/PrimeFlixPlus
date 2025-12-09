@@ -104,6 +104,24 @@ actor TmdbClient {
         return response.results
     }
     
+    // MARK: - Person Search (Actors/Directors)
+    
+    func searchPerson(query: String) async throws -> [TmdbPersonResult] {
+        let params = [
+            "query": query,
+            "include_adult": "false",
+            "language": "en-US",
+            "page": "1"
+        ]
+        let response: TmdbSearchResponse<TmdbPersonResult> = try await fetch("/search/person", params: params)
+        return response.results
+    }
+    
+    func getPersonCredits(personId: Int) async throws -> TmdbPersonCredits {
+        let params = ["language": "en-US"]
+        return try await fetch("/person/\(personId)/combined_credits", params: params)
+    }
+    
     // MARK: - Core Fetch
     
     private func fetch<T: Decodable>(_ endpoint: String, params: [String: String]) async throws -> T {
@@ -287,4 +305,32 @@ struct TmdbSeason: Decodable, Identifiable {
     let seasonNumber: Int
     let episodeCount: Int
     let posterPath: String?
+}
+
+// MARK: - Person Models (New)
+
+struct TmdbPersonResult: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let profilePath: String?
+    let knownForDepartment: String?
+    
+    var role: String { knownForDepartment ?? "Artist" }
+}
+
+struct TmdbPersonCredits: Decodable {
+    let cast: [TmdbCreditItem]
+    let crew: [TmdbCreditItem]
+}
+
+struct TmdbCreditItem: Decodable, Identifiable {
+    let id: Int
+    let title: String?
+    let name: String?
+    let posterPath: String?
+    let job: String?
+    let character: String?
+    let popularity: Double?
+    
+    var displayTitle: String { title ?? name ?? "" }
 }
