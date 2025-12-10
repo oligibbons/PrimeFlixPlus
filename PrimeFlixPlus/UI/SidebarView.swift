@@ -19,6 +19,7 @@ struct SidebarView: View {
         (.home, "house.fill", "Home"),
         (.continueWatching, "play.tv.fill", "Watching"),
         (.favorites, "heart.fill", "Favorites"),
+        (.watchlist, "bookmark.fill", "Watch List"), // NEW: Watch List
         (.search, "magnifyingglass", "Search"),
         (.settings, "gearshape.fill", "Settings"),
         (.addPlaylist, "person.badge.plus", "Profiles")
@@ -59,7 +60,7 @@ struct SidebarView: View {
                 .padding(.top, 50)
                 .padding(.bottom, 40)
                 
-                // 3. Navigation Items (FIXED: Wrapped in ScrollView and focusedSection)
+                // 3. Navigation Items
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 20) {
                         ForEach(menuItems, id: \.destination.hashValue) { item in
@@ -112,7 +113,6 @@ struct SidebarView: View {
                         }
                     }
                     .padding(.horizontal, 16) // Padding around the button stack
-                    // FIX: Explicitly set focus boundary for sidebar list
                     .focusSection()
                 }
                 
@@ -121,7 +121,7 @@ struct SidebarView: View {
                 // 4. Footer
                 if isExpanded {
                     VStack(spacing: 5) {
-                        Text("PrimeFlix")
+                        Text("Cinemelt")
                             .font(CinemeltTheme.fontBody(16))
                             .foregroundColor(CinemeltTheme.cream)
                         Text("v1.2.0")

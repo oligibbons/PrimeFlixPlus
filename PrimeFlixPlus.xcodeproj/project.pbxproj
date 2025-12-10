@@ -93,6 +93,8 @@
 		D2AC8B632EE9E5A800D440C3 /* LiveTVViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B622EE9E5A800D440C3 /* LiveTVViewModel.swift */; };
 		D2AC8B652EE9E67100D440C3 /* LiveTVView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B642EE9E67100D440C3 /* LiveTVView.swift */; };
 		D2AC8B672EE9E6CF00D440C3 /* EpgGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B662EE9E6CF00D440C3 /* EpgGridView.swift */; };
+		D2AC8B692EE9F86C00D440C3 /* WatchlistViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B682EE9F86C00D440C3 /* WatchlistViewModel.swift */; };
+		D2AC8B6B2EE9F8A500D440C3 /* WatchlistView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B6A2EE9F8A500D440C3 /* WatchlistView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -219,6 +221,8 @@
 		D2AC8B622EE9E5A800D440C3 /* LiveTVViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTVViewModel.swift; sourceTree = "<group>"; };
 		D2AC8B642EE9E67100D440C3 /* LiveTVView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTVView.swift; sourceTree = "<group>"; };
 		D2AC8B662EE9E6CF00D440C3 /* EpgGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpgGridView.swift; sourceTree = "<group>"; };
+		D2AC8B682EE9F86C00D440C3 /* WatchlistViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchlistViewModel.swift; sourceTree = "<group>"; };
+		D2AC8B6A2EE9F8A500D440C3 /* WatchlistView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchlistView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -385,6 +389,7 @@
 				D2AC8B2E2EE4828C00D440C3 /* NetworkSpeedTester.swift */,
 				D2AC8B362EE49D5C00D440C3 /* OnboardingViewModel.swift */,
 				D2AC8B622EE9E5A800D440C3 /* LiveTVViewModel.swift */,
+				D2AC8B682EE9F86C00D440C3 /* WatchlistViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -425,6 +430,7 @@
 				D2AC8B5A2EE7FE7600D440C3 /* SearchDiscoveryView.swift */,
 				D2AC8B642EE9E67100D440C3 /* LiveTVView.swift */,
 				D2AC8B662EE9E6CF00D440C3 /* EpgGridView.swift */,
+				D2AC8B6A2EE9F8A500D440C3 /* WatchlistView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -643,6 +649,7 @@
 				D292D6802EDF56AF00E8845A /* SettingsView.swift in Sources */,
 				D228AD132EDF66A3007C6114 /* AddPlaylistView.swift in Sources */,
 				D292D6772EDF4C3300E8845A /* HomeComponents.swift in Sources */,
+				D2AC8B692EE9F86C00D440C3 /* WatchlistViewModel.swift in Sources */,
 				D292D6642EDF49C900E8845A /* Programme.swift in Sources */,
 				D2AC8B632EE9E5A800D440C3 /* LiveTVViewModel.swift in Sources */,
 				D292D6522EDF45C000E8845A /* DataSource.swift in Sources */,
@@ -655,6 +662,7 @@
 				D2AC8B072EE1B8F400D440C3 /* SplashView.swift in Sources */,
 				D228AD0B2EDF5A22007C6114 /* Persistence.swift in Sources */,
 				D292D66F2EDF4B4100E8845A /* PrimeFlixRepository.swift in Sources */,
+				D2AC8B6B2EE9F8A500D440C3 /* WatchlistView.swift in Sources */,
 				D292D6842EDF576500E8845A /* PlayerView.swift in Sources */,
 				D2AC8B592EE784F100D440C3 /* PlayerSharedComponents.swift in Sources */,
 				D2AC8B562EE7822800D440C3 /* SelectionOverlays.swift in Sources */,

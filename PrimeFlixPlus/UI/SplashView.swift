@@ -2,24 +2,23 @@ import SwiftUI
 import CoreData
 
 struct SplashView: View {
-    // FIX: Replaced direct initialization with EnvironmentObject where appropriate,
-    // or kept StateObject if this is the root owner.
-    // Given PrimeFlixPlusApp creates the repo, we should ideally access it via .environmentObject,
-    // but since this view initializes the app state, keeping StateObject here or passing it down is key.
-    // Based on App structure, we will use the property wrapper as defined previously but ensure it passes data correctly.
-    
-    // NOTE: In the main App file, you likely initialize this.
-    // For this specific view to work as a switcher:
     @EnvironmentObject var repository: PrimeFlixRepository
     
+    // Internal Routing State
     @State private var isActive: Bool = false
     @State private var showSmartLoading: Bool = false
+    
+    // Animation States
+    @State private var logoScale: CGFloat = 0.6
+    @State private var logoOpacity: Double = 0.0
+    @State private var textOpacity: Double = 0.0
+    @State private var glowOpacity: Double = 0.4
     
     var body: some View {
         ZStack {
             if isActive {
+                // Logic to switch views once splash is done
                 if repository.getAllPlaylists().isEmpty {
-                    // FIX: Added missing arguments for repository and callbacks
                     AddPlaylistView(
                         repository: repository,
                         onPlaylistAdded: {
@@ -34,7 +33,6 @@ struct SplashView: View {
                         SmartLoadingView()
                             .transition(.opacity)
                     } else {
-                        // FIX: Updated onSearch closure signature
                         HomeView(
                             onPlayChannel: { _ in },
                             onAddPlaylist: {},
@@ -45,26 +43,66 @@ struct SplashView: View {
                     }
                 }
             } else {
-                // Logo Splash
+                // MARK: - Animated Splash Screen
                 ZStack {
+                    // 1. Background
                     CinemeltTheme.mainBackground.ignoresSafeArea()
                     
-                    Image("CinemeltLogo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 400)
-                        .cinemeltGlow()
+                    VStack(spacing: 40) {
+                        // 2. Animated Logo
+                        ZStack {
+                            // Outer Glow Pulse
+                            Image("CinemeltLogo")
+                                .resizable()
+                                .renderingMode(.template)
+                                .aspectRatio(contentMode: .fit)
+                                .foregroundColor(CinemeltTheme.accent)
+                                .frame(width: 420)
+                                .blur(radius: 40)
+                                .opacity(glowOpacity)
+                            
+                            // Main Logo
+                            Image("CinemeltLogo")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 400)
+                                .cinemeltGlow()
+                        }
+                        .scaleEffect(logoScale)
+                        .opacity(logoOpacity)
+                        
+                        // 3. Welcome Text
+                        VStack(spacing: 15) {
+                            Text("PrimeFlix+")
+                                .font(CinemeltTheme.fontTitle(70))
+                                .foregroundColor(CinemeltTheme.cream)
+                                .shadow(color: CinemeltTheme.accent.opacity(0.5), radius: 10, x: 0, y: 5)
+                            
+                            Text("The Ultimate Streaming Experience")
+                                .font(CinemeltTheme.fontBody(28))
+                                .foregroundColor(CinemeltTheme.cream.opacity(0.6))
+                                .tracking(2) // Cinematic letter spacing
+                        }
+                        .opacity(textOpacity)
+                        .offset(y: textOpacity == 1.0 ? 0 : 20) // Slight slide-up effect
+                    }
                 }
+                // Metal rendering for smooth 4K animation
+                .drawingGroup()
             }
         }
         .onAppear {
-            // 1. Kick off the smart sync
+            // 1. Trigger Animations
+            startAnimations()
+            
+            // 2. Kick off the smart sync (Data Pre-loading)
             Task {
                 await repository.syncAll(force: false)
             }
             
-            // 2. Handle UI Transition
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            // 3. Handle UI Transition to App
+            // Note: If PrimeFlixPlusApp.swift controls the delay, this acts as a fallback or internal router
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                 withAnimation {
                     self.isActive = true
                 }
@@ -73,8 +111,25 @@ struct SplashView: View {
         }
     }
     
+    private func startAnimations() {
+        // A. Logo Pop
+        withAnimation(.spring(response: 0.8, dampingFraction: 0.6)) {
+            logoScale = 1.0
+            logoOpacity = 1.0
+        }
+        
+        // B. Text Fade In (Staggered)
+        withAnimation(.easeOut(duration: 0.8).delay(0.4)) {
+            textOpacity = 1.0
+        }
+        
+        // C. Continuous Glow Pulse
+        withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
+            glowOpacity = 0.8
+        }
+    }
+    
     private func checkSyncStatus() {
-        // FIX: Replaced 'timer in' with '_' to silence warning
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
             if repository.isInitialSync {
                 withAnimation { self.showSmartLoading = true }

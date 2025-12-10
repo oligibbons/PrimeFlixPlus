@@ -91,6 +91,10 @@ class PrimeFlixRepository: ObservableObject {
         return channelRepo.getFavorites(type: type)
     }
     
+    func getWatchlist(type: String) -> [Channel] {
+        return channelRepo.getWatchlist(type: type)
+    }
+    
     func getRecentlyAdded(type: String, limit: Int) -> [Channel] {
         return channelRepo.getRecentlyAdded(type: type, limit: limit)
     }
@@ -271,11 +275,37 @@ class PrimeFlixRepository: ObservableObject {
         }.value
     }
     
-    // MARK: - Legacy Passthroughs
+    // MARK: - State Mutators (Context-Safe)
     
+    /// Safely toggles Favorite status on the View Context to ensure persistence.
+    /// Handles objects passed from background contexts by using their ID.
     func toggleFavorite(_ channel: Channel) {
-        channelRepo.toggleFavorite(channel)
-        try? container.viewContext.save()
+        let oid = channel.objectID
+        let context = container.viewContext
+        
+        context.perform {
+            if let managedObject = try? context.existingObject(with: oid) as? Channel {
+                managedObject.isFavorite.toggle()
+                try? context.save()
+            }
+        }
+        // Notify UI immediately
+        self.objectWillChange.send()
+    }
+    
+    /// Safely toggles Watch List status on the View Context to ensure persistence.
+    /// Handles objects passed from background contexts by using their ID.
+    func toggleWatchlist(_ channel: Channel) {
+        let oid = channel.objectID
+        let context = container.viewContext
+        
+        context.perform {
+            if let managedObject = try? context.existingObject(with: oid) as? Channel {
+                managedObject.inWatchlist.toggle()
+                try? context.save()
+            }
+        }
+        // Notify UI immediately
         self.objectWillChange.send()
     }
     

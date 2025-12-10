@@ -6,6 +6,7 @@ enum NavigationDestination: Hashable {
     case search
     case continueWatching
     case favorites
+    case watchlist // NEW: Watch List
     case details(Channel)
     case player(Channel)
     case settings
@@ -18,6 +19,7 @@ enum NavigationDestination: Hashable {
         case (.search, .search): return true
         case (.continueWatching, .continueWatching): return true
         case (.favorites, .favorites): return true
+        case (.watchlist, .watchlist): return true // NEW
         case (.settings, .settings): return true
         case (.addPlaylist, .addPlaylist): return true
         case (.speedTest, .speedTest): return true
@@ -42,6 +44,7 @@ enum NavigationDestination: Hashable {
         case .continueWatching: hasher.combine(6)
         case .favorites: hasher.combine(7)
         case .speedTest: hasher.combine(8)
+        case .watchlist: hasher.combine(9) // NEW
         }
     }
 }
@@ -92,7 +95,6 @@ struct ContentView: View, Equatable {
                     )
                     
                 case .search:
-                    // FIX: Passed 'repository' here to fix the Missing Argument error
                     SearchView(
                         repository: repository,
                         onPlay: { channel in navigateToContent(channel) },
@@ -107,6 +109,13 @@ struct ContentView: View, Equatable {
                 
                 case .favorites:
                     FavoritesView(
+                        onPlay: { channel in navigateToContent(channel) },
+                        onBack: { goBack() }
+                    )
+                    
+                case .watchlist:
+                    // NEW: Watch List View
+                    WatchlistView(
                         onPlay: { channel in navigateToContent(channel) },
                         onBack: { goBack() }
                     )

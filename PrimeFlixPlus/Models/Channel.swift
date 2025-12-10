@@ -16,6 +16,9 @@ public class Channel: NSManagedObject, Identifiable {
     @NSManaged public var addedAt: Date?
     @NSManaged public var isFavorite: Bool
     
+    // NEW: Watch List support
+    @NSManaged public var inWatchlist: Bool
+    
     // Structured Series Data
     @NSManaged public var seriesId: String?
     @NSManaged public var season: Int16
@@ -58,6 +61,7 @@ public class Channel: NSManagedObject, Identifiable {
         self.quality = quality
         self.addedAt = Date()
         self.isFavorite = false
+        self.inWatchlist = false // Default
         
         self.seriesId = seriesId
         self.season = Int16(season)

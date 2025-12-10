@@ -14,6 +14,7 @@ class DetailsViewModel: ObservableObject {
     
     // --- UI State ---
     @Published var isFavorite: Bool = false
+    @Published var isInWatchlist: Bool = false // NEW: Watch List State
     @Published var isLoading: Bool = true
     @Published var backgroundUrl: URL?
     @Published var posterUrl: URL?
@@ -82,6 +83,7 @@ class DetailsViewModel: ObservableObject {
     init(channel: Channel) {
         self.channel = channel
         self.isFavorite = channel.isFavorite
+        self.isInWatchlist = channel.inWatchlist // Init Watch List state
         if let cover = channel.cover {
             self.posterUrl = URL(string: cover)
             self.backgroundUrl = URL(string: cover)
@@ -538,6 +540,12 @@ class DetailsViewModel: ObservableObject {
     func toggleFavorite() {
         repository?.toggleFavorite(channel)
         self.isFavorite.toggle()
+    }
+    
+    // NEW: Watch List Toggle
+    func toggleWatchlist() {
+        repository?.toggleWatchlist(channel)
+        self.isInWatchlist.toggle()
     }
     
     func onPlaySmartTarget() {

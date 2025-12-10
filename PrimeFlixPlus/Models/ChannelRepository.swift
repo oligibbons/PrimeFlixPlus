@@ -28,6 +28,10 @@ class ChannelRepository {
         // Context save is handled by the caller (PrimeFlixRepository)
     }
     
+    func toggleWatchlist(_ channel: Channel) {
+        channel.inWatchlist.toggle()
+    }
+    
     // MARK: - Core Search Methods
     
     /// Searches Library (Movies & Series).
@@ -185,6 +189,22 @@ class ChannelRepository {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "isFavorite == YES AND type == %@", type)
         request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        return deduplicate(channels: (try? context.fetch(request)) ?? [], isSeries: type == "series")
+    }
+    
+    func getWatchlist(type: String) -> [Channel] {
+        let request = NSFetchRequest<Channel>(entityName: "Channel")
+        
+        // FIX: Ensure we catch episodes when asking for "series"
+        // This fixes the bug where adding an episode didn't show up in the Series list
+        if type == "series" {
+            request.predicate = NSPredicate(format: "inWatchlist == YES AND (type == 'series' OR type == 'series_episode')")
+        } else {
+            request.predicate = NSPredicate(format: "inWatchlist == YES AND type == %@", type)
+        }
+        
+        request.sortDescriptors = [NSSortDescriptor(key: "addedAt", ascending: false)] // Sort by most recently added
+        
         return deduplicate(channels: (try? context.fetch(request)) ?? [], isSeries: type == "series")
     }
     

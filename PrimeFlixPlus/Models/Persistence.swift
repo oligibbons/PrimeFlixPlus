@@ -37,12 +37,15 @@ struct PersistenceController {
             NSAttributeDescription(name: "addedAt", type: .dateAttributeType),
             NSAttributeDescription(name: "isFavorite", type: .booleanAttributeType),
             
+            // NEW: Watch List Feature
+            NSAttributeDescription(name: "inWatchlist", type: .booleanAttributeType),
+            
             // Structured Series Metadata
             NSAttributeDescription(name: "seriesId", type: .stringAttributeType),
             NSAttributeDescription(name: "season", type: .integer16AttributeType),
             NSAttributeDescription(name: "episode", type: .integer16AttributeType),
             
-            // NEW: Enhanced Metadata Properties
+            // Enhanced Metadata Properties
             NSAttributeDescription(name: "episodeName", type: .stringAttributeType), // "Pilot"
             NSAttributeDescription(name: "overview", type: .stringAttributeType),    // Synopsis
             NSAttributeDescription(name: "backdrop", type: .stringAttributeType)     // 16:9 Image

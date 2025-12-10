@@ -12,6 +12,8 @@ struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @EnvironmentObject var repository: PrimeFlixRepository
     
+    // Callbacks provided by parent (ContentView)
+    // Kept for API compatibility, even if unused in this View now
     var onPlayChannel: (Channel) -> Void
     var onAddPlaylist: () -> Void
     var onSettings: () -> Void
@@ -24,13 +26,11 @@ struct HomeView: View {
     @State private var showEpgGrid: Bool = false
     
     // FOCUS MANAGEMENT (LIFTED)
-    // We lift the focus state here so we can force focus back to tabs on "Menu" press
     @FocusState private var focusedField: HomeFocusField?
     
     enum HomeFocusField: Hashable {
         case tab(StreamType)
         case content // General content focus
-        case headerButton(String) // Search/Settings
     }
     
     var body: some View {
@@ -138,13 +138,10 @@ struct HomeView: View {
             
             VStack(alignment: .leading, spacing: 10) {
                 
-                // Header
+                // Header (Cleaned up: No icons)
                 HomeHeaderView(
                     greeting: viewModel.timeGreeting,
-                    title: viewModel.witGreeting,
-                    onSearch: { onSearch(viewModel.selectedTab) },
-                    onSettings: onSettings,
-                    focusedField: _focusedField
+                    title: viewModel.witGreeting
                 )
                 .focusSection()
                 
@@ -192,11 +189,6 @@ struct HomeView: View {
 struct HomeHeaderView: View {
     let greeting: String
     let title: String
-    var onSearch: () -> Void
-    var onSettings: () -> Void
-    
-    // Bind to parent focus
-    @FocusState var focusedField: HomeView.HomeFocusField?
     
     var body: some View {
         HStack(alignment: .bottom) {
@@ -212,35 +204,7 @@ struct HomeHeaderView: View {
             }
             Spacer()
             
-            // Action Buttons
-            HStack(spacing: 20) {
-                Button(action: onSearch) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.title2)
-                        .foregroundColor(focusedField == .headerButton("search") ? .black : CinemeltTheme.cream)
-                        .padding(15)
-                        .background(
-                            Circle()
-                                .fill(focusedField == .headerButton("search") ? CinemeltTheme.accent : Color.white.opacity(0.1))
-                        )
-                }
-                .buttonStyle(.card)
-                .focused($focusedField, equals: .headerButton("search"))
-                
-                Button(action: onSettings) {
-                    Image(systemName: "gearshape.fill")
-                        .font(.title2)
-                        .foregroundColor(focusedField == .headerButton("settings") ? .black : CinemeltTheme.cream)
-                        .padding(15)
-                        .background(
-                            Circle()
-                                .fill(focusedField == .headerButton("settings") ? CinemeltTheme.accent : Color.white.opacity(0.1))
-                        )
-                }
-                .buttonStyle(.card)
-                .focused($focusedField, equals: .headerButton("settings"))
-            }
-            .padding(.bottom, 10)
+            // Note: Search/Settings buttons removed as they are accessible via Sidebar
         }
         .padding(.top, 50)
         .padding(.horizontal, 80)

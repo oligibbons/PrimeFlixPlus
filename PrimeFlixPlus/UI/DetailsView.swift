@@ -21,7 +21,7 @@ struct DetailsView: View {
     
     enum FocusField: Hashable {
         case description
-        case play, favorite, version
+        case play, watchlist, favorite, version // Added watchlist
         case season(Int)
         case episode(String)
         case cast(Int)
@@ -249,6 +249,18 @@ struct DetailsView: View {
             }
             .buttonStyle(CinemeltCardButtonStyle())
             .focused($focusedField, equals: .play)
+            
+            // Watch List Button (New)
+            Button(action: { viewModel.toggleWatchlist() }) {
+                Image(systemName: viewModel.isInWatchlist ? "bookmark.fill" : "bookmark")
+                    .font(.system(size: 30))
+                    .foregroundColor(viewModel.isInWatchlist ? CinemeltTheme.accent : .white)
+                    .padding(22)
+                    .background(Color.white.opacity(0.1))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(CinemeltCardButtonStyle())
+            .focused($focusedField, equals: .watchlist)
             
             // Favorite Button
             Button(action: { viewModel.toggleFavorite() }) {
