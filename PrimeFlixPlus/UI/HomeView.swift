@@ -19,14 +19,23 @@ struct HomeView: View {
     
     @State private var heroChannel: Channel?
     
-    // Navigation State
+    // Navigation & Focus State
     @State private var scrollOffset: CGFloat = 0
     @State private var showEpgGrid: Bool = false
     
+    // FOCUS MANAGEMENT (LIFTED)
+    // We lift the focus state here so we can force focus back to tabs on "Menu" press
+    @FocusState private var focusedField: HomeFocusField?
+    
+    enum HomeFocusField: Hashable {
+        case tab(StreamType)
+        case content // General content focus
+        case headerButton(String) // Search/Settings
+    }
+    
     var body: some View {
         ZStack {
-            // 1. Dynamic Background Layer (Parallax for VOD)
-            // We keep this global so transitions between tabs feel grounded
+            // 1. Dynamic Background Layer
             HomeBackgroundView(heroChannel: heroChannel, scrollOffset: scrollOffset)
             
             // 2. Main Content Switcher
@@ -46,7 +55,7 @@ struct HomeView: View {
                 .transition(.move(edge: .bottom))
                 .zIndex(10)
             } else if let categoryTitle = viewModel.drillDownCategory {
-                // Category Drill Down (Movies/Series)
+                // Category Drill Down
                 HomeDrillDownView(
                     title: categoryTitle,
                     channels: viewModel.displayedGridChannels,
@@ -69,16 +78,24 @@ struct HomeView: View {
         }
         .animation(.easeInOut(duration: 0.4), value: viewModel.drillDownCategory)
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showEpgGrid)
-        .onAppear { viewModel.configure(repository: repository) }
+        .onAppear {
+            viewModel.configure(repository: repository)
+            // Default focus to the movie tab on load
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if focusedField == nil {
+                    focusedField = .tab(.movie)
+                }
+            }
+        }
     }
     
-    // MARK: - Live TV Interface (Pinned Filter Bar)
+    // MARK: - Live TV Interface
     var liveTvInterface: some View {
         VStack(spacing: 0) {
             // Pinned Filter Bar
-            // We pin it to the top so it doesn't scroll away, giving quick access to switch back to Movies
             HomeFilterBar(
                 selectedTab: viewModel.selectedTab,
+                focusedField: _focusedField,
                 onSelect: { tab in viewModel.selectTab(tab) }
             )
             .padding(.top, 40)
@@ -90,17 +107,23 @@ struct HomeView: View {
                     endPoint: .bottom
                 )
             )
-            .zIndex(2) // Ensure it floats above the list
+            .zIndex(2)
             
             // The Live Dashboard
             LiveTVView(
                 onPlay: onPlayChannel,
                 onGuide: { withAnimation { showEpgGrid = true } }
             )
+            // MENU BUTTON HANDLER: Return to Tabs
+            .onExitCommand {
+                withAnimation {
+                    focusedField = .tab(viewModel.selectedTab)
+                }
+            }
         }
     }
     
-    // MARK: - Main Feed (Movies/Series - Scrolling Header)
+    // MARK: - Main Feed (Movies/Series)
     var mainFeed: some View {
         ScrollView(.vertical, showsIndicators: false) {
             // Scroll Tracker
@@ -120,13 +143,15 @@ struct HomeView: View {
                     greeting: viewModel.timeGreeting,
                     title: viewModel.witGreeting,
                     onSearch: { onSearch(viewModel.selectedTab) },
-                    onSettings: onSettings
+                    onSettings: onSettings,
+                    focusedField: _focusedField
                 )
                 .focusSection()
                 
                 // Tabs
                 HomeFilterBar(
                     selectedTab: viewModel.selectedTab,
+                    focusedField: _focusedField,
                     onSelect: { tab in viewModel.selectTab(tab) }
                 )
                 .focusSection()
@@ -145,6 +170,13 @@ struct HomeView: View {
                         },
                         onLoadMore: { viewModel.loadMoreGenres() }
                     )
+                    // MENU BUTTON HANDLER: Return to Tabs
+                    // We attach it to the content stack so it catches events when deep in the list
+                    .onExitCommand {
+                        withAnimation {
+                            focusedField = .tab(viewModel.selectedTab)
+                        }
+                    }
                 }
             }
         }
@@ -155,16 +187,119 @@ struct HomeView: View {
     }
 }
 
-// MARK: - SUBVIEWS (Unchanged Structure)
+// MARK: - Subviews
+
+struct HomeHeaderView: View {
+    let greeting: String
+    let title: String
+    var onSearch: () -> Void
+    var onSettings: () -> Void
+    
+    // Bind to parent focus
+    @FocusState var focusedField: HomeView.HomeFocusField?
+    
+    var body: some View {
+        HStack(alignment: .bottom) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(greeting)
+                    .cinemeltBody()
+                    .font(CinemeltTheme.fontBody(28))
+                    .opacity(0.8)
+                
+                Text(title)
+                    .cinemeltTitle()
+                    .font(CinemeltTheme.fontTitle(60))
+            }
+            Spacer()
+            
+            // Action Buttons
+            HStack(spacing: 20) {
+                Button(action: onSearch) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.title2)
+                        .foregroundColor(focusedField == .headerButton("search") ? .black : CinemeltTheme.cream)
+                        .padding(15)
+                        .background(
+                            Circle()
+                                .fill(focusedField == .headerButton("search") ? CinemeltTheme.accent : Color.white.opacity(0.1))
+                        )
+                }
+                .buttonStyle(.card)
+                .focused($focusedField, equals: .headerButton("search"))
+                
+                Button(action: onSettings) {
+                    Image(systemName: "gearshape.fill")
+                        .font(.title2)
+                        .foregroundColor(focusedField == .headerButton("settings") ? .black : CinemeltTheme.cream)
+                        .padding(15)
+                        .background(
+                            Circle()
+                                .fill(focusedField == .headerButton("settings") ? CinemeltTheme.accent : Color.white.opacity(0.1))
+                        )
+                }
+                .buttonStyle(.card)
+                .focused($focusedField, equals: .headerButton("settings"))
+            }
+            .padding(.bottom, 10)
+        }
+        .padding(.top, 50)
+        .padding(.horizontal, 80)
+    }
+}
+
+struct HomeFilterBar: View {
+    let selectedTab: StreamType
+    @FocusState var focusedField: HomeView.HomeFocusField?
+    let onSelect: (StreamType) -> Void
+    
+    var body: some View {
+        HStack(spacing: 30) {
+            tabButton(title: "Movies", type: .movie)
+            tabButton(title: "Series", type: .series)
+            tabButton(title: "Live TV", type: .live)
+        }
+        .padding(.horizontal, 80)
+        .padding(.top, 30)
+        .padding(.bottom, 40)
+    }
+    
+    private func tabButton(title: String, type: StreamType) -> some View {
+        Button(action: { onSelect(type) }) {
+            Text(title)
+                .font(CinemeltTheme.fontTitle(24))
+                .foregroundColor(selectedTab == type ? .black : CinemeltTheme.cream)
+                .padding(.horizontal, 35)
+                .padding(.vertical, 14)
+                .background(
+                    ZStack {
+                        if selectedTab == type {
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(CinemeltTheme.accent)
+                                .shadow(color: CinemeltTheme.accent.opacity(0.6), radius: 15)
+                        } else {
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(CinemeltTheme.glassSurface)
+                        }
+                    }
+                )
+        }
+        .buttonStyle(.card)
+        // Bind to the parent's focus state so we can force focus here
+        .focused($focusedField, equals: .tab(type))
+        .scaleEffect(focusedField == .tab(type) ? 1.1 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focusedField)
+    }
+}
+
+// MARK: - Passthrough Components (Unchanged logic, just wrappers)
 
 struct HomeBackgroundView: View {
     let heroChannel: Channel?
-    var scrollOffset: CGFloat = 0
+    var scrollOffset: CGFloat
     
     var body: some View {
         ZStack {
             CinemeltTheme.mainBackground
-            
             if let hero = heroChannel {
                 GeometryReader { geo in
                     AsyncImage(url: URL(string: hero.cover ?? "")) { image in
@@ -202,106 +337,6 @@ struct HomeLoadingState: View {
     }
 }
 
-struct HomeHeaderView: View {
-    let greeting: String
-    let title: String
-    var onSearch: () -> Void
-    var onSettings: () -> Void
-    
-    @FocusState private var focusedButton: String?
-    
-    var body: some View {
-        HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(greeting)
-                    .cinemeltBody()
-                    .font(CinemeltTheme.fontBody(28))
-                    .opacity(0.8)
-                
-                Text(title)
-                    .cinemeltTitle()
-                    .font(CinemeltTheme.fontTitle(60))
-            }
-            Spacer()
-            
-            // Action Buttons
-            HStack(spacing: 20) {
-                Button(action: onSearch) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.title2)
-                        .foregroundColor(focusedButton == "search" ? .black : CinemeltTheme.cream)
-                        .padding(15)
-                        .background(
-                            Circle()
-                                .fill(focusedButton == "search" ? CinemeltTheme.accent : Color.white.opacity(0.1))
-                        )
-                }
-                .buttonStyle(.card)
-                .focused($focusedButton, equals: "search")
-                
-                Button(action: onSettings) {
-                    Image(systemName: "gearshape.fill")
-                        .font(.title2)
-                        .foregroundColor(focusedButton == "settings" ? .black : CinemeltTheme.cream)
-                        .padding(15)
-                        .background(
-                            Circle()
-                                .fill(focusedButton == "settings" ? CinemeltTheme.accent : Color.white.opacity(0.1))
-                        )
-                }
-                .buttonStyle(.card)
-                .focused($focusedButton, equals: "settings")
-            }
-            .padding(.bottom, 10)
-        }
-        .padding(.top, 50)
-        .padding(.horizontal, 80)
-    }
-}
-
-struct HomeFilterBar: View {
-    let selectedTab: StreamType
-    let onSelect: (StreamType) -> Void
-    @FocusState private var focusedTab: StreamType?
-    
-    var body: some View {
-        HStack(spacing: 30) {
-            tabButton(title: "Movies", type: .movie)
-            tabButton(title: "Series", type: .series)
-            tabButton(title: "Live TV", type: .live)
-        }
-        .padding(.horizontal, 80)
-        .padding(.top, 30)
-        .padding(.bottom, 40)
-    }
-    
-    private func tabButton(title: String, type: StreamType) -> some View {
-        Button(action: { onSelect(type) }) {
-            Text(title)
-                .font(CinemeltTheme.fontTitle(24))
-                .foregroundColor(selectedTab == type ? .black : CinemeltTheme.cream)
-                .padding(.horizontal, 35)
-                .padding(.vertical, 14)
-                .background(
-                    ZStack {
-                        if selectedTab == type {
-                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .fill(CinemeltTheme.accent)
-                                .shadow(color: CinemeltTheme.accent.opacity(0.6), radius: 15)
-                        } else {
-                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .fill(CinemeltTheme.glassSurface)
-                        }
-                    }
-                )
-        }
-        .buttonStyle(.card)
-        .focused($focusedTab, equals: type)
-        .scaleEffect(focusedTab == type ? 1.1 : 1.0)
-    }
-}
-
-// Keeping existing subviews (Lanes, DrillDown, etc.) as is for context preservation
 struct HomeLanesView: View {
     let sections: [HomeSection]
     let isLoadingMore: Bool
@@ -321,17 +356,11 @@ struct HomeLanesView: View {
                 )
             }
             
-            Color.clear
-                .frame(height: 50)
-                .onAppear { onLoadMore() }
+            Color.clear.frame(height: 50).onAppear { onLoadMore() }
             
             if isLoadingMore {
-                HStack {
-                    Spacer()
-                    CinemeltLoadingIndicator().scaleEffect(0.8)
-                    Spacer()
-                }
-                .padding(.bottom, 50)
+                HStack { Spacer(); CinemeltLoadingIndicator().scaleEffect(0.8); Spacer() }
+                    .padding(.bottom, 50)
             }
         }
         .padding(.bottom, 100)
@@ -353,7 +382,6 @@ struct HomeSectionRow: View {
                     Text(section.title)
                         .font(CinemeltTheme.fontTitle(36))
                         .foregroundColor(isHeaderFocused ? .black : CinemeltTheme.cream)
-                    
                     Image(systemName: "chevron.right")
                         .font(.headline)
                         .foregroundColor(isHeaderFocused ? .black : CinemeltTheme.accent)
@@ -375,11 +403,7 @@ struct HomeSectionRow: View {
                             if case .continueWatching = section.type {
                                 ContinueWatchingCard(channel: channel) { onPlay(channel) }
                             } else {
-                                MovieCard(
-                                    channel: channel,
-                                    onClick: { onPlay(channel) },
-                                    onFocus: { onFocus(channel) }
-                                )
+                                MovieCard(channel: channel, onClick: { onPlay(channel) }, onFocus: { onFocus(channel) })
                             }
                         }
                     }
@@ -425,11 +449,7 @@ struct HomeDrillDownView: View {
                 ScrollView {
                     LazyVGrid(columns: gridColumns, spacing: 80) {
                         ForEach(channels) { channel in
-                            MovieCard(
-                                channel: channel,
-                                onClick: { onPlay(channel) },
-                                onFocus: { onFocus(channel) }
-                            )
+                            MovieCard(channel: channel, onClick: { onPlay(channel) }, onFocus: { onFocus(channel) })
                         }
                     }
                     .padding(.horizontal, 80)

@@ -2,12 +2,13 @@ import SwiftUI
 
 struct LiveTVView: View {
     var onPlay: (Channel) -> Void
-    var onGuide: () -> Void // Action to open the Full Grid Guide
+    var onGuide: () -> Void
     
     @StateObject private var viewModel = LiveTVViewModel()
     @EnvironmentObject var repository: PrimeFlixRepository
     
     @FocusState private var focusedChannel: String?
+    @FocusState private var isGuideButtonFocused: Bool
     
     var body: some View {
         ZStack {
@@ -23,84 +24,91 @@ struct LiveTVView: View {
                     Spacer()
                 }
             } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 40) {
-                        
-                        // MARK: - Header & Actions
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text("Live TV")
-                                    .font(CinemeltTheme.fontTitle(60))
-                                    .foregroundColor(CinemeltTheme.cream)
-                                    .cinemeltGlow()
-                                
-                                Text("\(viewModel.allGroups.count) Categories • \(viewModel.channelsByGroup.values.flatMap{$0}.count) Channels")
-                                    .font(CinemeltTheme.fontBody(24))
-                                    .foregroundColor(.gray)
-                            }
+                // FIXED LAYOUT: Header is now pinned above the ScrollView
+                VStack(alignment: .leading, spacing: 0) {
+                    
+                    // MARK: - Pinned Header (Focusable Area 1)
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text("Live TV")
+                                .font(CinemeltTheme.fontTitle(60))
+                                .foregroundColor(CinemeltTheme.cream)
+                                .cinemeltGlow()
                             
-                            Spacer()
-                            
-                            // Guide Button
-                            Button(action: onGuide) {
-                                HStack(spacing: 15) {
-                                    Image(systemName: "rectangle.grid.3x2.fill")
-                                    Text("TV Guide")
-                                }
-                                .font(CinemeltTheme.fontTitle(28))
-                                .foregroundColor(.black)
-                                .padding(.horizontal, 30)
-                                .padding(.vertical, 15)
-                                .background(CinemeltTheme.accent)
-                                .cornerRadius(12)
+                            Text("\(viewModel.allGroups.count) Categories • \(viewModel.channelsByGroup.values.flatMap{$0}.count) Channels")
+                                .font(CinemeltTheme.fontBody(24))
+                                .foregroundColor(.gray)
+                        }
+                        
+                        Spacer()
+                        
+                        // Guide Button
+                        Button(action: onGuide) {
+                            HStack(spacing: 15) {
+                                Image(systemName: "rectangle.grid.3x2.fill")
+                                Text("TV Guide")
                             }
-                            .buttonStyle(CinemeltCardButtonStyle())
+                            .font(CinemeltTheme.fontTitle(28))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 30)
+                            .padding(.vertical, 15)
+                            .background(CinemeltTheme.accent)
+                            .cornerRadius(12)
                         }
-                        .padding(.horizontal, 80)
-                        .padding(.top, 40)
-                        
-                        // MARK: - Special Lanes
-                        
-                        // 1. Favorites
-                        if !viewModel.favoriteChannels.isEmpty {
-                            LiveLane(
-                                title: "Favorites",
-                                icon: "heart.fill",
-                                channels: viewModel.favoriteChannels,
-                                viewModel: viewModel,
-                                onPlay: onPlay,
-                                focusedChannel: _focusedChannel
-                            )
-                        }
-                        
-                        // 2. Recently Watched
-                        if !viewModel.recentChannels.isEmpty {
-                            LiveLane(
-                                title: "Recently Watched",
-                                icon: "clock.arrow.circlepath",
-                                channels: viewModel.recentChannels,
-                                viewModel: viewModel,
-                                onPlay: onPlay,
-                                focusedChannel: _focusedChannel
-                            )
-                        }
-                        
-                        // MARK: - All Categories (Lazy Load)
-                        LazyVStack(alignment: .leading, spacing: 50) {
-                            ForEach(viewModel.allGroups, id: \.self) { group in
-                                LiveCategoryRow(
-                                    group: group,
+                        .buttonStyle(CinemeltCardButtonStyle())
+                        .focused($isGuideButtonFocused)
+                    }
+                    .padding(.horizontal, 80)
+                    .padding(.top, 20)
+                    .padding(.bottom, 30)
+                    .focusSection() // Tells tvOS this is a distinct navigation group
+                    
+                    // MARK: - Scrollable Content (Focusable Area 2)
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 40) {
+                            
+                            // 1. Favorites Lane
+                            if !viewModel.favoriteChannels.isEmpty {
+                                LiveLane(
+                                    title: "Favorites",
+                                    icon: "heart.fill",
+                                    channels: viewModel.favoriteChannels,
                                     viewModel: viewModel,
                                     onPlay: onPlay,
                                     focusedChannel: _focusedChannel
                                 )
-                                .onAppear {
-                                    viewModel.onCategoryAppeared(category: group)
+                            }
+                            
+                            // 2. Recently Watched Lane
+                            if !viewModel.recentChannels.isEmpty {
+                                LiveLane(
+                                    title: "Recently Watched",
+                                    icon: "clock.arrow.circlepath",
+                                    channels: viewModel.recentChannels,
+                                    viewModel: viewModel,
+                                    onPlay: onPlay,
+                                    focusedChannel: _focusedChannel
+                                )
+                            }
+                            
+                            // 3. All Categories (Lazy Grid)
+                            LazyVStack(alignment: .leading, spacing: 50) {
+                                ForEach(viewModel.allGroups, id: \.self) { group in
+                                    LiveCategoryRow(
+                                        group: group,
+                                        viewModel: viewModel,
+                                        onPlay: onPlay,
+                                        focusedChannel: _focusedChannel
+                                    )
+                                    .onAppear {
+                                        viewModel.onCategoryAppeared(category: group)
+                                    }
                                 }
                             }
+                            .padding(.bottom, 100)
                         }
-                        .padding(.bottom, 100)
                     }
+                    .focusSection() // Tells tvOS the scroll area is distinct from the header
                 }
             }
         }
@@ -110,7 +118,7 @@ struct LiveTVView: View {
     }
 }
 
-// MARK: - Subcomponents
+// MARK: - Subcomponents (Unchanged from previous fix)
 
 struct LiveLane: View {
     let title: String
@@ -139,7 +147,7 @@ struct LiveLane: View {
                         LiveChannelCard(
                             channel: channel,
                             program: viewModel.getProgram(for: channel),
-                            progress: viewModel.getProgress(for: viewModel.getProgram(for: channel) ?? Programme()),
+                            progress: viewModel.getProgress(for: channel),
                             onPlay: { onPlay(channel) },
                             onFavorite: { viewModel.toggleFavorite(channel) }
                         )
@@ -179,7 +187,7 @@ struct LiveCategoryRow: View {
                             LiveChannelCard(
                                 channel: channel,
                                 program: viewModel.getProgram(for: channel),
-                                progress: viewModel.getProgress(for: viewModel.getProgram(for: channel) ?? Programme()),
+                                progress: viewModel.getProgress(for: channel),
                                 onPlay: { onPlay(channel) },
                                 onFavorite: { viewModel.toggleFavorite(channel) }
                             )
@@ -196,7 +204,7 @@ struct LiveCategoryRow: View {
                 }
                 .focusSection()
             } else {
-                // Skeleton Loader for row
+                // Skeleton Loader
                 ScrollView(.horizontal) {
                     HStack(spacing: 40) {
                         ForEach(0..<5) { _ in
@@ -212,7 +220,6 @@ struct LiveCategoryRow: View {
     }
 }
 
-// MARK: - Live Channel Card (EPG Aware)
 struct LiveChannelCard: View {
     let channel: Channel
     let program: Programme?
@@ -226,7 +233,6 @@ struct LiveChannelCard: View {
     var body: some View {
         Button(action: onPlay) {
             ZStack(alignment: .bottom) {
-                // 1. Background (Logo)
                 ZStack {
                     Color.white.opacity(0.05)
                     
@@ -243,12 +249,9 @@ struct LiveChannelCard: View {
                 .background(.ultraThinMaterial)
                 .cornerRadius(16)
                 
-                // 2. Info Overlay (Visible on Focus or if Program exists)
                 if isFocused || program != nil {
                     VStack(alignment: .leading, spacing: 4) {
                         Spacer()
-                        
-                        // Gradient Backing for text readability
                         LinearGradient(
                             colors: [.clear, .black.opacity(0.95)],
                             startPoint: .top,
@@ -259,9 +262,7 @@ struct LiveChannelCard: View {
                     }
                 }
                 
-                // 3. Text Content
                 VStack(alignment: .leading, spacing: 4) {
-                    // Favorite Badge
                     HStack {
                         Spacer()
                         if channel.isFavorite {
@@ -276,7 +277,6 @@ struct LiveChannelCard: View {
                     
                     Spacer()
                     
-                    // Program Info
                     VStack(alignment: .leading, spacing: 2) {
                         Text(channel.title)
                             .font(CinemeltTheme.fontBody(20))
@@ -290,7 +290,6 @@ struct LiveChannelCard: View {
                                 .foregroundColor(CinemeltTheme.accent)
                                 .lineLimit(1)
                             
-                            // Time Range
                             Text("\(formatTime(prog.start)) - \(formatTime(prog.end))")
                                 .font(.caption2)
                                 .foregroundColor(.gray)
@@ -303,7 +302,6 @@ struct LiveChannelCard: View {
                     .padding(12)
                     .padding(.bottom, 6)
                     
-                    // Progress Bar
                     if progress > 0 {
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
@@ -318,7 +316,6 @@ struct LiveChannelCard: View {
             }
             .frame(width: 280, height: 180)
             .cornerRadius(16)
-            // Focus Border
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(isFocused ? CinemeltTheme.accent : Color.clear, lineWidth: 3)
@@ -328,7 +325,6 @@ struct LiveChannelCard: View {
             .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isFocused)
         }
         .buttonStyle(.card)
-        // Long Press to Toggle Favorite
         .contextMenu {
             Button(action: onFavorite) {
                 Label(channel.isFavorite ? "Unfavorite" : "Favorite", systemImage: channel.isFavorite ? "heart.slash" : "heart")

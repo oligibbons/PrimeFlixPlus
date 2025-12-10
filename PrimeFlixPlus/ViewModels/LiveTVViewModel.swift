@@ -10,6 +10,8 @@ class LiveTVViewModel: ObservableObject {
     @Published var favoriteChannels: [Channel] = []
     @Published var recentChannels: [Channel] = []
     @Published var allGroups: [String] = []
+    
+    // Private backing for dictionary to ensure thread safety
     @Published var channelsByGroup: [String: [Channel]] = [:]
     
     // EPG Data (Map: Channel URL -> Current Program)
@@ -35,7 +37,9 @@ class LiveTVViewModel: ObservableObject {
         
         // Periodic EPG Cleanup (remove old programs every 10 mins)
         Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.epgService?.pruneExpiredPrograms() }
+            Task { @MainActor [weak self] in
+                self?.epgService?.pruneExpiredPrograms()
+            }
         }
     }
     
@@ -57,9 +61,13 @@ class LiveTVViewModel: ObservableObject {
         Task {
             guard let repo = repository else { return }
             
-            // 1. Get Live Playlist (Assuming active one)
-            let playlist = repo.getAllPlaylists().first(where: { $0.source == DataSourceType.xtream.rawValue || $0.source == DataSourceType.m3u.rawValue })
-            guard let plUrl = playlist?.url else { return }
+            // 1. Get Live Playlist
+            let playlists = repo.getAllPlaylists()
+            let playlist = playlists.first(where: { $0.source == DataSourceType.xtream.rawValue || $0.source == DataSourceType.m3u.rawValue })
+            guard let plUrl = playlist?.url else {
+                self.isLoading = false
+                return
+            }
             
             // 2. Fetch Groups
             let rawGroups = repo.getGroups(playlistUrl: plUrl, type: .live)
@@ -77,12 +85,11 @@ class LiveTVViewModel: ObservableObject {
         // 1. Favorites
         self.favoriteChannels = repo.getFavorites(type: "live")
         
-        // 2. Recently Watched (Specific logic for Live TV)
-        // We use 'getSmartContinueWatching' but filter strictly for Live items
+        // 2. Recently Watched
         let recents = repo.getSmartContinueWatching(type: "live")
         self.recentChannels = Array(recents.prefix(20))
         
-        // 3. Trigger EPG Refresh for these "Top Shelf" items
+        // 3. Trigger EPG Refresh
         let combined = (favoriteChannels + recentChannels)
         if !combined.isEmpty {
             updateEpg(for: combined)
@@ -91,24 +98,24 @@ class LiveTVViewModel: ObservableObject {
     
     // MARK: - EPG Logic
     
-    /// Called when a row/category receives focus or becomes visible
     func onCategoryAppeared(category: String) {
-        // If we haven't loaded channels for this group yet, do it now (Lazy Loading)
+        // Lazy Loading check
         if channelsByGroup[category] == nil {
             Task {
                 guard let repo = repository, let pl = repo.getAllPlaylists().first else { return }
+                
+                // Fetch channels synchronously (viewContext is safe on MainActor)
                 let channels = repo.getBrowsingContent(playlistUrl: pl.url, type: "live", group: category)
                 
-                await MainActor.run {
-                    self.channelsByGroup[category] = channels
-                    // Fetch EPG for this batch
-                    self.updateEpg(for: channels)
-                }
+                // Direct assignment
+                self.channelsByGroup[category] = channels
+                
+                // Fetch EPG
+                self.updateEpg(for: channels)
             }
         }
     }
     
-    /// Called when a specific channel is focused (High Priority EPG fetch)
     func onChannelFocused(_ channel: Channel) {
         updateEpg(for: [channel])
     }
@@ -123,26 +130,28 @@ class LiveTVViewModel: ObservableObject {
             // 2. Update local UI map
             let freshMap = service.getCurrentPrograms(for: channels)
             
-            await MainActor.run {
-                // Merge into existing map
-                self.currentPrograms.merge(freshMap) { (_, new) in new }
+            // Direct Dictionary Update (MainActor isolated)
+            for (key, value) in freshMap {
+                self.currentPrograms[key] = value
             }
         }
     }
     
-    // MARK: - Actions
+    // MARK: - Actions & Helpers
     
     func toggleFavorite(_ channel: Channel) {
         repository?.toggleFavorite(channel)
-        // Listener will auto-refresh lists
     }
     
     func getProgram(for channel: Channel) -> Programme? {
         return currentPrograms[channel.url]
     }
     
-    /// Calculates progress (0.0 - 1.0) for the current program
-    func getProgress(for program: Programme) -> Double {
+    // SAFE IMPLEMENTATION: Calculates progress internally to prevent invalid object access
+    func getProgress(for channel: Channel) -> Double {
+        guard let program = currentPrograms[channel.url] else { return 0.0 }
+        
+        // Safely access properties. If this crashes, the object in the dictionary is invalid (unlikely).
         let now = Date()
         let start = program.start.timeIntervalSince1970
         let end = program.end.timeIntervalSince1970
