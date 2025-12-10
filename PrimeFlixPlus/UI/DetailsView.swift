@@ -21,7 +21,7 @@ struct DetailsView: View {
     
     enum FocusField: Hashable {
         case description
-        case play, watchlist, favorite, version // Added watchlist
+        case play, watchlist, favorite, version
         case season(Int)
         case episode(String)
         case cast(Int)
@@ -173,12 +173,12 @@ struct DetailsView: View {
                     .buttonStyle(.plain)
                     .focused($focusedField, equals: .description)
                 }
-                .padding(.horizontal, 80)
+                .padding(.horizontal, 10) // Small local padding, real margin handled by parent
                 .focusSection()
                 
                 // --- Action Buttons ---
                 actionButtons
-                    .padding(.horizontal, 80)
+                    .padding(.horizontal, 10)
                     .focusSection()
                 
                 // --- Series Content (Seasons & Episodes) ---
@@ -194,6 +194,8 @@ struct DetailsView: View {
                 
                 Spacer(minLength: 150)
             }
+            // CRITICAL FIX: Safe Padding for Layout Safety
+            .standardSafePadding()
         }
     }
     
@@ -247,10 +249,10 @@ struct DetailsView: View {
                 .background(CinemeltTheme.accent)
                 .cornerRadius(16)
             }
-            .buttonStyle(CinemeltCardButtonStyle())
+            .cinemeltCardStyle() // NEW: Apply Lift Effect
             .focused($focusedField, equals: .play)
             
-            // Watch List Button (New)
+            // Watch List Button
             Button(action: { viewModel.toggleWatchlist() }) {
                 Image(systemName: viewModel.isInWatchlist ? "bookmark.fill" : "bookmark")
                     .font(.system(size: 30))
@@ -259,7 +261,7 @@ struct DetailsView: View {
                     .background(Color.white.opacity(0.1))
                     .clipShape(Circle())
             }
-            .buttonStyle(CinemeltCardButtonStyle())
+            .cinemeltCardStyle()
             .focused($focusedField, equals: .watchlist)
             
             // Favorite Button
@@ -271,7 +273,7 @@ struct DetailsView: View {
                     .background(Color.white.opacity(0.1))
                     .clipShape(Circle())
             }
-            .buttonStyle(CinemeltCardButtonStyle())
+            .cinemeltCardStyle()
             .focused($focusedField, equals: .favorite)
             
             // Versions Button (Movies Only - Manual Override)
@@ -287,7 +289,7 @@ struct DetailsView: View {
                     .background(Color.white.opacity(0.05))
                     .cornerRadius(12)
                 }
-                .buttonStyle(CinemeltCardButtonStyle())
+                .cinemeltCardStyle()
                 .focused($focusedField, equals: .version)
             }
         }
@@ -312,12 +314,12 @@ struct DetailsView: View {
                                     )
                                     .cornerRadius(30)
                             }
-                            .buttonStyle(CinemeltCardButtonStyle())
+                            .cinemeltCardStyle()
                             .focused($focusedField, equals: .season(season))
                         }
                     }
-                    .padding(.horizontal, 80)
-                    .padding(.vertical, 20)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 20) // Padding for focus bloom
                 }
                 .focusSection()
             }
@@ -327,7 +329,7 @@ struct DetailsView: View {
                 Text("No episodes available for this season.")
                     .font(CinemeltTheme.fontBody(20))
                     .foregroundColor(.gray)
-                    .padding(.horizontal, 80)
+                    .padding(.horizontal, 10)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 50) {
@@ -337,12 +339,12 @@ struct DetailsView: View {
                             }) {
                                 EpisodeCard(episode: ep)
                             }
-                            .buttonStyle(CinemeltCardButtonStyle())
-                            .frame(width: 600) // LAYOUT FIX: Prevent infinite expansion
+                            .cinemeltCardStyle()
+                            .frame(width: 350) // Use fixed width to match EpisodeCard
                             .focused($focusedField, equals: .episode(ep.id))
                         }
                     }
-                    .padding(.horizontal, 80)
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 40)
                 }
                 .focusSection()
@@ -355,7 +357,7 @@ struct DetailsView: View {
             Text("Cast")
                 .font(CinemeltTheme.fontTitle(32))
                 .foregroundColor(CinemeltTheme.cream)
-                .padding(.leading, 80)
+                .padding(.leading, 10)
             
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 40) {
@@ -381,7 +383,7 @@ struct DetailsView: View {
                         .focused($focusedField, equals: .cast(index))
                     }
                 }
-                .padding(.horizontal, 80)
+                .padding(.horizontal, 10)
                 .padding(.bottom, 20)
             }
         }

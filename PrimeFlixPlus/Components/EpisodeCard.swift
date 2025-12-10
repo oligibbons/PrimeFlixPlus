@@ -1,10 +1,14 @@
 import SwiftUI
 
 struct EpisodeCard: View {
-    // Linked to the new DetailsViewModel.MergedEpisode struct
+    // Linked to the DetailsViewModel.MergedEpisode struct
     let episode: DetailsViewModel.MergedEpisode
     
     @Environment(\.isFocused) var isFocused
+    
+    // Standardized 16:9 Episode Thumbnail Size
+    private let cardWidth: CGFloat = 350
+    private let cardHeight: CGFloat = 197 // approx 16:9
     
     var body: some View {
         HStack(spacing: 0) {
@@ -35,14 +39,14 @@ struct EpisodeCard: View {
                 
                 // --- OVERLAYS ---
                 
-                // A. Gradient Shade (Always visible for text readability if needed, but mainly for style)
+                // A. Gradient Shade
                 LinearGradient(
-                    colors: [.clear, .black.opacity(0.6)],
+                    colors: [.clear, .black.opacity(0.8)],
                     startPoint: .center,
                     endPoint: .bottom
                 )
                 
-                // B. Progress Bar (If in progress and not finished)
+                // B. Progress Bar
                 if episode.progress > 0 && !episode.isWatched {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
@@ -58,10 +62,10 @@ struct EpisodeCard: View {
                         }
                     }
                     .frame(height: 6)
-                    .padding(.bottom, 0) // Align to very bottom
+                    .padding(.bottom, 0)
                 }
                 
-                // C. "Watched" Overlay (Dim + Icon)
+                // C. "Watched" Overlay
                 if episode.isWatched {
                     ZStack {
                         Color.black.opacity(0.7)
@@ -72,21 +76,21 @@ struct EpisodeCard: View {
                     }
                 }
             }
-            .frame(width: 280, height: 160)
+            .frame(width: cardWidth, height: cardHeight)
             .clipped()
             
             // 2. Metadata Content
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 
                 // Row 1: Episode Number & Title
-                HStack(alignment: .firstTextBaseline) {
+                HStack(alignment: .firstTextBaseline, spacing: 15) {
                     Text(String(format: "%02d", episode.number))
-                        .font(CinemeltTheme.fontTitle(44))
+                        .font(CinemeltTheme.fontTitle(48)) // Increased for TV
                         .foregroundColor(isFocused ? CinemeltTheme.accent : CinemeltTheme.accent.opacity(0.7))
                         .shadow(color: isFocused ? CinemeltTheme.accent.opacity(0.5) : .clear, radius: 10)
                     
                     Text(episode.title)
-                        .font(CinemeltTheme.fontTitle(28))
+                        .font(CinemeltTheme.fontTitle(32)) // Increased for TV
                         .foregroundColor(isFocused ? .white : CinemeltTheme.cream)
                         .lineLimit(1)
                 }
@@ -99,28 +103,27 @@ struct EpisodeCard: View {
                 
                 // Row 3: Overview
                 Text(episode.overview.isEmpty ? "No details available." : episode.overview)
-                    .font(CinemeltTheme.fontBody(20))
+                    .font(CinemeltTheme.fontBody(22)) // Readable body text
                     .foregroundColor(isFocused ? .white.opacity(0.9) : .gray)
                     .lineLimit(3)
                     .lineSpacing(4)
                 
                 Spacer()
                 
-                // Row 4: Versions Tag (Chillio Feature)
+                // Row 4: Versions Tag
                 if episode.versions.count > 1 {
                     HStack(spacing: 6) {
                         Image(systemName: "square.stack.3d.up.fill")
                             .font(.caption)
                         Text("\(episode.versions.count) Versions")
-                            .font(CinemeltTheme.fontBody(16))
+                            .font(CinemeltTheme.fontBody(18))
                             .fontWeight(.bold)
                     }
                     .foregroundColor(isFocused ? CinemeltTheme.accent : .gray)
                     .padding(.bottom, 8)
-                    .transition(.opacity)
                 }
             }
-            .padding(20)
+            .padding(24) // More breathing room
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         // Card Container Styling
@@ -135,21 +138,13 @@ struct EpisodeCard: View {
             .background(.ultraThinMaterial)
         )
         .cornerRadius(12)
-        // Focus Effects
-        .shadow(
-            color: isFocused ? CinemeltTheme.accent.opacity(0.3) : .clear,
-            radius: 20,
-            x: 0,
-            y: 5
-        )
+        // Focus Effects handled by CinemeltCardButtonStyle, but we add the border here
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(
                     isFocused ? CinemeltTheme.accent : Color.white.opacity(0.05),
-                    lineWidth: isFocused ? 2 : 1
+                    lineWidth: isFocused ? 3 : 1
                 )
         )
-        .scaleEffect(isFocused ? 1.02 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isFocused)
     }
 }

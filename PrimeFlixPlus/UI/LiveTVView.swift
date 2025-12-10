@@ -58,7 +58,8 @@ struct LiveTVView: View {
                         .buttonStyle(CinemeltCardButtonStyle())
                         .focused($isGuideButtonFocused)
                     }
-                    .padding(.horizontal, 80)
+                    // Apply explicit horizontal margin to header to match safe padding below
+                    .padding(.horizontal, CinemeltTheme.Layout.margin)
                     .padding(.top, 20)
                     .padding(.bottom, 30)
                     .focusSection() // Tells tvOS this is a distinct navigation group
@@ -107,6 +108,8 @@ struct LiveTVView: View {
                             }
                             .padding(.bottom, 100)
                         }
+                        // CRITICAL FIX: Safe Padding applied here
+                        .standardSafePadding()
                     }
                     .focusSection() // Tells tvOS the scroll area is distinct from the header
                 }
@@ -139,7 +142,7 @@ struct LiveLane: View {
                     .foregroundColor(CinemeltTheme.cream)
                     .cinemeltGlow()
             }
-            .padding(.leading, 80)
+            .padding(.leading, 10) // Small local padding
             
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 40) {
@@ -159,7 +162,7 @@ struct LiveLane: View {
                         }
                     }
                 }
-                .padding(.horizontal, 80)
+                .padding(.horizontal, 40) // Focus bloom space
                 .padding(.vertical, 40)
             }
             .focusSection()
@@ -178,7 +181,7 @@ struct LiveCategoryRow: View {
             Text(group)
                 .font(CinemeltTheme.fontTitle(32))
                 .foregroundColor(CinemeltTheme.cream)
-                .padding(.leading, 80)
+                .padding(.leading, 10)
             
             if let channels = viewModel.channelsByGroup[group] {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -199,7 +202,7 @@ struct LiveCategoryRow: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 80)
+                    .padding(.horizontal, 40)
                     .padding(.vertical, 40)
                 }
                 .focusSection()
@@ -213,7 +216,7 @@ struct LiveCategoryRow: View {
                                 .frame(width: 280, height: 180)
                         }
                     }
-                    .padding(.horizontal, 80)
+                    .padding(.horizontal, 40)
                 }
             }
         }

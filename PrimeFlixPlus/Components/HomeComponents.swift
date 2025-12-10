@@ -13,7 +13,7 @@ struct ContinueWatchingLane: View {
                 Text(title)
                     .font(CinemeltTheme.fontTitle(32))
                     .foregroundColor(CinemeltTheme.cream)
-                    .padding(.leading, 60)
+                    .padding(.leading, CinemeltTheme.Layout.margin) // Align with global margin
                     .cinemeltGlow()
                 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -24,7 +24,8 @@ struct ContinueWatchingLane: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 60)
+                    // Add padding to allow focus bloom to expand without clipping
+                    .padding(.horizontal, CinemeltTheme.Layout.margin)
                     .padding(.vertical, 40)
                 }
             }
@@ -32,13 +33,17 @@ struct ContinueWatchingLane: View {
     }
 }
 
-// MARK: - Continue Watching Card (Enhanced)
+// MARK: - Continue Watching Card (Refined)
 struct ContinueWatchingCard: View {
     let channel: Channel
     let onClick: () -> Void
     
     @FocusState private var isFocused: Bool
     @FetchRequest var progressHistory: FetchedResults<WatchProgress>
+    
+    // Landscape Card Dimensions (approx 16:9)
+    private let width: CGFloat = 360
+    private let height: CGFloat = 200
     
     init(channel: Channel, onClick: @escaping () -> Void) {
         self.channel = channel
@@ -93,10 +98,10 @@ struct ContinueWatchingCard: View {
                         }
                     }
                 }
-                .frame(width: 340, height: 190)
+                .frame(width: width, height: height)
                 .clipped()
                 
-                // 2. Info Overlay (Always visible for CW)
+                // 2. Info Overlay (Always visible for CW to show context)
                 LinearGradient(
                     colors: [.clear, .black.opacity(0.9)],
                     startPoint: .center,
@@ -106,20 +111,21 @@ struct ContinueWatchingCard: View {
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(displayTitle)
-                            .font(CinemeltTheme.fontBody(22))
+                            .font(CinemeltTheme.fontBody(24)) // Increased readability
                             .fontWeight(.bold)
                             .foregroundColor(isFocused ? .white : CinemeltTheme.cream)
                             .lineLimit(1)
+                            .shadow(color: .black, radius: 2)
                         
                         if !displaySubtitle.isEmpty {
                             Text(displaySubtitle)
-                                .font(CinemeltTheme.fontBody(16))
+                                .font(CinemeltTheme.fontBody(18))
                                 .foregroundColor(CinemeltTheme.accent)
                         }
                     }
                     Spacer()
                 }
-                .padding(12)
+                .padding(16)
                 .padding(.bottom, 8)
                 
                 // 3. Progress Bar
@@ -137,10 +143,20 @@ struct ContinueWatchingCard: View {
                 }
                 .frame(height: 6)
             }
+            // Explicit frame for Focus Engine sizing
+            .frame(width: width, height: height)
+            .background(CinemeltTheme.charcoal)
+            .cornerRadius(12)
+            // Border highlight on focus
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(
+                        isFocused ? CinemeltTheme.white.opacity(0.5) : Color.white.opacity(0.1),
+                        lineWidth: isFocused ? 2 : 1
+                    )
+            )
         }
-        .buttonStyle(CinemeltCardButtonStyle())
+        .cinemeltCardStyle() // Apply the Lift Effect
         .focused($isFocused)
-        .frame(width: 340, height: 190)
-        .cornerRadius(16)
     }
 }

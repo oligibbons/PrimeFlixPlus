@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// The central Design System for "Cinemelt" v2.1 (Visual Refinement Update).
+/// Refactored for tvOS 15.4+ with proper Focus Engines and Overscan protection.
 struct CinemeltTheme {
     
     // MARK: - Colors
@@ -52,13 +53,33 @@ struct CinemeltTheme {
         .ignoresSafeArea()
     }
     
-    // MARK: - Fonts
+    // MARK: - Fonts (tvOS Optimized)
+    
+    /// Returns a title font. Automatically upgrades small sizes to tvOS standards (48pt+ recommended).
     static func fontTitle(_ size: CGFloat) -> Font {
-        return .custom("Zain-Bold", size: size)
+        // Rule of 10ft: If requested size is too small for a title, bump it up.
+        let effectiveSize = size < 30 ? 38 : size
+        return .custom("Zain-Bold", size: effectiveSize)
     }
     
+    /// Returns a body font. Enforces minimum readability (26pt+ recommended).
     static func fontBody(_ size: CGFloat) -> Font {
-        return .custom("Zain-Regular", size: size)
+        // Rule of 10ft: Body text below 26pt is unreadable on many TVs.
+        let effectiveSize = size < 20 ? 26 : size
+        return .custom("Zain-Regular", size: effectiveSize)
+    }
+    
+    // MARK: - Layout Constants
+    struct Layout {
+        // Critical: Apple TV Safe Area margins are huge (90pt standard).
+        // Using less than this risks content being cut off on older TVs.
+        static let margin: CGFloat = 90
+        static let verticalSpacing: CGFloat = 60
+        static let gutter: CGFloat = 40
+        
+        // Standardized Card Sizes for Grids
+        static let posterWidth: CGFloat = 250
+        static let posterHeight: CGFloat = 375
     }
 }
 
@@ -68,7 +89,8 @@ struct GrainOverlay: View {
         GeometryReader { geo in
             Canvas { context, size in
                 // Optimized grain count for performance
-                for _ in 0..<Int(size.width * size.height / 500) {
+                // Reduced count slightly to ensure 60fps on older 4K boxes
+                for _ in 0..<Int(size.width * size.height / 600) {
                     let x = Double.random(in: 0...size.width)
                     let y = Double.random(in: 0...size.height)
                     let opacity = Double.random(in: 0...0.5)
@@ -81,7 +103,7 @@ struct GrainOverlay: View {
     }
 }
 
-// MARK: - Premium Loading Indicator (NEW)
+// MARK: - Premium Loading Indicator
 struct CinemeltLoadingIndicator: View {
     @State private var isAnimating: Bool = false
     
@@ -146,7 +168,7 @@ struct CinemeltTextGlow: ViewModifier {
     }
 }
 
-// MARK: - Button Styles
+// MARK: - Button Styles (UPDATED: Parallax Lift)
 
 struct CinemeltCardButtonView: View {
     let configuration: ButtonStyle.Configuration
@@ -154,28 +176,36 @@ struct CinemeltCardButtonView: View {
     
     var body: some View {
         configuration.label
-            // Micro-Interaction: Bouncy scale on press
-            .scaleEffect(configuration.isPressed ? 0.95 : (isFocused ? 1.1 : 1.0))
-            // Ambilight Glow
+            // 1. The "Lift" Effect (Critical for tvOS Feel)
+            // Instead of just scaling, we move it UP (-10 y) to simulate floating.
+            .scaleEffect(configuration.isPressed ? 0.95 : (isFocused ? 1.15 : 1.0))
+            .offset(y: isFocused ? -10 : 0)
+            
+            // 2. Ambilight Glow (Enhanced for Focus)
             .shadow(
-                color: isFocused ? CinemeltTheme.accent.opacity(0.7) : .black.opacity(0.3),
+                color: isFocused ? CinemeltTheme.accent.opacity(0.6) : .black.opacity(0.3),
                 radius: isFocused ? 30 : 5,
                 x: 0,
-                y: isFocused ? 15 : 2
+                y: isFocused ? 20 : 2
             )
+            
+            // 3. Background Plate
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.clear)
+                    .fill(Color.clear) // Transparent hit target
             )
+            
+            // 4. Focus Border
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(isFocused ? 0.8 : 0), lineWidth: 2)
+                    .stroke(Color.white.opacity(isFocused ? 0.8 : 0), lineWidth: 3)
                     .blur(radius: isFocused ? 1 : 0)
             )
+            
             // Animation Stack
-            // 1. Focus: Smooth spring
-            .animation(.spring(response: 0.35, dampingFraction: 0.65), value: isFocused)
-            // 2. Press: Rapid, tactile bounce (Pulse effect)
+            // Focus: Springy and responsive
+            .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isFocused)
+            // Press: Quick feedback
             .animation(.spring(response: 0.2, dampingFraction: 0.4), value: configuration.isPressed)
             .zIndex(isFocused ? 1 : 0)
     }
@@ -186,6 +216,8 @@ struct CinemeltCardButtonStyle: ButtonStyle {
         CinemeltCardButtonView(configuration: configuration)
     }
 }
+
+// MARK: - Usage Extensions
 
 extension View {
     func cinemeltGlass(radius: CGFloat = 20) -> some View {
@@ -202,5 +234,12 @@ extension View {
     
     func cinemeltBody() -> some View {
         self.font(CinemeltTheme.fontBody(28)).foregroundColor(CinemeltTheme.cream.opacity(0.8))
+    }
+    
+    // NEW: Safe Area Helper
+    // Use this on your root VStacks/ScrollViews to ensure they aren't cut off by the TV bezel
+    func standardSafePadding() -> some View {
+        self.padding(.horizontal, CinemeltTheme.Layout.margin)
+            .padding(.vertical, 60)
     }
 }

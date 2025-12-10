@@ -176,6 +176,8 @@ struct HomeView: View {
                     }
                 }
             }
+            // CRITICAL FIX: Applied Safe Padding here to protect edges
+            .standardSafePadding()
         }
         .coordinateSpace(name: "homeScrollSpace")
         .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
@@ -206,8 +208,8 @@ struct HomeHeaderView: View {
             
             // Note: Search/Settings buttons removed as they are accessible via Sidebar
         }
-        .padding(.top, 50)
-        .padding(.horizontal, 80)
+        // Padding is now handled by standardSafePadding() on the parent, so we reduce local padding
+        .padding(.horizontal, 10)
     }
 }
 
@@ -222,9 +224,8 @@ struct HomeFilterBar: View {
             tabButton(title: "Series", type: .series)
             tabButton(title: "Live TV", type: .live)
         }
-        .padding(.horizontal, 80)
-        .padding(.top, 30)
-        .padding(.bottom, 40)
+        // Removed heavy manual padding here to rely on parent container
+        .padding(.vertical, 20)
     }
     
     private func tabButton(title: String, type: StreamType) -> some View {
@@ -358,7 +359,8 @@ struct HomeSectionRow: View {
             }
             .buttonStyle(.card)
             .focused($isHeaderFocused)
-            .padding(.horizontal, 60)
+            // Reduced manual padding as parent handles safe area
+            .padding(.horizontal, 10)
             
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 60) {
@@ -372,7 +374,8 @@ struct HomeSectionRow: View {
                         }
                     }
                 }
-                .padding(.horizontal, 80)
+                // Padding for focus expansion inside the scrollview
+                .padding(.horizontal, 40)
                 .padding(.vertical, 60)
             }
             .focusSection()
@@ -406,7 +409,7 @@ struct HomeDrillDownView: View {
                         .padding(.horizontal, 20)
                     }
                     .buttonStyle(.card)
-                    .padding(80)
+                    .padding(.bottom, 20)
                     Spacer()
                 }
                 
@@ -416,11 +419,12 @@ struct HomeDrillDownView: View {
                             MovieCard(channel: channel, onClick: { onPlay(channel) }, onFocus: { onFocus(channel) })
                         }
                     }
-                    .padding(.horizontal, 80)
                     .padding(.bottom, 100)
                 }
                 .focusSection()
             }
+            // CRITICAL FIX: Safe Padding for Drill Down
+            .standardSafePadding()
         }
         .onExitCommand { onClose() }
     }

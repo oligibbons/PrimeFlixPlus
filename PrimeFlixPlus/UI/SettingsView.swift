@@ -436,8 +436,8 @@ struct SettingsView: View {
                             .cinemeltGlass()
                         }
                     }
-                    .padding(50)
-                    .padding(.bottom, 100)
+                    // CRITICAL FIX: Safe Padding for Settings
+                    .standardSafePadding()
                 }
                 .background(Color.clear)
             }
