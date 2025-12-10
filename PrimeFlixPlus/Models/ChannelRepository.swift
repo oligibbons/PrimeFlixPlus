@@ -11,22 +11,14 @@ class ChannelRepository {
     
     // MARK: - Search Engine Data Structures
     
-    struct SearchResults {
+    struct LibrarySearchResults {
         let movies: [Channel]
         let series: [Channel]
-        let live: [Channel]
-        let peopleMatches: [Channel]
     }
     
-    struct SearchFilters {
-        var only4K: Bool = false
-        var onlyLive: Bool = false
-        var onlyMovies: Bool = false
-        var onlySeries: Bool = false
-        
-        var hasActiveFilters: Bool {
-            return only4K || onlyLive || onlyMovies || onlySeries
-        }
+    struct LiveSearchResults {
+        let categories: [String]
+        let channels: [Channel]
     }
     
     // MARK: - Core Mutators
@@ -36,116 +28,146 @@ class ChannelRepository {
         // Context save is handled by the caller (PrimeFlixRepository)
     }
 
-    // MARK: - Simplified Search Operation
+    // MARK: - Core Search Methods (New Logic)
     
-    /// A robust, simple search that finds ANY item containing the query string.
-    /// Sorts results alphabetically and groups them by type.
-    func searchHybrid(query: String, filters: SearchFilters) -> SearchResults {
+    /// Searches Movies and Series with Smart Deduplication.
+    /// Logic: Matches Title, File Name (Canonical), or Group.
+    func searchLibrary(query: String) -> LibrarySearchResults {
         let rawTerm = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Return empty if no query and no filters (though typically query won't be empty here)
-        if rawTerm.isEmpty && !filters.hasActiveFilters {
-            return SearchResults(movies: [], series: [], live: [], peopleMatches: [])
-        }
+        if rawTerm.isEmpty { return LibrarySearchResults(movies: [], series: []) }
         
         let request = NSFetchRequest<Channel>(entityName: "Channel")
-        request.fetchLimit = 1000 // Increased limit to ensure we find your files
+        request.fetchLimit = 1000
         
-        // 1. Build Predicates
-        var predicates: [NSPredicate] = []
+        // Predicates: Match visible Title OR raw Filename OR Group
+        let textMatch = NSPredicate(format: "title CONTAINS[cd] %@ OR canonicalTitle CONTAINS[cd] %@ OR group CONTAINS[cd] %@", rawTerm, rawTerm, rawTerm)
+        let typeMatch = NSPredicate(format: "type IN {'movie', 'series', 'series_episode'}")
         
-        // Search Text Predicate (Simple "Contains")
-        if !rawTerm.isEmpty {
-            // Checks visible title, raw filename/title, or original group
-            let titleMatch = NSPredicate(format: "title CONTAINS[cd] %@", rawTerm)
-            let rawMatch = NSPredicate(format: "canonicalTitle CONTAINS[cd] %@", rawTerm)
-            let groupMatch = NSPredicate(format: "group CONTAINS[cd] %@", rawTerm)
-            
-            predicates.append(NSCompoundPredicate(orPredicateWithSubpredicates: [titleMatch, rawMatch, groupMatch]))
-        }
-        
-        // Filter Predicates
-        if filters.onlyMovies {
-            predicates.append(NSPredicate(format: "type == 'movie'"))
-        }
-        if filters.onlySeries {
-            predicates.append(NSPredicate(format: "type == 'series' OR type == 'series_episode'"))
-        }
-        if filters.onlyLive {
-            predicates.append(NSPredicate(format: "type == 'live'"))
-        }
-        
-        // Combine all requirements
-        if !predicates.isEmpty {
-            request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-        }
-        
-        // 2. Sort by Title
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [textMatch, typeMatch])
         request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
         
-        // 3. Execute Fetch
         var results: [Channel] = []
         context.performAndWait {
             results = (try? context.fetch(request)) ?? []
         }
         
-        // 4. Categorize & Deduplicate
-        // We use a simplified deduplication to avoid showing 10 versions of the same movie,
-        // but it's less aggressive than before to ensure you see your files.
-        let distinctItems = deduplicateChannels(results)
+        // Separation
+        let rawMovies = results.filter { $0.type == "movie" }
+        // Note: We search 'series_episode' too, just in case the container title didn't match but an episode did
+        let rawSeries = results.filter { $0.type == "series" || $0.type == "series_episode" }
         
-        var movies: [Channel] = []
-        var series: [Channel] = []
-        var live: [Channel] = []
+        // Smart Deduplication
+        let uniqueMovies = deduplicate(channels: rawMovies, isSeries: false)
+        let uniqueSeries = deduplicate(channels: rawSeries, isSeries: true)
         
-        for ch in distinctItems {
-            if ch.type == "movie" {
-                movies.append(ch)
-            } else if ch.type == "series" || ch.type == "series_episode" {
-                series.append(ch)
-            } else if ch.type == "live" {
-                live.append(ch)
+        return LibrarySearchResults(movies: uniqueMovies, series: uniqueSeries)
+    }
+    
+    /// Searches Live TV Channels and Categories.
+    /// Logic: Returns matching Channels AND matching Categories.
+    func searchLive(query: String) -> LiveSearchResults {
+        let rawTerm = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if rawTerm.isEmpty { return LiveSearchResults(categories: [], channels: []) }
+        
+        // A. Search Channels
+        let channelReq = NSFetchRequest<Channel>(entityName: "Channel")
+        channelReq.fetchLimit = 500
+        channelReq.predicate = NSPredicate(
+            format: "type == 'live' AND (title CONTAINS[cd] %@ OR group CONTAINS[cd] %@ OR canonicalTitle CONTAINS[cd] %@)",
+            rawTerm, rawTerm, rawTerm
+        )
+        channelReq.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        
+        var channels: [Channel] = []
+        context.performAndWait {
+            channels = (try? context.fetch(channelReq)) ?? []
+        }
+        
+        // B. Search Categories (Distinct Groups)
+        let distinctGroupReq = NSFetchRequest<NSDictionary>(entityName: "Channel")
+        distinctGroupReq.resultType = .dictionaryResultType
+        distinctGroupReq.returnsDistinctResults = true
+        distinctGroupReq.propertiesToFetch = ["group"]
+        distinctGroupReq.predicate = NSPredicate(format: "type == 'live' AND group CONTAINS[cd] %@", rawTerm)
+        distinctGroupReq.sortDescriptors = [NSSortDescriptor(key: "group", ascending: true)]
+        
+        var categories: [String] = []
+        context.performAndWait {
+            if let dicts = try? context.fetch(distinctGroupReq) as? [[String: String]] {
+                categories = dicts.compactMap { $0["group"] }
             }
         }
         
-        return SearchResults(movies: movies, series: series, live: live, peopleMatches: [])
+        return LiveSearchResults(categories: categories, channels: channels)
     }
     
-    // MARK: - Matches & Lookups (Reverse Search)
+    // MARK: - Smart Deduplication Logic (The Fix)
+    
+    /// Groups duplicates (e.g. 4K vs 1080p) BUT ensures generic titles remain unique.
+    private func deduplicate(channels: [Channel], isSeries: Bool) -> [Channel] {
+        var unique: [Channel] = []
+        var seenKeys = Set<String>()
+        
+        for item in channels {
+            var key = item.title.lowercased()
+            
+            // CRITICAL FIX: If title is generic (e.g. "Unknown Title"), use the filename/URL as the key.
+            // This prevents 100 items named "Unknown Title" from being hidden as duplicates.
+            if isGenericTitle(item.title) {
+                key = (item.canonicalTitle ?? item.url).lowercased()
+            } else if isSeries {
+                // For series, group by SeriesID (if structured) to merge seasons/episodes into one Show result
+                if let sid = item.seriesId, sid != "0", !sid.isEmpty {
+                    key = "sid_\(sid)"
+                }
+            }
+            
+            if !seenKeys.contains(key) {
+                seenKeys.insert(key)
+                unique.append(item)
+            }
+        }
+        
+        return unique
+    }
+    
+    private func isGenericTitle(_ title: String) -> Bool {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return t == "unknown title" || t == "unknown channel" || t == "movie" || t == "series" || t.isEmpty || t.count < 3
+    }
+    
+    // MARK: - Reverse Lookup (Matches)
     
     func findMatches(for titles: [String], limit: Int = 20) -> [Channel] {
-        // Simplified to just strict title matching to avoid "Unknown" logic
         guard !titles.isEmpty else { return [] }
-        
         let request = NSFetchRequest<Channel>(entityName: "Channel")
+        // Check only the first 50 titles to prevent query explosion
         let subPredicates = titles.prefix(50).map { NSPredicate(format: "title CONTAINS[cd] %@", $0) }
         request.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: subPredicates)
         request.fetchLimit = 50
-        
         var matches: [Channel] = []
-        context.performAndWait {
-            matches = (try? context.fetch(request)) ?? []
-        }
-        return deduplicateChannels(matches)
+        context.performAndWait { matches = (try? context.fetch(request)) ?? [] }
+        return deduplicate(channels: matches, isSeries: false)
     }
     
-    // MARK: - Standard Lists (Unchanged)
+    // MARK: - Standard List Accessors
     
     func getFavorites(type: String) -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "isFavorite == YES AND type == %@", type)
         request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
         let raw = (try? context.fetch(request)) ?? []
-        return deduplicateChannels(raw)
+        // Favorites are user-curated, minimal deduplication needed, but good to be safe
+        return deduplicate(channels: raw, isSeries: type == "series")
     }
     
     func getRecentlyAdded(type: String, limit: Int) -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "type == %@", type)
         request.sortDescriptors = [NSSortDescriptor(key: "addedAt", ascending: false)]
-        request.fetchLimit = limit * 4
+        request.fetchLimit = limit * 4 // Fetch more to allow for dedup reduction
         let raw = (try? context.fetch(request)) ?? []
-        return Array(deduplicateChannels(raw).prefix(limit))
+        return Array(deduplicate(channels: raw, isSeries: type == "series").prefix(limit))
     }
     
     func getRecentFallback(type: String, limit: Int) -> [Channel] {
@@ -158,7 +180,7 @@ class ChannelRepository {
         request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
         request.fetchLimit = limit * 3
         let raw = (try? context.fetch(request)) ?? []
-        return Array(deduplicateChannels(raw).prefix(limit))
+        return Array(deduplicate(channels: raw, isSeries: type == "series").prefix(limit))
     }
     
     // MARK: - Smart Fetching
@@ -173,41 +195,51 @@ class ChannelRepository {
         
         context.performAndWait {
             guard let history = try? context.fetch(request) else { return }
+            var seenUrls = Set<String>()
             var processedSeriesMap = [String: Bool]()
             
             for item in history {
                 if results.count >= 20 { break }
-                guard let channel = getChannel(byUrl: item.channelUrl), channel.type == type else { continue }
+                if seenUrls.contains(item.channelUrl) { continue }
+                
+                guard let channel = self.getChannel(byUrl: item.channelUrl), channel.type == type else { continue }
                 
                 let percentage = Double(item.duration) > 0 ? Double(item.position) / Double(item.duration) : 0
                 
                 if channel.type == "movie" {
+                    // Movies: Show if 5% < watched < 95%
                     if percentage > 0.05 && percentage < 0.95 {
                         results.append(channel)
+                        seenUrls.insert(channel.url)
                     }
                 } else if channel.type == "series" || channel.type == "series_episode" {
-                    // Simple series key based on title to avoid over-grouping
+                    // Series: Group by Title to avoid showing 5 episodes of same show
                     let seriesKey = channel.title
                     if processedSeriesMap[seriesKey] == true { continue }
                     
                     if percentage < 0.95 {
+                        // Resume current episode
                         results.append(channel)
+                        seenUrls.insert(channel.url)
                         processedSeriesMap[seriesKey] = true
                     } else {
+                        // Fetch Next Episode
                         if let nextEp = nextEpService.findNextEpisode(currentChannel: channel) {
                             results.append(nextEp)
+                            seenUrls.insert(nextEp.url)
                             processedSeriesMap[seriesKey] = true
                         }
                     }
                 } else if channel.type == "live" {
                     results.append(channel)
+                    seenUrls.insert(channel.url)
                 }
             }
         }
         return results
     }
     
-    // MARK: - Navigation & Grouping
+    // MARK: - Navigation & Drill Down
     
     func getBrowsingContent(playlistUrl: String, type: String, group: String) -> [Channel] {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
@@ -223,7 +255,7 @@ class ChannelRepository {
         request.fetchLimit = 1000
         
         let raw = (try? context.fetch(request)) ?? []
-        return deduplicateChannels(raw)
+        return deduplicate(channels: raw, isSeries: type == "series")
     }
     
     func getGroups(playlistUrl: String, type: String) -> [String] {
@@ -238,48 +270,10 @@ class ChannelRepository {
         return results.compactMap { $0["group"] as? String }
     }
     
-    // MARK: - Helpers
-    
     func getChannel(byUrl url: String) -> Channel? {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.predicate = NSPredicate(format: "url == %@", url)
         request.fetchLimit = 1
         return try? context.fetch(request).first
-    }
-    
-    // MARK: - Simplified Deduplication
-    
-    /// Groups by title and picks the best quality version.
-    private func deduplicateChannels(_ channels: [Channel]) -> [Channel] {
-        var groups: [String: [Channel]] = [:]
-        
-        for channel in channels {
-            // Use the simple title as key.
-            // If "Unknown Title" is appearing, it's usually because 'title' is empty/nil.
-            // Fallback to canonicalTitle if title is suspicious.
-            let key = channel.title.count > 2 ? channel.title : (channel.canonicalTitle ?? "Unknown")
-            groups[key, default: []].append(channel)
-        }
-        
-        var unique: [Channel] = []
-        for (_, variants) in groups {
-            // Simple logic: Prefer item with cover art, then 4K, then 1080p
-            if let best = variants.sorted(by: { a, b in
-                let aCover = (a.cover != nil) ? 1 : 0
-                let bCover = (b.cover != nil) ? 1 : 0
-                if aCover != bCover { return aCover > bCover }
-                
-                // If covers equal, prefer "4K" in title/quality
-                let aQ = (a.quality ?? "") + a.title
-                let bQ = (b.quality ?? "") + b.title
-                if aQ.contains("4K") && !bQ.contains("4K") { return true }
-                
-                return false
-            }).first {
-                unique.append(best)
-            }
-        }
-        // Return sorted alphabetically
-        return unique.sorted { $0.title < $1.title }
     }
 }

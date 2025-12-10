@@ -8,27 +8,28 @@ class SearchViewModel: ObservableObject {
     
     // MARK: - Search Scopes
     enum SearchScope: String, CaseIterable {
-        case all = "All"
-        case movies = "Movies"
-        case series = "Series"
-        case live = "Live TV"
+        case library = "Library"
+        case liveTV = "Live TV"
     }
     
     // MARK: - Inputs
     @Published var query: String = ""
-    @Published var selectedScope: SearchScope = .all
+    @Published var selectedScope: SearchScope = .library
     
-    // MARK: - Outputs
+    // MARK: - Outputs (Library)
     @Published var movies: [Channel] = []
     @Published var series: [Channel] = []
-    @Published var liveChannels: [Channel] = []
     
-    // MARK: - History (Fixed)
-    @Published var searchHistory: [String] = []
+    // MARK: - Outputs (Live TV)
+    @Published var liveCategories: [String] = []
+    @Published var liveChannels: [Channel] = []
     
     // MARK: - UI State
     @Published var isLoading: Bool = false
     @Published var hasNoResults: Bool = false
+    
+    // MARK: - History
+    @Published var searchHistory: [String] = []
     
     // MARK: - Dependencies
     private var repository: PrimeFlixRepository?
@@ -36,24 +37,21 @@ class SearchViewModel: ObservableObject {
     private var searchTask: Task<Void, Never>?
     
     // MARK: - Initialization
-    // FIX: Accepts optional repository to ensure safe init
-    init(repository: PrimeFlixRepository? = nil) {
-        self.repository = repository
-        // Load History from UserDefaults
+    init(initialScope: SearchScope = .library) {
+        self.selectedScope = initialScope
         self.searchHistory = UserDefaults.standard.stringArray(forKey: "SearchHistory") ?? []
-        setupSubscriptions()
     }
     
     func configure(repository: PrimeFlixRepository) {
         self.repository = repository
+        setupSubscriptions()
     }
     
     // MARK: - History Management
     
     func addToHistory(_ term: String) {
         guard !term.isEmpty else { return }
-        
-        // Remove duplicates and move to top
+        // Remove duplicate if exists, then prepend
         if let index = searchHistory.firstIndex(of: term) {
             searchHistory.remove(at: index)
         }
@@ -63,82 +61,112 @@ class SearchViewModel: ObservableObject {
         if searchHistory.count > 10 {
             searchHistory.removeLast()
         }
-        
-        saveHistory()
+        UserDefaults.standard.set(searchHistory, forKey: "SearchHistory")
     }
     
     func clearHistory() {
         searchHistory.removeAll()
-        saveHistory()
-    }
-    
-    private func saveHistory() {
         UserDefaults.standard.set(searchHistory, forKey: "SearchHistory")
     }
     
     // MARK: - Search Logic
     
     private func setupSubscriptions() {
-        // 1. Debounced Search Trigger
+        // 1. Watch Query (Debounced)
         $query
             .removeDuplicates()
             .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
             .sink { [weak self] newQuery in
-                self?.handleQueryChange(newQuery)
+                guard let self = self else { return }
+                if !newQuery.isEmpty {
+                    self.performSearch()
+                } else {
+                    self.clearResults()
+                }
             }
             .store(in: &cancellables)
         
-        // 2. Scope Change (Immediate)
+        // 2. Watch Scope (Immediate)
         $selectedScope
             .dropFirst()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
-                self.handleQueryChange(self.query)
+                // If query exists, re-run search immediately for new scope
+                if !self.query.isEmpty {
+                    self.performSearch()
+                }
             }
             .store(in: &cancellables)
     }
     
-    private func handleQueryChange(_ newQuery: String) {
-        searchTask?.cancel()
-        
-        let cleanQuery = newQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        if cleanQuery.isEmpty {
+    func performSearch() {
+        guard let repo = repository, !query.isEmpty else {
             clearResults()
             return
         }
         
-        performLocalSearch(query: cleanQuery)
-    }
-    
-    private func performLocalSearch(query: String) {
-        guard let repo = repository else { return }
-        
         self.isLoading = true
         self.hasNoResults = false
         
+        // Cancel any existing task
+        searchTask?.cancel()
+        
+        let currentQuery = query
+        let currentScope = selectedScope
+        
         searchTask = Task {
-            var filters = ChannelRepository.SearchFilters()
-            switch selectedScope {
-            case .movies: filters.onlyMovies = true
-            case .series: filters.onlySeries = true
-            case .live: filters.onlyLive = true
-            case .all: break
-            }
+            // Perform heavy lifting on background context
+            let bgContext = repo.container.newBackgroundContext()
             
-            // Execute Search via Repository
-            let results = await repo.searchHybrid(query: query, filters: filters)
-            
-            if !Task.isCancelled {
-                withAnimation(.easeInOut) {
-                    self.movies = results.movies
-                    self.series = results.series
-                    self.liveChannels = results.live
+            await bgContext.perform { [weak self] in
+                guard let self = self else { return }
+                
+                let searchRepo = ChannelRepository(context: bgContext)
+                
+                if currentScope == .library {
+                    // --- LIBRARY SEARCH ---
+                    let results = searchRepo.searchLibrary(query: currentQuery)
                     
-                    let totalCount = results.movies.count + results.series.count + results.live.count
-                    self.hasNoResults = (totalCount == 0)
-                    self.isLoading = false
+                    // Map to ObjectIDs for thread transfer
+                    let movieIDs = results.movies.map { $0.objectID }
+                    let seriesIDs = results.series.map { $0.objectID }
+                    
+                    Task { @MainActor in
+                        if Task.isCancelled { return }
+                        
+                        let viewContext = repo.container.viewContext
+                        // Re-fetch objects on Main Thread
+                        self.movies = movieIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
+                        self.series = seriesIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
+                        
+                        self.isLoading = false
+                        self.hasNoResults = self.movies.isEmpty && self.series.isEmpty
+                        
+                        // Trigger Enrichment (optional, for missing covers)
+                        if !self.movies.isEmpty || !self.series.isEmpty {
+                            let combined = Array((self.movies + self.series).prefix(8))
+                            await repo.enrichContent(items: combined)
+                        }
+                    }
+                    
+                } else {
+                    // --- LIVE TV SEARCH ---
+                    let results = searchRepo.searchLive(query: currentQuery)
+                    
+                    let channelIDs = results.channels.map { $0.objectID }
+                    let foundCategories = results.categories
+                    
+                    Task { @MainActor in
+                        if Task.isCancelled { return }
+                        
+                        let viewContext = repo.container.viewContext
+                        self.liveCategories = foundCategories
+                        self.liveChannels = channelIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
+                        
+                        self.isLoading = false
+                        self.hasNoResults = self.liveCategories.isEmpty && self.liveChannels.isEmpty
+                    }
                 }
             }
         }
@@ -147,8 +175,17 @@ class SearchViewModel: ObservableObject {
     func clearResults() {
         self.movies = []
         self.series = []
+        self.liveCategories = []
         self.liveChannels = []
-        self.hasNoResults = false
         self.isLoading = false
+        self.hasNoResults = false
+    }
+    
+    // MARK: - Actions
+    
+    /// Allows clicking a category in search results to refine the search to that category name
+    func refineSearch(to category: String) {
+        self.query = category
+        // The subscription to $query will pick this up and trigger a search automatically
     }
 }

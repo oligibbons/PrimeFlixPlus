@@ -13,9 +13,9 @@ enum XtreamError: LocalizedError {
             if code == 513 { return "Provider Error 513 (Rate Limit)" }
             return "Server Error: \(code)"
         case .emptyData:
-            return "Server returned no data"
+            return "Server returned empty data."
         case .parsingError:
-            return "Data format not supported"
+            return "Data format not supported."
         }
     }
 }
@@ -24,11 +24,12 @@ actor XtreamClient {
     private let session = UnsafeSession.shared
     private let decoder = JSONDecoder()
     
-    // Trusted User-Agents
+    // Trusted User-Agents (Rotated) + One Generic Fallback
     private let userAgents = [
         "TiviMate/4.7.0 (Linux; Android 11)",
         "IPTVSmartersPro/1.1.1",
-        "okhttp/3.12.1"
+        "okhttp/3.12.1",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     ]
     
     // MARK: - Bulk API Calls
@@ -58,17 +59,13 @@ actor XtreamClient {
     
     // MARK: - Deep Details Fetch
     
-    /// Fetches all episodes for a specific series.
-    /// Crucial for "Lazy Syncing" in DetailsViewModel.
     func getSeriesEpisodes(input: XtreamInput, seriesId: String) async throws -> [XtreamChannelInfo.Episode] {
-        // action=get_series_info returns a complex object: { "seasons": [], "info": {}, "episodes": { "1": [...], "2": [...] } }
         let url = "\(input.basicUrl)/player_api.php?username=\(input.username)&password=\(input.password)&action=get_series_info&series_id=\(seriesId)"
         
         do {
             let container: XtreamChannelInfo.SeriesInfoContainer = try await fetchWithRetry(url: url)
             
-            // Flatten the "Season Dictionary" into a single list of episodes
-            // The API returns episodes as a dictionary where Key = Season Number (String)
+            // Flatten Season Dictionary
             let allEpisodes = container.episodes.flatMap { (key, value) -> [XtreamChannelInfo.Episode] in
                 return value
             }
@@ -79,7 +76,6 @@ actor XtreamClient {
             }
         } catch {
             print("⚠️ Series Info Fetch Failed for ID \(seriesId): \(error.localizedDescription)")
-            // Return empty list instead of throwing to allow UI to degrade gracefully
             return []
         }
     }
@@ -96,7 +92,7 @@ actor XtreamClient {
         for (index, agent) in userAgents.enumerated() {
             do {
                 if index > 0 {
-                    // Exponential backoff: 1s, 2s, 4s...
+                    // Exponential backoff
                     let delay = UInt64(pow(2.0, Double(index))) * 1_000_000_000
                     try? await Task.sleep(nanoseconds: delay)
                 }
@@ -106,6 +102,7 @@ actor XtreamClient {
                 
                 // Retry specific network/server errors
                 if let xErr = error as? XtreamError, case .invalidResponse(let code, _) = xErr {
+                    // Don't retry 404s, but do retry 502/Gateway errors
                     if [403, 401, 512, 513, 502, 504, 520].contains(code) {
                         continue
                     }
@@ -115,7 +112,6 @@ actor XtreamClient {
                 if nsErr.domain == NSURLErrorDomain && (nsErr.code == -1011 || nsErr.code == -1012 || nsErr.code == -1001) {
                     continue
                 }
-                // Don't retry DNS errors
                 if nsErr.domain == NSURLErrorDomain && nsErr.code == -1003 { throw error }
             }
         }
@@ -129,7 +125,9 @@ actor XtreamClient {
         request.httpMethod = "GET"
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("close", forHTTPHeaderField: "Connection")
-        request.timeoutInterval = 60 // Shorter timeout for interactive fetches
+        
+        // FIX: Increased timeout for large library fetching
+        request.timeoutInterval = 180
         
         let (data, response) = try await session.data(for: request)
         
@@ -142,14 +140,20 @@ actor XtreamClient {
             do {
                 return try decoder.decode(T.self, from: data)
             } catch {
+                // Handling empty array/object mismatch
                 if let str = String(data: data, encoding: .utf8), str == "[]" {
-                    return try decoder.decode(T.self, from: "{}".data(using: .utf8)!) // Handle empty array as object if needed, or throw
+                    // If T is expected to be an array, this is fine, but if T is a struct, it fails.
+                    // We attempt to decode empty object for struct expectations.
+                    if let emptyObj = "{}".data(using: .utf8), let fallback = try? decoder.decode(T.self, from: emptyObj) {
+                        return fallback
+                    }
                 }
-                print("❌ Decoding Error for URL: \(urlString)")
+                print("❌ Decoding Error for URL: \(urlString) - \(error)")
                 throw XtreamError.parsingError
             }
         }
         
+        // Error Message Extraction (Handling HTML bodies)
         var serverMsg: String? = nil
         if let body = String(data: data, encoding: .utf8) {
              let clean = body.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression, range: nil)

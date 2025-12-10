@@ -148,7 +148,6 @@ enum TitleNormalizer {
             }
             
             // Only cut if we haven't already identified it as a series (some series have years in title)
-            // e.g. "Doctor.Who.2005.S01E01" -> We want "Doctor Who 2005", not "Doctor Who"
             if !isSeries {
                 let cutIndex = Range(match.range, in: workingTitle)!.lowerBound
                 workingTitle = String(workingTitle[..<cutIndex])
@@ -156,7 +155,6 @@ enum TitleNormalizer {
         }
         
         // 4. Clean The Extracted Title (Basic Chars)
-        // Replace dots, underscores, parens with spaces
         let separators = CharacterSet(charactersIn: "._-()[]")
         var cleanTitle = workingTitle.components(separatedBy: separators)
             .filter { !$0.isEmpty }
@@ -165,14 +163,11 @@ enum TitleNormalizer {
             .capitalized
         
         // 5. Aggressive Suffix Removal Loop (The "Chillio" Fix)
-        // Repeatedly strip known tags from the end until clean
-        // e.g. "Severance Fr 4K" -> "Severance Fr" -> "Severance"
         var changed = true
         while changed {
             changed = false
             let tokens = cleanTitle.components(separatedBy: " ")
             if let last = tokens.last?.uppercased() {
-                // Remove if it matches a tag OR looks like a Year (if we haven't found one yet or want to clean it)
                 if tagsToRemove.contains(last) || (Int(last) != nil && last.count == 4) {
                     cleanTitle = tokens.dropLast().joined(separator: " ")
                     changed = true
@@ -180,17 +175,21 @@ enum TitleNormalizer {
             }
         }
         
-        // Fallback: If title became empty (e.g. file was just "4K.mp4"), revert
-        if cleanTitle.isEmpty { cleanTitle = "Unknown Title" }
+        // FIX: Better Fallback
+        // If normalization stripped everything (or was empty), fallback to the RAW title
+        // instead of "Unknown Title" so the user can at least see what it is.
+        if cleanTitle.isEmpty || cleanTitle.count < 2 {
+            cleanTitle = rawTitle
+        }
         
-        // 6. Detect Quality & Language from RAW string (to catch tags at the end)
+        // 6. Detect Quality & Language from RAW string
         let quality = detectQuality(in: rawTitle)
         let language = detectLanguage(in: rawTitle)
         
         let info = ContentInfo(
             rawTitle: rawTitle,
             normalizedTitle: cleanTitle,
-            displayTitle: cleanTitle, // Used for UI
+            displayTitle: cleanTitle,
             quality: quality,
             language: language,
             year: detectedYear,
@@ -215,7 +214,6 @@ enum TitleNormalizer {
     
     private static func detectLanguage(in text: String) -> String? {
         let upper = text.uppercased()
-        // Try map first (fastest)
         let tokens = upper.components(separatedBy: CharacterSet.alphanumerics.inverted)
         for token in tokens {
             if let lang = languageMap[token] { return lang }
@@ -225,7 +223,6 @@ enum TitleNormalizer {
     
     // MARK: - Fuzzy Matching
     
-    /// Returns a score between 0.0 (No match) and 1.0 (Perfect match)
     static func similarity(between s1: String, and s2: String) -> Double {
         let t1 = s1.lowercased().filter { $0.isLetter || $0.isNumber }
         let t2 = s2.lowercased().filter { $0.isLetter || $0.isNumber }

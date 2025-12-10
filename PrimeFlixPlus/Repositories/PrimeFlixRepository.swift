@@ -135,6 +135,12 @@ class PrimeFlixRepository: ObservableObject {
         return channelRepo.getGroups(playlistUrl: playlistUrl, type: type.rawValue)
     }
     
+    func getBrowsingContent(playlistUrl: String, type: StreamType, group: String) -> [Channel] {
+        // Corrected type conversion if necessary, assuming repository expects String
+        return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type.rawValue, group: group)
+    }
+    
+    // Overload for string type if needed by legacy code
     func getBrowsingContent(playlistUrl: String, type: String, group: String) -> [Channel] {
         return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type, group: group)
     }
@@ -271,10 +277,11 @@ class PrimeFlixRepository: ObservableObject {
             }
             
         } catch {
-            print("❌ Sync Failed: \(error)")
+            print("❌ Sync Failed: \(error.localizedDescription)")
             await MainActor.run {
                 self.isErrorState = true
-                self.syncStatusMessage = "Sync Error"
+                // FIX: Propagate the actual error description to the UI so the user knows WHY it failed.
+                self.syncStatusMessage = "Sync Error: \(error.localizedDescription)"
             }
         }
     }

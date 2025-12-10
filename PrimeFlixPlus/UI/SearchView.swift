@@ -14,11 +14,16 @@ struct SearchView: View {
         case scope(SearchViewModel.SearchScope)
     }
     
+    // Grid Layout for Live Channels
+    let channelGridColumns = [
+        GridItem(.adaptive(minimum: 220, maximum: 260), spacing: 40)
+    ]
+    
     // MARK: - Initializer
-    // FIX: Added 'repository' to init to satisfy the build error
+    // FIX: Accepts optional repository to ensure safe init
     init(repository: PrimeFlixRepository, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
         // Initialize ViewModel with the repository immediately
-        _viewModel = StateObject(wrappedValue: SearchViewModel(repository: repository))
+        _viewModel = StateObject(wrappedValue: SearchViewModel(initialScope: .library))
         self.onPlay = onPlay
         self.onBack = onBack
     }
@@ -30,7 +35,7 @@ struct SearchView: View {
             VStack(spacing: 0) {
                 
                 // MARK: - 1. Search Header
-                VStack(spacing: 20) {
+                VStack(spacing: 25) {
                     HStack(spacing: 20) {
                         Button(action: onBack) {
                             Image(systemName: "arrow.left")
@@ -44,8 +49,8 @@ struct SearchView: View {
                         
                         // Standard Glass Text Field
                         GlassTextField(
-                            title: "Search Library",
-                            placeholder: "Search Movies, Series, or Live TV...",
+                            title: "Search",
+                            placeholder: viewModel.selectedScope == .library ? "Movies & Series..." : "Channels & Groups...",
                             text: $viewModel.query,
                             nextFocus: {
                                 // Save history when user hits Enter
@@ -112,7 +117,11 @@ struct SearchView: View {
                             noResultsPlaceholder
                         }
                         else {
-                            resultsContent
+                            if viewModel.selectedScope == .library {
+                                libraryResults
+                            } else {
+                                liveTvResults
+                            }
                         }
                     }
                     .padding(.horizontal, 50)
@@ -130,7 +139,8 @@ struct SearchView: View {
     
     // MARK: - Subviews
     
-    private var resultsContent: some View {
+    @ViewBuilder
+    private var libraryResults: some View {
         LazyVStack(alignment: .leading, spacing: 60) {
             if !viewModel.movies.isEmpty {
                 ResultSection(title: "Movies", items: viewModel.movies, onPlay: onPlay)
@@ -138,8 +148,83 @@ struct SearchView: View {
             if !viewModel.series.isEmpty {
                 ResultSection(title: "Series", items: viewModel.series, onPlay: onPlay)
             }
+        }
+    }
+    
+    @ViewBuilder
+    private var liveTvResults: some View {
+        VStack(alignment: .leading, spacing: 40) {
+            
+            // 1. Categories Row (Pills)
+            if !viewModel.liveCategories.isEmpty {
+                VStack(alignment: .leading, spacing: 15) {
+                    Text("Matching Groups")
+                        .font(CinemeltTheme.fontTitle(28))
+                        .foregroundColor(CinemeltTheme.accent)
+                        .padding(.leading, 10)
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 20) {
+                            ForEach(viewModel.liveCategories, id: \.self) { category in
+                                Button(action: {
+                                    withAnimation { viewModel.refineSearch(to: category) }
+                                }) {
+                                    Text(category)
+                                        .font(CinemeltTheme.fontBody(20))
+                                        .fontWeight(.medium)
+                                        .foregroundColor(CinemeltTheme.cream)
+                                        .padding(.horizontal, 24)
+                                        .padding(.vertical, 12)
+                                        .background(Color.white.opacity(0.1))
+                                        .cornerRadius(12)
+                                }
+                                .buttonStyle(CinemeltCardButtonStyle())
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 20)
+                    }
+                    .focusSection()
+                }
+            }
+            
+            // 2. Channels Grid
             if !viewModel.liveChannels.isEmpty {
-                ResultSection(title: "Live Channels", items: viewModel.liveChannels, onPlay: onPlay)
+                VStack(alignment: .leading, spacing: 25) {
+                    Text("Channels")
+                        .font(CinemeltTheme.fontTitle(32))
+                        .foregroundColor(CinemeltTheme.cream)
+                        .cinemeltGlow()
+                    
+                    LazyVGrid(columns: channelGridColumns, spacing: 50) {
+                        ForEach(viewModel.liveChannels) { channel in
+                            Button(action: { onPlay(channel) }) {
+                                VStack(spacing: 15) {
+                                    AsyncImage(url: URL(string: channel.cover ?? "")) { image in
+                                        image.resizable().aspectRatio(contentMode: .fit)
+                                    } placeholder: {
+                                        Image(systemName: "tv")
+                                            .font(.system(size: 40))
+                                            .foregroundColor(.gray.opacity(0.3))
+                                    }
+                                    .frame(width: 120, height: 120)
+                                    .background(Color.white.opacity(0.05))
+                                    .cornerRadius(20)
+                                    .shadow(radius: 5)
+                                    
+                                    Text(channel.title)
+                                        .font(CinemeltTheme.fontBody(18))
+                                        .foregroundColor(CinemeltTheme.cream)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.center)
+                                }
+                            }
+                            .buttonStyle(.card)
+                            .padding(10)
+                        }
+                    }
+                }
+                .focusSection()
             }
         }
     }
