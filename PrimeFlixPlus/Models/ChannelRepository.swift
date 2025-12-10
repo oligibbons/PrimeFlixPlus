@@ -21,6 +21,13 @@ class ChannelRepository {
         let channels: [Channel]
     }
     
+    // MARK: - Core Mutators
+    
+    func toggleFavorite(_ channel: Channel) {
+        channel.isFavorite.toggle()
+        // Context save is handled by the caller (PrimeFlixRepository)
+    }
+    
     // MARK: - Core Search Methods
     
     /// Searches Library (Movies & Series).
@@ -31,7 +38,7 @@ class ChannelRepository {
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         request.fetchLimit = 1000
         
-        // Match: Title OR File Name (Canonical) OR Group OR Raw URL
+        // Search Logic: Title OR File Name (Canonical) OR Group OR Raw URL
         let textMatch = NSPredicate(
             format: "title CONTAINS[cd] %@ OR canonicalTitle CONTAINS[cd] %@ OR group CONTAINS[cd] %@ OR url CONTAINS[cd] %@",
             rawTerm, rawTerm, rawTerm, rawTerm
@@ -46,18 +53,19 @@ class ChannelRepository {
             results = (try? context.fetch(request)) ?? []
         }
         
-        // Separation
+        // Separation & Deduplication
         let rawMovies = results.filter { $0.type == "movie" }
+        // We exclude individual episodes from the main search results if a "Series Container" exists,
+        // but since we want to find shows even if only episodes matched, we process them all and group by Show.
         let rawSeries = results.filter { $0.type == "series" || $0.type == "series_episode" }
         
-        // Deduplication (Preserving Unknown Titles)
         let uniqueMovies = deduplicate(channels: rawMovies, isSeries: false)
         let uniqueSeries = deduplicate(channels: rawSeries, isSeries: true)
         
         return LibrarySearchResults(movies: uniqueMovies, series: uniqueSeries)
     }
     
-    /// Searches Live TV.
+    /// Searches Live TV. Returns (Categories, Channels).
     func searchLive(query: String) -> LiveSearchResults {
         let rawTerm = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if rawTerm.isEmpty { return LiveSearchResults(categories: [], channels: []) }
@@ -76,17 +84,17 @@ class ChannelRepository {
             channels = (try? context.fetch(channelReq)) ?? []
         }
         
-        // B. Search Categories (Distinct Groups)
-        let distinctGroupReq = NSFetchRequest<NSDictionary>(entityName: "Channel")
-        distinctGroupReq.resultType = .dictionaryResultType
-        distinctGroupReq.returnsDistinctResults = true
-        distinctGroupReq.propertiesToFetch = ["group"]
-        distinctGroupReq.predicate = NSPredicate(format: "type == 'live' AND group CONTAINS[cd] %@", rawTerm)
-        distinctGroupReq.sortDescriptors = [NSSortDescriptor(key: "group", ascending: true)]
+        // B. Search Groups (Categories) matching the query
+        let groupReq = NSFetchRequest<NSDictionary>(entityName: "Channel")
+        groupReq.resultType = .dictionaryResultType
+        groupReq.returnsDistinctResults = true
+        groupReq.propertiesToFetch = ["group"]
+        groupReq.predicate = NSPredicate(format: "type == 'live' AND group CONTAINS[cd] %@", rawTerm)
+        groupReq.sortDescriptors = [NSSortDescriptor(key: "group", ascending: true)]
         
         var categories: [String] = []
         context.performAndWait {
-            if let dicts = try? context.fetch(distinctGroupReq) as? [[String: String]] {
+            if let dicts = try? context.fetch(groupReq) as? [[String: String]] {
                 categories = dicts.compactMap { $0["group"] }
             }
         }
@@ -96,37 +104,73 @@ class ChannelRepository {
     
     // MARK: - Smart Deduplication (The Fix)
     
+    /// Groups duplicates but ensures "Unknown Title" items remain unique.
     private func deduplicate(channels: [Channel], isSeries: Bool) -> [Channel] {
-        var unique: [Channel] = []
-        var seenKeys = Set<String>()
+        // We use a dictionary to keep the "Best" version of a duplicate set
+        var grouped: [String: Channel] = [:]
+        var order: [String] = [] // To preserve sort order
         
         for item in channels {
-            var key = item.title.lowercased()
+            var key = item.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             
-            // If the title is generic/broken, use the filename/URL as the key.
+            // 1. Handle "Generic/Unknown" Titles (Force Uniqueness)
             if isGenericTitle(item.title) {
+                // Use filename/URL as key to prevent collapsing different "Unknown" items
                 key = (item.canonicalTitle ?? item.url).lowercased()
-            } else if isSeries {
-                // Group Series by ID if available
+            }
+            // 2. Handle Series Grouping
+            else if isSeries {
+                // If it has a SeriesID, use that as the ultimate grouping key
                 if let sid = item.seriesId, sid != "0", !sid.isEmpty {
                     key = "sid_\(sid)"
                 }
+                // If no SeriesID (M3U), we fall back to the Title key above
             }
             
-            if !seenKeys.contains(key) {
-                seenKeys.insert(key)
-                unique.append(item)
+            // 3. Selection Logic ("Keep Best")
+            if let existing = grouped[key] {
+                // If we already have this item, check if the new one is "better"
+                if isBetterVersion(candidate: item, current: existing) {
+                    grouped[key] = item
+                }
+            } else {
+                grouped[key] = item
+                order.append(key)
             }
         }
-        return unique
+        
+        // Return items in original sort order
+        return order.compactMap { grouped[$0] }
+    }
+    
+    /// Helper to pick the "Best" version to display in the search result
+    private func isBetterVersion(candidate: Channel, current: Channel) -> Bool {
+        // 1. Prefer items with Cover Art
+        let candidateHasCover = (candidate.cover != nil)
+        let currentHasCover = (current.cover != nil)
+        
+        if candidateHasCover && !currentHasCover { return true }
+        if !candidateHasCover && currentHasCover { return false }
+        
+        // 2. Prefer "Series Container" over "Episode" (for Series search)
+        if candidate.type == "series" && current.type == "series_episode" { return true }
+        if candidate.type == "series_episode" && current.type == "series" { return false }
+        
+        // 3. Prefer 4K/UHD over standard
+        let cQ = candidate.quality ?? ""
+        let curQ = current.quality ?? ""
+        if cQ.contains("4K") && !curQ.contains("4K") { return true }
+        
+        return false
     }
     
     private func isGenericTitle(_ title: String) -> Bool {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return t == "unknown title" || t == "unknown channel" || t == "movie" || t == "series" || t.count < 3
+        // REMOVED: 't.count < 3' check which was hiding movies like "Up", "It", "Us"
+        return t == "unknown title" || t == "unknown channel" || t == "movie" || t == "series" || t.isEmpty
     }
     
-    // MARK: - Standard Accessors (Preserved)
+    // MARK: - Legacy / Standard Methods
     
     func findMatches(for titles: [String], limit: Int = 20) -> [Channel] {
         guard !titles.isEmpty else { return [] }
@@ -134,7 +178,7 @@ class ChannelRepository {
         let subPredicates = titles.prefix(50).map { NSPredicate(format: "title CONTAINS[cd] %@", $0) }
         request.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: subPredicates)
         request.fetchLimit = limit
-        return (try? context.fetch(request)) ?? []
+        return deduplicate(channels: (try? context.fetch(request)) ?? [], isSeries: false)
     }
     
     func getFavorites(type: String) -> [Channel] {
@@ -241,9 +285,5 @@ class ChannelRepository {
         request.predicate = NSPredicate(format: "url == %@", url)
         request.fetchLimit = 1
         return try? context.fetch(request).first
-    }
-    
-    func toggleFavorite(_ channel: Channel) {
-        channel.isFavorite.toggle()
     }
 }
