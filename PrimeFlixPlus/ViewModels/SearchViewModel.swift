@@ -95,6 +95,8 @@ class SearchViewModel: ObservableObject {
                 // If query exists, re-run search immediately for new scope
                 if !self.query.isEmpty {
                     self.performSearch()
+                } else {
+                    self.clearResults()
                 }
             }
             .store(in: &cancellables)
@@ -126,6 +128,7 @@ class SearchViewModel: ObservableObject {
                 
                 if currentScope == .library {
                     // --- LIBRARY SEARCH ---
+                    // FIX: Calls the dedicated 'searchLibrary' method we restored
                     let results = searchRepo.searchLibrary(query: currentQuery)
                     
                     // Map to ObjectIDs for thread transfer
@@ -152,6 +155,7 @@ class SearchViewModel: ObservableObject {
                     
                 } else {
                     // --- LIVE TV SEARCH ---
+                    // FIX: Calls 'searchLive' (renamed from searchLiveContent to match repo)
                     let results = searchRepo.searchLive(query: currentQuery)
                     
                     let channelIDs = results.channels.map { $0.objectID }

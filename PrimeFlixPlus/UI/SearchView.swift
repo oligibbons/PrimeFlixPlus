@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SearchView: View {
     @StateObject private var viewModel: SearchViewModel
+    @EnvironmentObject var repository: PrimeFlixRepository
     
     var onPlay: (Channel) -> Void
     var onBack: () -> Void
@@ -20,9 +21,8 @@ struct SearchView: View {
     ]
     
     // MARK: - Initializer
-    // FIX: Accepts optional repository to ensure safe init
+    // We remove the repository from init because we use @EnvironmentObject now (cleaner)
     init(repository: PrimeFlixRepository, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
-        // Initialize ViewModel with the repository immediately
         _viewModel = StateObject(wrappedValue: SearchViewModel(initialScope: .library))
         self.onPlay = onPlay
         self.onBack = onBack
@@ -131,6 +131,7 @@ struct SearchView: View {
             }
         }
         .onAppear {
+            viewModel.configure(repository: repository)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if focusedField == nil { focusedField = .searchBar }
             }
