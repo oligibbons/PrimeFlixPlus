@@ -19,12 +19,14 @@ struct HomeView: View {
     
     @State private var heroChannel: Channel?
     
-    // Parallax State
+    // Navigation State
     @State private var scrollOffset: CGFloat = 0
+    @State private var showEpgGrid: Bool = false
     
     var body: some View {
         ZStack {
-            // 1. Dynamic Background Layer with Parallax
+            // 1. Dynamic Background Layer (Parallax for VOD)
+            // We keep this global so transitions between tabs feel grounded
             HomeBackgroundView(heroChannel: heroChannel, scrollOffset: scrollOffset)
             
             // 2. Main Content Switcher
@@ -35,7 +37,16 @@ struct HomeView: View {
                     onAdd: onAddPlaylist
                 )
                 .transition(.opacity)
+            } else if showEpgGrid {
+                // Full Screen EPG Overlay
+                EpgGridView(
+                    onPlay: onPlayChannel,
+                    onBack: { withAnimation { showEpgGrid = false } }
+                )
+                .transition(.move(edge: .bottom))
+                .zIndex(10)
             } else if let categoryTitle = viewModel.drillDownCategory {
+                // Category Drill Down (Movies/Series)
                 HomeDrillDownView(
                     title: categoryTitle,
                     channels: viewModel.displayedGridChannels,
@@ -45,15 +56,51 @@ struct HomeView: View {
                 )
                 .transition(.move(edge: .trailing))
             } else {
-                mainFeed
-                    .transition(.opacity)
+                // Tab Content
+                Group {
+                    if viewModel.selectedTab == .live {
+                        liveTvInterface
+                    } else {
+                        mainFeed
+                    }
+                }
+                .transition(.opacity.animation(.easeInOut(duration: 0.3)))
             }
         }
         .animation(.easeInOut(duration: 0.4), value: viewModel.drillDownCategory)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showEpgGrid)
         .onAppear { viewModel.configure(repository: repository) }
     }
     
-    // MARK: - Main Feed
+    // MARK: - Live TV Interface (Pinned Filter Bar)
+    var liveTvInterface: some View {
+        VStack(spacing: 0) {
+            // Pinned Filter Bar
+            // We pin it to the top so it doesn't scroll away, giving quick access to switch back to Movies
+            HomeFilterBar(
+                selectedTab: viewModel.selectedTab,
+                onSelect: { tab in viewModel.selectTab(tab) }
+            )
+            .padding(.top, 40)
+            .padding(.bottom, 10)
+            .background(
+                LinearGradient(
+                    colors: [CinemeltTheme.charcoal, CinemeltTheme.charcoal.opacity(0.0)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .zIndex(2) // Ensure it floats above the list
+            
+            // The Live Dashboard
+            LiveTVView(
+                onPlay: onPlayChannel,
+                onGuide: { withAnimation { showEpgGrid = true } }
+            )
+        }
+    }
+    
+    // MARK: - Main Feed (Movies/Series - Scrolling Header)
     var mainFeed: some View {
         ScrollView(.vertical, showsIndicators: false) {
             // Scroll Tracker
@@ -75,14 +122,14 @@ struct HomeView: View {
                     onSearch: { onSearch(viewModel.selectedTab) },
                     onSettings: onSettings
                 )
-                .focusSection() // FIX: Treats the header area as one navigation block
+                .focusSection()
                 
                 // Tabs
                 HomeFilterBar(
                     selectedTab: viewModel.selectedTab,
                     onSelect: { tab in viewModel.selectTab(tab) }
                 )
-                .focusSection() // FIX: Treats the tab bar as one navigation block
+                .focusSection()
                 
                 if viewModel.isLoading {
                     HomeLoadingState()
@@ -108,7 +155,7 @@ struct HomeView: View {
     }
 }
 
-// MARK: - SUBVIEWS
+// MARK: - SUBVIEWS (Unchanged Structure)
 
 struct HomeBackgroundView: View {
     let heroChannel: Channel?
@@ -123,11 +170,10 @@ struct HomeBackgroundView: View {
                     AsyncImage(url: URL(string: hero.cover ?? "")) { image in
                         image.resizable()
                             .aspectRatio(contentMode: .fill)
-                            .frame(width: geo.size.width, height: geo.size.height + 200) // Taller for parallax
+                            .frame(width: geo.size.width, height: geo.size.height + 200)
                             .blur(radius: 80)
                             .opacity(0.5)
                             .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .clear, location: 0.7)], startPoint: .topTrailing, endPoint: .bottomLeading))
-                            // Parallax Effect: Move background slightly up as user scrolls down
                             .offset(y: -scrollOffset * 0.15)
                             .animation(.linear(duration: 0.1), value: scrollOffset)
                     } placeholder: { Color.clear }
@@ -145,9 +191,7 @@ struct HomeLoadingState: View {
         HStack {
             Spacer()
             VStack(spacing: 30) {
-                // Use Premium Spinner
                 CinemeltLoadingIndicator()
-                
                 Text("Loading Library...")
                     .cinemeltBody()
                     .transition(.opacity)
@@ -257,6 +301,7 @@ struct HomeFilterBar: View {
     }
 }
 
+// Keeping existing subviews (Lanes, DrillDown, etc.) as is for context preservation
 struct HomeLanesView: View {
     let sections: [HomeSection]
     let isLoadingMore: Bool
@@ -278,15 +323,12 @@ struct HomeLanesView: View {
             
             Color.clear
                 .frame(height: 50)
-                .onAppear {
-                    onLoadMore()
-                }
+                .onAppear { onLoadMore() }
             
             if isLoadingMore {
                 HStack {
                     Spacer()
-                    CinemeltLoadingIndicator()
-                        .scaleEffect(0.8)
+                    CinemeltLoadingIndicator().scaleEffect(0.8)
                     Spacer()
                 }
                 .padding(.bottom, 50)
@@ -345,7 +387,7 @@ struct HomeSectionRow: View {
                 .padding(.horizontal, 80)
                 .padding(.vertical, 60)
             }
-            .focusSection() // FIX: THIS IS THE MAGIC. It groups the horizontal row as a single navigation entity.
+            .focusSection()
         }
     }
 }
@@ -393,7 +435,7 @@ struct HomeDrillDownView: View {
                     .padding(.horizontal, 80)
                     .padding(.bottom, 100)
                 }
-                .focusSection() // FIX: Ensures the grid is treated as a solid block
+                .focusSection()
             }
         }
         .onExitCommand { onClose() }
@@ -441,7 +483,7 @@ struct HomeProfileSelector: View {
                     .buttonStyle(CinemeltCardButtonStyle())
                 }
             }
-            .focusSection() // FIX: Ensures horizontal movement stays in profile selector
+            .focusSection()
         }
     }
 }

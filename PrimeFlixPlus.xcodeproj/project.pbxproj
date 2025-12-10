@@ -89,6 +89,10 @@
 		D2AC8B592EE784F100D440C3 /* PlayerSharedComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B582EE784F100D440C3 /* PlayerSharedComponents.swift */; };
 		D2AC8B5B2EE7FE7700D440C3 /* SearchDiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B5A2EE7FE7600D440C3 /* SearchDiscoveryView.swift */; };
 		D2AC8B5F2EE8001600D440C3 /* SearchUIComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B5E2EE8001600D440C3 /* SearchUIComponents.swift */; };
+		D2AC8B612EE9E53F00D440C3 /* EpgService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B602EE9E53F00D440C3 /* EpgService.swift */; };
+		D2AC8B632EE9E5A800D440C3 /* LiveTVViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B622EE9E5A800D440C3 /* LiveTVViewModel.swift */; };
+		D2AC8B652EE9E67100D440C3 /* LiveTVView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B642EE9E67100D440C3 /* LiveTVView.swift */; };
+		D2AC8B672EE9E6CF00D440C3 /* EpgGridView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B662EE9E6CF00D440C3 /* EpgGridView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -211,6 +215,10 @@
 		D2AC8B582EE784F100D440C3 /* PlayerSharedComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerSharedComponents.swift; sourceTree = "<group>"; };
 		D2AC8B5A2EE7FE7600D440C3 /* SearchDiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchDiscoveryView.swift; sourceTree = "<group>"; };
 		D2AC8B5E2EE8001600D440C3 /* SearchUIComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchUIComponents.swift; sourceTree = "<group>"; };
+		D2AC8B602EE9E53F00D440C3 /* EpgService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpgService.swift; sourceTree = "<group>"; };
+		D2AC8B622EE9E5A800D440C3 /* LiveTVViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTVViewModel.swift; sourceTree = "<group>"; };
+		D2AC8B642EE9E67100D440C3 /* LiveTVView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTVView.swift; sourceTree = "<group>"; };
+		D2AC8B662EE9E6CF00D440C3 /* EpgGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpgGridView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -376,6 +384,7 @@
 				D2AC8B0C2EE1FB2F00D440C3 /* FavoritesViewModel.swift */,
 				D2AC8B2E2EE4828C00D440C3 /* NetworkSpeedTester.swift */,
 				D2AC8B362EE49D5C00D440C3 /* OnboardingViewModel.swift */,
+				D2AC8B622EE9E5A800D440C3 /* LiveTVViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -414,6 +423,8 @@
 				D2AC8B322EE488ED00D440C3 /* VPNWarningView.swift */,
 				D2AC8B382EE49D7B00D440C3 /* OnboardingView.swift */,
 				D2AC8B5A2EE7FE7600D440C3 /* SearchDiscoveryView.swift */,
+				D2AC8B642EE9E67100D440C3 /* LiveTVView.swift */,
+				D2AC8B662EE9E6CF00D440C3 /* EpgGridView.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -448,6 +459,7 @@
 				D2AC8B452EE625D000D440C3 /* SyncEngine.swift */,
 				D2AC8B472EE6265700D440C3 /* EnrichmentService.swift */,
 				D2AC8B492EE6267900D440C3 /* VLCPlayerEngine.swift */,
+				D2AC8B602EE9E53F00D440C3 /* EpgService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -632,6 +644,7 @@
 				D228AD132EDF66A3007C6114 /* AddPlaylistView.swift in Sources */,
 				D292D6772EDF4C3300E8845A /* HomeComponents.swift in Sources */,
 				D292D6642EDF49C900E8845A /* Programme.swift in Sources */,
+				D2AC8B632EE9E5A800D440C3 /* LiveTVViewModel.swift in Sources */,
 				D292D6522EDF45C000E8845A /* DataSource.swift in Sources */,
 				D2AC8B482EE6265700D440C3 /* EnrichmentService.swift in Sources */,
 				D2AC8B3D2EE4A05000D440C3 /* TasteItem.swift in Sources */,
@@ -682,11 +695,14 @@
 				D228AD1D2EDFA8E3007C6114 /* DetailsViewModel.swift in Sources */,
 				D2AC8B332EE488ED00D440C3 /* VPNWarningView.swift in Sources */,
 				D2AC8B2D2EE481D100D440C3 /* NetworkSpeedTestView.swift in Sources */,
+				D2AC8B652EE9E67100D440C3 /* LiveTVView.swift in Sources */,
 				D2AC8B402EE6253800D440C3 /* RecommendationService.swift in Sources */,
 				D292D67E2EDF568C00E8845A /* SettingsViewModel.swift in Sources */,
 				D2AC8B312EE486E700D440C3 /* VPNDetector.swift in Sources */,
 				D228AD1F2EDFA961007C6114 /* DetailsView.swift in Sources */,
+				D2AC8B672EE9E6CF00D440C3 /* EpgGridView.swift in Sources */,
 				D292D65C2EDF470300E8845A /* MediaMetadata.swift in Sources */,
+				D2AC8B612EE9E53F00D440C3 /* EpgService.swift in Sources */,
 				D292D66C2EDF4B0500E8845A /* TmdbClient.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

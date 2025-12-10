@@ -68,6 +68,10 @@ class PlayerViewModel: ObservableObject {
     private var repository: PrimeFlixRepository?
     private let tmdbClient = TmdbClient()
     private let omdbClient = OmdbClient()
+    
+    // NEW: EPG Service for Live TV Metadata
+    private var epgService: EpgService?
+    
     private var currentChannel: Channel?
     private var cancellables = Set<AnyCancellable>()
     private var controlHideTimer: Timer?
@@ -86,6 +90,7 @@ class PlayerViewModel: ObservableObject {
         self.currentUrl = channel.url
         self.qualityBadge = channel.quality ?? "HD"
         self.nextEpisodeService = NextEpisodeService(context: repository.container.viewContext)
+        self.epgService = EpgService(context: repository.container.viewContext) // Init EPG
         
         // 1. Read Global Playback Speed Default
         let speed = UserDefaults.standard.double(forKey: "defaultPlaybackSpeed")
@@ -98,8 +103,13 @@ class PlayerViewModel: ObservableObject {
         
         // 3. Metadata & Logic
         Task {
-            await fetchRichMetadata(channel: channel)
-            await checkForNextEpisode()
+            // Branch logic based on content type
+            if channel.type == "live" {
+                await fetchLiveMetadata(channel: channel)
+            } else {
+                await fetchRichMetadata(channel: channel)
+                await checkForNextEpisode()
+            }
         }
         
         loadAlternatives()
@@ -113,6 +123,12 @@ class PlayerViewModel: ObservableObject {
     
     private func checkForResume(channel: Channel) {
         guard let repo = repository else { return }
+        
+        // Live TV generally shouldn't resume from a timestamp unless it's catchup (not supported yet)
+        if channel.type == "live" {
+            startPlayback(from: 0)
+            return
+        }
         
         let context = repo.container.viewContext
         let req = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
@@ -142,11 +158,10 @@ class PlayerViewModel: ObservableObject {
         // 1. Load Engine with Optimization Data
         playerEngine.setRate(self.playbackRate)
         
-        // OPTIMIZATION UPDATE: Pass the specific 'quality' string (e.g. "4K")
         playerEngine.load(
             url: channel.url,
             isLive: channel.type == "live",
-            quality: channel.quality, // Pass string directly
+            quality: channel.quality,
             startTime: time
         )
         
@@ -183,6 +198,7 @@ class PlayerViewModel: ObservableObject {
             if self.isScrubbing || self.isSeekingCommit { return }
             self.currentTime = time
             
+            // Auto-save progress
             if abs(time - self.lastSavedTime) > 10 {
                 self.saveProgress()
             }
@@ -259,7 +275,6 @@ class PlayerViewModel: ObservableObject {
         playerEngine.setRate(speed)
     }
     
-    // FIX: Updated signatures to match SelectionOverlays calls (removed _)
     func setAudioTrack(index: Int) { playerEngine.setAudioTrack(index) }
     func setSubtitleTrack(index: Int) { playerEngine.setSubtitleTrack(index) }
     
@@ -273,7 +288,6 @@ class PlayerViewModel: ObservableObject {
         playerEngine.setDeinterlace(isDeinterlaceEnabled)
     }
     
-    // FIX: Added direct setter required by Settings Overlay
     func setDeinterlace(_ enabled: Bool) {
         self.isDeinterlaceEnabled = enabled
         playerEngine.setDeinterlace(enabled)
@@ -305,7 +319,38 @@ class PlayerViewModel: ObservableObject {
         autoPlayTimer?.invalidate()
     }
     
-    // MARK: - Metadata
+    // MARK: - Metadata (Live EPG)
+    
+    private func fetchLiveMetadata(channel: Channel) async {
+        guard let service = epgService else { return }
+        
+        // 1. Setup Basic Info
+        if let cover = channel.cover, let url = URL(string: cover) { self.posterImage = url }
+        
+        // 2. Fetch Fresh EPG
+        // We do this in a task to not block basic UI
+        await service.refreshEpg(for: [channel])
+        
+        let map = service.getCurrentPrograms(for: [channel])
+        if let program = map[channel.url] {
+            await MainActor.run {
+                self.videoTitle = program.title
+                self.videoOverview = program.desc ?? "No description available."
+                
+                let f = DateFormatter()
+                f.timeStyle = .short
+                let timeStr = "\(f.string(from: program.start)) - \(f.string(from: program.end))"
+                self.videoYear = timeStr // Re-using videoYear slot for Time display in Player
+            }
+        } else {
+            await MainActor.run {
+                self.videoTitle = channel.title
+                self.videoOverview = "No program information available."
+            }
+        }
+    }
+    
+    // MARK: - Metadata (VOD TMDB)
     
     private func fetchRichMetadata(channel: Channel) async {
         let info = TitleNormalizer.parse(rawTitle: channel.canonicalTitle ?? channel.title)
@@ -396,9 +441,10 @@ class PlayerViewModel: ObservableObject {
         self.lastSavedTime = currentTime
         let pos = Int64(currentTime * 1000)
         let dur = Int64(duration * 1000)
-        if (pos > 10000 && dur > 0) || channel.type == "live" {
-            repo.saveProgress(url: channel.url, pos: pos, dur: dur)
-        }
+        
+        // For Live TV, we might simply mark it as "watched" recently without saving a specific time
+        // but keeping it in the repo updates "Recently Watched" logic.
+        repo.saveProgress(url: channel.url, pos: pos, dur: dur)
     }
     
     func toggleFavorite() {

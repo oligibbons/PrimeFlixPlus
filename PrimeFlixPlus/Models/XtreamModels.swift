@@ -37,6 +37,83 @@ struct XtreamCategory: Codable, Identifiable {
     }
 }
 
+// MARK: - EPG Models (NEW)
+struct XtreamEpgResponse: Codable {
+    let epgListings: [XtreamEpgListing]
+    
+    enum CodingKeys: String, CodingKey {
+        case epgListings = "epg_listings"
+    }
+}
+
+struct XtreamEpgListing: Codable {
+    let id: String?
+    let epgId: String?
+    let title: String?
+    let desc: String?
+    let start: String?
+    let end: String?
+    let startTimestamp: String? // Xtream often sends these as Strings in JSON
+    let stopTimestamp: String?
+    
+    // Decoded Date helpers
+    var startTime: Date? {
+        if let ts = startTimestamp, let interval = TimeInterval(ts) {
+            return Date(timeIntervalSince1970: interval)
+        }
+        return nil
+    }
+    
+    var endTime: Date? {
+        if let ts = stopTimestamp, let interval = TimeInterval(ts) {
+            return Date(timeIntervalSince1970: interval)
+        }
+        return nil
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case epgId = "epg_id"
+        case title
+        case desc = "description"
+        case start
+        case end
+        case startTimestamp = "start_timestamp"
+        case stopTimestamp = "stop_timestamp"
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        epgId = try container.decodeIfPresent(String.self, forKey: .epgId)
+        
+        // Base64 Decode Description if needed (Xtream sometimes encodes it)
+        let rawDesc = try container.decodeIfPresent(String.self, forKey: .desc)
+        if let d = rawDesc, let data = Data(base64Encoded: d), let decoded = String(data: data, encoding: .utf8) {
+            desc = decoded
+        } else {
+            desc = rawDesc
+        }
+        
+        title = try container.decodeIfPresent(String.self, forKey: .title) // Also often Base64, but title is usually plain
+        start = try container.decodeIfPresent(String.self, forKey: .start)
+        end = try container.decodeIfPresent(String.self, forKey: .end)
+        
+        // Flexible Timestamp Decoding
+        if let intStart = try? container.decode(Int.self, forKey: .startTimestamp) {
+            startTimestamp = String(intStart)
+        } else {
+            startTimestamp = try container.decodeIfPresent(String.self, forKey: .startTimestamp)
+        }
+        
+        if let intStop = try? container.decode(Int.self, forKey: .stopTimestamp) {
+            stopTimestamp = String(intStop)
+        } else {
+            stopTimestamp = try container.decodeIfPresent(String.self, forKey: .stopTimestamp)
+        }
+    }
+}
+
 // MARK: - Channel Info Namespace
 struct XtreamChannelInfo {
     
@@ -46,6 +123,7 @@ struct XtreamChannelInfo {
         let streamIcon: String?
         let categoryId: String?
         let epgChannelId: String?
+        let tvArchive: Int? // 1 if catchup is available
         
         var id: Int { streamId }
         
@@ -55,6 +133,7 @@ struct XtreamChannelInfo {
             case streamIcon = "stream_icon"
             case categoryId = "category_id"
             case epgChannelId = "epg_channel_id"
+            case tvArchive = "tv_archive"
         }
         
         init(from decoder: Decoder) throws {
@@ -64,6 +143,7 @@ struct XtreamChannelInfo {
             streamIcon = try container.decodeIfPresent(String.self, forKey: .streamIcon)
             categoryId = container.decodeFlexibleString(forKey: .categoryId)
             epgChannelId = container.decodeFlexibleString(forKey: .epgChannelId)
+            tvArchive = container.decodeFlexibleInt(forKey: .tvArchive)
         }
     }
     

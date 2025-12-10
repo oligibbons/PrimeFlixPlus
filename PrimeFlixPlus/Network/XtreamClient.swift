@@ -57,7 +57,29 @@ actor XtreamClient {
         return try await fetchWithRetry(url: url)
     }
     
-    // MARK: - Deep Details Fetch
+    // MARK: - EPG & Deep Details
+    
+    /// Fetches Short EPG (TV Guide) for a specific live stream.
+    /// - limit: Number of future programs to fetch (Default: 12).
+    func getShortEPG(input: XtreamInput, streamId: Int, limit: Int = 12) async throws -> [XtreamEpgListing] {
+        let url = "\(input.basicUrl)/player_api.php?username=\(input.username)&password=\(input.password)&action=get_short_epg&stream_id=\(streamId)&limit=\(limit)"
+        
+        do {
+            let response: XtreamEpgResponse = try await fetchWithRetry(url: url)
+            return response.epgListings
+        } catch {
+            // Xtream API Quirk: Returns "[]" (Empty Array) instead of empty object "{...}" when no EPG exists.
+            // This causes a Decoding Error. We catch it here and treat it as "No Data".
+            if let xErr = error as? XtreamError, case .parsingError = xErr {
+                return []
+            }
+            // If decoding failed generally, it's also likely just empty/malformed EPG
+            if error is DecodingError {
+                return []
+            }
+            throw error
+        }
+    }
     
     func getSeriesEpisodes(input: XtreamInput, seriesId: String) async throws -> [XtreamChannelInfo.Episode] {
         let url = "\(input.basicUrl)/player_api.php?username=\(input.username)&password=\(input.password)&action=get_series_info&series_id=\(seriesId)"
@@ -148,7 +170,10 @@ actor XtreamClient {
                         return fallback
                     }
                 }
-                print("❌ Decoding Error for URL: \(urlString) - \(error)")
+                // Don't print decoding error for EPG, it's expected often
+                if !(T.self is XtreamEpgResponse.Type) {
+                    print("❌ Decoding Error for URL: \(urlString) - \(error)")
+                }
                 throw XtreamError.parsingError
             }
         }
