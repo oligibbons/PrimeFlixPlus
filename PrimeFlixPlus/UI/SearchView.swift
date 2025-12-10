@@ -13,16 +13,10 @@ struct SearchView: View {
     enum SearchFocus: Hashable {
         case searchBar
         case scope(SearchViewModel.SearchScope)
-        case result(String)
     }
     
-    // Grid Layout for Results
-    let gridLayout = [
-        GridItem(.adaptive(minimum: 220, maximum: 260), spacing: 40)
-    ]
-    
     // MARK: - Initializer
-    init(initialScope: SearchViewModel.SearchScope = .all, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
+    init(onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
         _viewModel = StateObject(wrappedValue: SearchViewModel())
         self.onPlay = onPlay
         self.onBack = onBack
@@ -34,7 +28,7 @@ struct SearchView: View {
             
             VStack(spacing: 0) {
                 
-                // MARK: - 1. Search Header (Input, Scopes, Filters)
+                // MARK: - 1. Search Header
                 VStack(spacing: 20) {
                     // Row A: Back + Input
                     HStack(spacing: 20) {
@@ -48,9 +42,10 @@ struct SearchView: View {
                         }
                         .buttonStyle(.card)
                         
+                        // Standard Glass Text Field
                         GlassTextField(
                             title: "Search Library",
-                            placeholder: "Title, Actor, or Director...",
+                            placeholder: "Search Movies, Series, or Live TV...",
                             text: $viewModel.query,
                             nextFocus: { /* Submit action if needed */ }
                         )
@@ -58,7 +53,8 @@ struct SearchView: View {
                         .submitLabel(.search)
                     }
                     
-                    // Row B: Scope Picker (Tabs)
+                    // Row B: Scope Picker (Tabs) - Simplified
+                    // Allows user to quickly filter the list below without complex logic
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 15) {
                             ForEach(SearchViewModel.SearchScope.allCases, id: \.self) { scope in
@@ -81,11 +77,6 @@ struct SearchView: View {
                         .padding(5)
                     }
                     .focusSection()
-                    
-                    // Row C: Smart Filters (Requires SearchFilterBar.swift component)
-                    SearchFilterBar(viewModel: viewModel)
-                        .padding(.top, 10)
-                        .focusSection()
                 }
                 .padding(50)
                 .background(
@@ -106,16 +97,21 @@ struct SearchView: View {
                             }
                             .padding(.top, 100)
                         }
-                        // B. Zero State (Discovery Engine/Tags/History)
+                        // B. Zero State (Simple Placeholder)
                         else if viewModel.query.isEmpty {
-                            // Requires SearchDiscoveryView.swift component
-                            SearchDiscoveryView(
-                                viewModel: viewModel,
-                                onTagSelected: { tag in
-                                    viewModel.query = tag
+                            HStack {
+                                Spacer()
+                                VStack(spacing: 20) {
+                                    Image(systemName: "magnifyingglass")
+                                        .font(.system(size: 60))
+                                        .foregroundColor(CinemeltTheme.accent.opacity(0.5))
+                                    Text("Start typing to search...")
+                                        .font(CinemeltTheme.fontTitle(32))
+                                        .foregroundColor(CinemeltTheme.cream.opacity(0.5))
                                 }
-                            )
-                            .transition(.opacity)
+                                Spacer()
+                            }
+                            .padding(.top, 100)
                         }
                         // C. No Results
                         else if viewModel.hasNoResults {
@@ -134,6 +130,7 @@ struct SearchView: View {
         }
         .onAppear {
             viewModel.configure(repository: repository)
+            // Auto-focus search bar on appear
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if focusedField == nil { focusedField = .searchBar }
             }
@@ -145,73 +142,19 @@ struct SearchView: View {
     private var resultsContent: some View {
         LazyVStack(alignment: .leading, spacing: 60) {
             
-            // 1. Movies (Priority 1)
+            // 1. Movies
             if !viewModel.movies.isEmpty {
                 ResultSection(title: "Movies", items: viewModel.movies, onPlay: onPlay)
             }
             
-            // 2. Series (Priority 2)
+            // 2. Series
             if !viewModel.series.isEmpty {
                 ResultSection(title: "Series", items: viewModel.series, onPlay: onPlay)
             }
             
-            // 3. Live TV (Priority 3)
+            // 3. Live TV
             if !viewModel.liveChannels.isEmpty {
                 ResultSection(title: "Live Channels", items: viewModel.liveChannels, onPlay: onPlay)
-            }
-            
-            // 4. Person Spotlight (Moved to Bottom as requested)
-            if let person = viewModel.personMatch, !viewModel.personCredits.isEmpty {
-                VStack(alignment: .center, spacing: 20) {
-                    
-                    Divider().background(Color.white.opacity(0.1)).padding(.vertical, 20)
-                    
-                    Text("Related People")
-                        .font(CinemeltTheme.fontTitle(28))
-                        .foregroundColor(.gray)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 10)
-                    
-                    // Circular Profile Image
-                    if let path = person.profilePath, let url = URL(string: "https://image.tmdb.org/t/p/w400\(path)") {
-                        AsyncImage(url: url) { img in
-                            img.resizable().aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            Circle().fill(Color.white.opacity(0.1))
-                        }
-                        .frame(width: 150, height: 150)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(CinemeltTheme.accent, lineWidth: 3))
-                        .shadow(color: CinemeltTheme.accent.opacity(0.5), radius: 15)
-                    }
-                    
-                    VStack(spacing: 5) {
-                        Text(person.name)
-                            .font(CinemeltTheme.fontTitle(32))
-                            .foregroundColor(CinemeltTheme.cream)
-                            .cinemeltGlow()
-                        
-                        Text("Known for \(person.role)")
-                            .font(CinemeltTheme.fontBody(18))
-                            .foregroundColor(.gray)
-                    }
-                    
-                    // The "Collection" Rail
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: 40) {
-                            ForEach(viewModel.personCredits) { channel in
-                                MovieCard(channel: channel) { onPlay(channel) }
-                                    .focused($focusedField, equals: .result(channel.id))
-                            }
-                        }
-                        .padding(.horizontal, 40)
-                        .padding(.vertical, 30)
-                    }
-                    .focusSection()
-                }
-                .padding(.vertical, 20)
-                .background(Color.white.opacity(0.03))
-                .cornerRadius(20)
             }
         }
     }
@@ -228,7 +171,7 @@ struct SearchView: View {
                 Text("No matches found")
                     .font(CinemeltTheme.fontTitle(28))
                     .foregroundColor(CinemeltTheme.cream)
-                Text("Try adjusting filters or search terms.")
+                Text("Try checking your spelling.")
                     .font(CinemeltTheme.fontBody(20))
                     .foregroundColor(.gray)
             }
