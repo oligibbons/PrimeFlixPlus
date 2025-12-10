@@ -29,7 +29,6 @@ class PrimeFlixRepository: ObservableObject {
     internal let container: NSPersistentContainer
     
     // --- Internal Data Access ---
-    // We keep a MainActor reference to the ChannelRepository for quick UI thread fetches
     private let channelRepo: ChannelRepository
     
     // --- Services & Engines ---
@@ -48,23 +47,10 @@ class PrimeFlixRepository: ObservableObject {
     
     init(container: NSPersistentContainer) {
         self.container = container
-        // Initialize the DAO on the main context for UI operations
         self.channelRepo = ChannelRepository(context: container.viewContext)
     }
     
-    // MARK: - Discovery and Search (CRITICAL PASSTHROUGH FUNCTIONS)
-
-    /// Delegates the hybrid search logic to ChannelRepository using a dedicated background context.
-    /// This method is called by SearchViewModel to run the fuzzy and filtered search.
-    func searchHybrid(query: String, filters: ChannelRepository.SearchFilters) async -> ChannelRepository.SearchResults {
-        // Run the entire fetch and ranking operation on a detached background task.
-        return await Task.detached(priority: .userInitiated) {
-            let bgContext = self.container.newBackgroundContext()
-            let readRepo = ChannelRepository(context: bgContext)
-            
-            return readRepo.searchHybrid(query: query, filters: filters)
-        }.value
-    }
+    // MARK: - Discovery & Lookup
     
     /// Delegates the reverse search logic (finding local matches for external API titles).
     func findMatches(for titles: [String], limit: Int = 20) async -> [Channel] {
@@ -75,10 +61,9 @@ class PrimeFlixRepository: ObservableObject {
         }.value
     }
     
-    // MARK: - Active Enrichment (NEW)
+    // MARK: - Active Enrichment
     
     /// Triggers an immediate metadata fetch for specific items (e.g. Search Results).
-    /// Safe to call from Main Actor; handles thread confinement automatically.
     func enrichContent(items: [Channel]) async {
         guard !items.isEmpty else { return }
         
@@ -88,22 +73,15 @@ class PrimeFlixRepository: ObservableObject {
         // 2. Perform work on Background Thread
         await Task.detached(priority: .background) {
             let bgContext = self.container.newBackgroundContext()
-            // Important: Use merge policy to handle potential conflicts during save
             bgContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
             
             // 3. Re-fetch objects in the correct context
-            // 'existingObject' is safer than 'object(with:)' as it ensures the data exists
             let bgItems = objectIDs.compactMap { try? bgContext.existingObject(with: $0) as? Channel }
-            
             guard !bgItems.isEmpty else { return }
             
-            // 4. Create a temporary service instance bound to this context
+            // 4. Run Enrichment
             let service = EnrichmentService(context: bgContext, tmdbClient: self.tmdbClient)
-            
-            // 5. Run Enrichment
-            // We ignore status callbacks for search enrichment to keep UI clean
             await service.enrichLibrary(specificItems: bgItems, onStatus: { _ in })
-            
         }.value
     }
 
@@ -126,7 +104,6 @@ class PrimeFlixRepository: ObservableObject {
     }
     
     func getRecommended(type: String) -> [Channel] {
-        // We use the viewContext safely since RecommendationService often reuses the context
         let service = RecommendationService(context: container.viewContext)
         return service.getRecommended(type: type)
     }
@@ -135,18 +112,11 @@ class PrimeFlixRepository: ObservableObject {
         return channelRepo.getGroups(playlistUrl: playlistUrl, type: type.rawValue)
     }
     
-    func getBrowsingContent(playlistUrl: String, type: StreamType, group: String) -> [Channel] {
-        // Corrected type conversion if necessary, assuming repository expects String
-        return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type.rawValue, group: group)
-    }
-    
-    // Overload for string type if needed by legacy code
     func getBrowsingContent(playlistUrl: String, type: String, group: String) -> [Channel] {
         return channelRepo.getBrowsingContent(playlistUrl: playlistUrl, type: type, group: group)
     }
     
     func getVersions(for channel: Channel) -> [Channel] {
-        // Instantiate service on the fly for the UI thread
         let service = VersioningService(context: container.viewContext)
         return service.getVersions(for: channel)
     }
@@ -167,7 +137,6 @@ class PrimeFlixRepository: ObservableObject {
             _ = Playlist(context: context, title: title, url: url, source: source)
             try? context.save()
             
-            // Trigger Sync automatically
             Task.detached(priority: .userInitiated) {
                 await self.syncPlaylistWrapper(playlistTitle: title, playlistUrl: url, source: source, force: true, isFirstTime: true)
             }
@@ -178,19 +147,15 @@ class PrimeFlixRepository: ObservableObject {
         let context = container.viewContext
         let plUrl = playlist.url
         
-        // 1. Delete Channels (Batch)
         let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: "Channel")
         fetch.predicate = NSPredicate(format: "playlistUrl == %@", plUrl)
         let deleteReq = NSBatchDeleteRequest(fetchRequest: fetch)
         _ = try? context.execute(deleteReq)
         
-        // 2. Delete Playlist Entity
         context.delete(playlist)
         try? context.save()
         
-        // 3. Clear Cache Timestamp
         UserDefaults.standard.removeObject(forKey: "last_sync_\(plUrl)")
-        
         self.objectWillChange.send()
     }
     
@@ -203,7 +168,7 @@ class PrimeFlixRepository: ObservableObject {
         
         self.isSyncing = true
         self.isErrorState = false
-        self.syncStats = SyncStats() // Reset stats
+        self.syncStats = SyncStats()
         
         await Task.detached(priority: .background) { [weak self] in
             guard let self = self else { return }
@@ -221,7 +186,6 @@ class PrimeFlixRepository: ObservableObject {
                     self.lastSyncDate = Date()
                     self.isInitialSync = false
                     
-                    // Clear toast after delay
                     Task {
                         try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
                         self.syncStatusMessage = nil
@@ -234,7 +198,6 @@ class PrimeFlixRepository: ObservableObject {
         }.value
     }
     
-    /// Wrapper that bridges the SyncEngine (Background) with the Repository State (Main Actor).
     private nonisolated func syncPlaylistWrapper(playlistTitle: String, playlistUrl: String, source: DataSourceType, force: Bool, isFirstTime: Bool) async {
         
         await MainActor.run {
@@ -242,7 +205,6 @@ class PrimeFlixRepository: ObservableObject {
             if isFirstTime { self.isInitialSync = true }
         }
         
-        // Retrieve a thread-safe reference to the playlist data via a temporary background context
         let bgContext = container.newBackgroundContext()
         var bgPlaylist: Playlist?
         bgContext.performAndWait {
@@ -254,7 +216,6 @@ class PrimeFlixRepository: ObservableObject {
         guard let pl = bgPlaylist else { return }
         
         do {
-            // Run the Sync Engine
             let hasChanges = try await syncEngine.sync(
                 playlist: pl,
                 force: force,
@@ -266,7 +227,6 @@ class PrimeFlixRepository: ObservableObject {
                 }
             )
             
-            // Run Enrichment if needed (First time or content changed)
             if hasChanges || isFirstTime {
                 await enrichmentService.enrichLibrary(
                     playlistUrl: playlistUrl,
@@ -280,7 +240,6 @@ class PrimeFlixRepository: ObservableObject {
             print("❌ Sync Failed: \(error.localizedDescription)")
             await MainActor.run {
                 self.isErrorState = true
-                // FIX: Propagate the actual error description to the UI so the user knows WHY it failed.
                 self.syncStatusMessage = "Sync Error: \(error.localizedDescription)"
             }
         }
