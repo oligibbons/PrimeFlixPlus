@@ -36,6 +36,7 @@ class SearchViewModel: ObservableObject {
     private var searchTask: Task<Void, Never>?
     
     // MARK: - Initialization
+    // FIX: Accepts optional repository to ensure safe init
     init(repository: PrimeFlixRepository? = nil) {
         self.repository = repository
         // Load History from UserDefaults
@@ -108,8 +109,6 @@ class SearchViewModel: ObservableObject {
             return
         }
         
-        // Save to history only on significant actions (handled by UI onSubmit generally),
-        // but we can also trigger it here if desired. For now, we leave it to the View's onSubmit.
         performLocalSearch(query: cleanQuery)
     }
     

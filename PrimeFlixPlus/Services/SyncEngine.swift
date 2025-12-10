@@ -16,12 +16,6 @@ class SyncEngine {
     // MARK: - Main Sync Loop
     
     /// Performs a full sync for a specific playlist.
-    /// - Parameters:
-    ///   - playlist: The playlist entity to sync.
-    ///   - force: If true, ignores cache timers.
-    ///   - onStatus: Callback for string status updates (e.g. "Downloading...").
-    ///   - onStats: Callback for numeric updates.
-    /// - Returns: Boolean indicating if content was modified.
     func sync(
         playlist: Playlist,
         force: Bool,
@@ -37,6 +31,7 @@ class SyncEngine {
             return false
         }
         
+        // Use a background context for all heavy lifting
         let context = container.newBackgroundContext()
         context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
         
@@ -54,26 +49,45 @@ class SyncEngine {
             
             // Parallel Fetch
             onStatus("Fetching Xtream data...")
-            async let live = xtreamClient.getLiveStreams(input: input)
-            async let vod = xtreamClient.getVodStreams(input: input)
-            async let series = xtreamClient.getSeries(input: input)
-            async let categories = fetchCategories(input: input) // Map IDs to Names
             
-            let (liveItems, vodItems, seriesItems, catMap) = try await (live, vod, series, categories)
-            
-            onStatus("Processing \(liveItems.count + vodItems.count) items...")
-            
-            // Map to unified struct
-            let allLive = liveItems.map { ChannelStruct.from($0, playlistUrl: playlist.url, input: input, categoryMap: catMap) }
-            let allVod = vodItems.map { ChannelStruct.from($0, playlistUrl: playlist.url, input: input, categoryMap: catMap) }
-            let allSeries = seriesItems.map { ChannelStruct.from($0, playlistUrl: playlist.url, categoryMap: catMap) }
-            
-            incomingStructs = allLive + allVod + allSeries
-            
-            stats.liveChannelsAdded = allLive.count
-            stats.moviesAdded = allVod.count
-            stats.seriesAdded = allSeries.count
-            stats.totalProcessed = incomingStructs.count
+            // We use a task group to fetch all required endpoints in parallel
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                var liveItems: [XtreamChannelInfo.LiveStream] = []
+                var vodItems: [XtreamChannelInfo.VodStream] = []
+                var seriesItems: [XtreamChannelInfo.Series] = []
+                var catMap: [String: String] = [:]
+                
+                // Fetch Live
+                async let live = xtreamClient.getLiveStreams(input: input)
+                // Fetch VOD
+                async let vod = xtreamClient.getVodStreams(input: input)
+                // Fetch Series
+                async let series = xtreamClient.getSeries(input: input)
+                // Fetch Categories
+                async let categories = fetchCategories(input: input)
+                
+                // Await all results
+                let (fetchedLive, fetchedVod, fetchedSeries, fetchedCats) = try await (live, vod, series, categories)
+                
+                liveItems = fetchedLive
+                vodItems = fetchedVod
+                seriesItems = fetchedSeries
+                catMap = fetchedCats
+                
+                onStatus("Processing \(liveItems.count + vodItems.count) items...")
+                
+                // Map to unified struct
+                let allLive = liveItems.map { ChannelStruct.from($0, playlistUrl: playlist.url, input: input, categoryMap: catMap) }
+                let allVod = vodItems.map { ChannelStruct.from($0, playlistUrl: playlist.url, input: input, categoryMap: catMap) }
+                let allSeries = seriesItems.map { ChannelStruct.from($0, playlistUrl: playlist.url, categoryMap: catMap) }
+                
+                incomingStructs = allLive + allVod + allSeries
+                
+                stats.liveChannelsAdded = allLive.count
+                stats.moviesAdded = allVod.count
+                stats.seriesAdded = allSeries.count
+                stats.totalProcessed = incomingStructs.count
+            }
             onStats(stats)
             
         } else if source == .m3u {
@@ -143,41 +157,48 @@ class SyncEngine {
     
     private func fetchSnapshots(context: NSManagedObjectContext, playlistUrl: String) throws -> [String: ChannelSnapshot] {
         var snapshots: [String: ChannelSnapshot] = [:]
+        var fetchError: Error?
         
-        try context.performAndWait {
+        // Safe synchronous execution on the background context
+        context.performAndWait {
             let req = NSFetchRequest<NSDictionary>(entityName: "Channel")
             req.resultType = .dictionaryResultType
             req.predicate = NSPredicate(format: "playlistUrl == %@", playlistUrl)
             req.propertiesToFetch = ["url", "title", "group", "objectID", "seriesId", "season", "episode"]
             
-            let results = try context.fetch(req)
-            
-            for dict in results {
-                if let url = dict["url"] as? String,
-                   let title = dict["title"] as? String,
-                   let group = dict["group"] as? String,
-                   let oid = dict["objectID"] as? NSManagedObjectID {
-                    
-                    let sid = dict["seriesId"] as? String
-                    let s = dict["season"] as? Int ?? 0
-                    let e = dict["episode"] as? Int ?? 0
-                    
-                    var hasher = Hasher()
-                    hasher.combine(title)
-                    hasher.combine(group)
-                    hasher.combine(sid)
-                    hasher.combine(s)
-                    hasher.combine(e)
-                    
-                    snapshots[url] = ChannelSnapshot(objectID: oid, contentHash: hasher.finalize())
+            do {
+                let results = try context.fetch(req)
+                for dict in results {
+                    if let url = dict["url"] as? String,
+                       let title = dict["title"] as? String,
+                       let group = dict["group"] as? String,
+                       let oid = dict["objectID"] as? NSManagedObjectID {
+                        
+                        let sid = dict["seriesId"] as? String
+                        let s = dict["season"] as? Int ?? 0
+                        let e = dict["episode"] as? Int ?? 0
+                        
+                        var hasher = Hasher()
+                        hasher.combine(title)
+                        hasher.combine(group)
+                        hasher.combine(sid)
+                        hasher.combine(s)
+                        hasher.combine(e)
+                        
+                        snapshots[url] = ChannelSnapshot(objectID: oid, contentHash: hasher.finalize())
+                    }
                 }
+            } catch {
+                fetchError = error
             }
         }
+        
+        if let error = fetchError { throw error }
         return snapshots
     }
     
     private func fetchCategories(input: XtreamInput) async -> [String: String] {
-        // Parallel fetch for Live and VOD categories
+        // Parallel fetch for Live and VOD categories using TaskGroup
         return await withTaskGroup(of: [String: String].self) { group in
             group.addTask {
                 var map: [String: String] = [:]
@@ -221,6 +242,8 @@ class SyncEngine {
     }
     
     private func performBatchUpdate(items: [ChannelStruct], existingSnapshots: [String: ChannelSnapshot], context: NSManagedObjectContext) async throws {
+        // Core Data batch updates are tricky with complex logic, so we use object-level updates in blocks
+        // For performance, we still group them
         await context.perform {
             for item in items {
                 guard let snapshot = existingSnapshots[item.url],
@@ -264,7 +287,7 @@ class SyncEngine {
         let key = "last_sync_\(url)"
         let lastSync = UserDefaults.standard.double(forKey: key)
         if lastSync == 0 { return false }
-        return Date().timeIntervalSince(Date(timeIntervalSince1970: lastSync)) < (12 * 60 * 60)
+        return Date().timeIntervalSince(Date(timeIntervalSince1970: lastSync)) < (12 * 60 * 60) // 12 Hours
     }
     
     private func markCacheAsFresh(for url: String) {

@@ -1,5 +1,3 @@
-// oligibbons/primeflixplus/PrimeFlixPlus-73fc471b3826ec01f10236d5c79ae256450974b4/PrimeFlixPlus/ContentView.swift
-
 import SwiftUI
 
 // Navigation State
@@ -50,7 +48,6 @@ enum NavigationDestination: Hashable {
 
 struct ContentView: View, Equatable {
     // MARK: - Equatable Conformance
-    // Strict false ensures the view redraws on @State changes like showVPNWarning
     static func == (lhs: ContentView, rhs: ContentView) -> Bool {
         return false
     }
@@ -95,11 +92,11 @@ struct ContentView: View, Equatable {
                     )
                     
                 case .search:
-                                    SearchView(
-                                        repository: repository, // <--- Added this argument
-                                        onPlay: { channel in navigateToContent(channel) },
-                                        onBack: { goBack() }
-                                    )
+                    // FIX: Passed 'repository' here to fix the Missing Argument error
+                    SearchView(
+                        repository: repository,
+                        onPlay: { channel in navigateToContent(channel) },
+                        onBack: { goBack() }
                     )
                 
                 case .continueWatching:
@@ -159,7 +156,6 @@ struct ContentView: View, Equatable {
             .animation(.easeInOut(duration: 0.35), value: currentDestination)
             .focusSection()
             .zIndex(1)
-            // Blur the content when warning is active
             .disabled(showVPNWarning)
             .blur(radius: showVPNWarning ? 10 : 0)
             
@@ -167,14 +163,12 @@ struct ContentView: View, Equatable {
             if showVPNWarning {
                 VPNWarningView(
                     onProceed: {
-                        print("[VPN UI] User chose Proceed")
                         if let channel = pendingPlayable {
                             forcePlay(channel)
                         }
                         closeWarning()
                     },
                     onCancel: {
-                        print("[VPN UI] User chose Return")
                         closeWarning()
                     }
                 )
@@ -182,7 +176,7 @@ struct ContentView: View, Equatable {
                 .transition(.opacity.animation(.easeInOut))
             }
             
-            // 5. DEBUG INDICATOR (Remove for production release)
+            // 5. DEBUG INDICATOR (Remove for production)
             if !isPlayerMode && currentDestination != .speedTest {
                 VStack {
                     HStack {
@@ -223,18 +217,14 @@ struct ContentView: View, Equatable {
     
     private func attemptPlayback(_ channel: Channel, replaceCurrent: Bool = false) {
         let vpnStatus = VPNDetector.checkVPNStatus()
-        print("[VPN CHECK] Status: \(vpnStatus.isActive) Interface: \(vpnStatus.interfaceName ?? "None")")
         
         if vpnStatus.isActive {
-            // Safe -> Play
             if replaceCurrent {
                 currentDestination = .player(channel)
             } else {
                 navigate(to: .player(channel))
             }
         } else {
-            // Unsafe -> Show Warning
-            print("[VPN CHECK] Triggering Warning")
             self.pendingPlayable = channel
             withAnimation {
                 self.showVPNWarning = true
