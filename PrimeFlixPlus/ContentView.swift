@@ -95,9 +95,11 @@ struct ContentView: View, Equatable {
                     )
                     
                 case .search:
-                    SearchView(
-                        onPlay: { channel in navigateToContent(channel) },
-                        onBack: { goBack() }
+                                    SearchView(
+                                        repository: repository, // <--- Added this argument
+                                        onPlay: { channel in navigateToContent(channel) },
+                                        onBack: { goBack() }
+                                    )
                     )
                 
                 case .continueWatching:

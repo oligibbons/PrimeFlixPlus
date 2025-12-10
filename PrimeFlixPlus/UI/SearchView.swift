@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SearchView: View {
     @StateObject private var viewModel: SearchViewModel
-    @EnvironmentObject var repository: PrimeFlixRepository
     
     var onPlay: (Channel) -> Void
     var onBack: () -> Void
@@ -16,8 +15,10 @@ struct SearchView: View {
     }
     
     // MARK: - Initializer
-    init(onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
-        _viewModel = StateObject(wrappedValue: SearchViewModel())
+    // FIX: Added 'repository' to init to satisfy the build error
+    init(repository: PrimeFlixRepository, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
+        // Initialize ViewModel with the repository immediately
+        _viewModel = StateObject(wrappedValue: SearchViewModel(repository: repository))
         self.onPlay = onPlay
         self.onBack = onBack
     }
@@ -30,7 +31,6 @@ struct SearchView: View {
                 
                 // MARK: - 1. Search Header
                 VStack(spacing: 20) {
-                    // Row A: Back + Input
                     HStack(spacing: 20) {
                         Button(action: onBack) {
                             Image(systemName: "arrow.left")
@@ -47,14 +47,16 @@ struct SearchView: View {
                             title: "Search Library",
                             placeholder: "Search Movies, Series, or Live TV...",
                             text: $viewModel.query,
-                            nextFocus: { /* Submit action if needed */ }
+                            nextFocus: {
+                                // Save history when user hits Enter
+                                viewModel.addToHistory(viewModel.query)
+                            }
                         )
                         .focused($focusedField, equals: .searchBar)
                         .submitLabel(.search)
                     }
                     
-                    // Row B: Scope Picker (Tabs) - Simplified
-                    // Allows user to quickly filter the list below without complex logic
+                    // Scope Picker
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 15) {
                             ForEach(SearchViewModel.SearchScope.allCases, id: \.self) { scope in
@@ -88,7 +90,6 @@ struct SearchView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 50) {
                         
-                        // A. Loading State
                         if viewModel.isLoading {
                             HStack {
                                 Spacer()
@@ -97,27 +98,19 @@ struct SearchView: View {
                             }
                             .padding(.top, 100)
                         }
-                        // B. Zero State (Simple Placeholder)
                         else if viewModel.query.isEmpty {
-                            HStack {
-                                Spacer()
-                                VStack(spacing: 20) {
-                                    Image(systemName: "magnifyingglass")
-                                        .font(.system(size: 60))
-                                        .foregroundColor(CinemeltTheme.accent.opacity(0.5))
-                                    Text("Start typing to search...")
-                                        .font(CinemeltTheme.fontTitle(32))
-                                        .foregroundColor(CinemeltTheme.cream.opacity(0.5))
+                            // Shows History and Tags
+                            SearchDiscoveryView(
+                                viewModel: viewModel,
+                                onTagSelected: { tag in
+                                    viewModel.query = tag
+                                    viewModel.addToHistory(tag)
                                 }
-                                Spacer()
-                            }
-                            .padding(.top, 100)
+                            )
                         }
-                        // C. No Results
                         else if viewModel.hasNoResults {
                             noResultsPlaceholder
                         }
-                        // D. Results
                         else {
                             resultsContent
                         }
@@ -129,51 +122,38 @@ struct SearchView: View {
             }
         }
         .onAppear {
-            viewModel.configure(repository: repository)
-            // Auto-focus search bar on appear
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if focusedField == nil { focusedField = .searchBar }
             }
         }
     }
     
-    // MARK: - Result Views
+    // MARK: - Subviews
     
     private var resultsContent: some View {
         LazyVStack(alignment: .leading, spacing: 60) {
-            
-            // 1. Movies
             if !viewModel.movies.isEmpty {
                 ResultSection(title: "Movies", items: viewModel.movies, onPlay: onPlay)
             }
-            
-            // 2. Series
             if !viewModel.series.isEmpty {
                 ResultSection(title: "Series", items: viewModel.series, onPlay: onPlay)
             }
-            
-            // 3. Live TV
             if !viewModel.liveChannels.isEmpty {
                 ResultSection(title: "Live Channels", items: viewModel.liveChannels, onPlay: onPlay)
             }
         }
     }
     
-    // MARK: - Placeholders
-    
     private var noResultsPlaceholder: some View {
         HStack {
             Spacer()
             VStack(spacing: 15) {
-                Image(systemName: "eye.slash.fill")
+                Image(systemName: "doc.text.magnifyingglass")
                     .font(.system(size: 60))
                     .foregroundColor(.gray)
-                Text("No matches found")
+                Text("No results found")
                     .font(CinemeltTheme.fontTitle(28))
                     .foregroundColor(CinemeltTheme.cream)
-                Text("Try checking your spelling.")
-                    .font(CinemeltTheme.fontBody(20))
-                    .foregroundColor(.gray)
             }
             Spacer()
         }

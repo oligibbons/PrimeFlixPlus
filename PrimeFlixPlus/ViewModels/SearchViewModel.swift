@@ -23,6 +23,9 @@ class SearchViewModel: ObservableObject {
     @Published var series: [Channel] = []
     @Published var liveChannels: [Channel] = []
     
+    // MARK: - History (Fixed)
+    @Published var searchHistory: [String] = []
+    
     // MARK: - UI State
     @Published var isLoading: Bool = false
     @Published var hasNoResults: Bool = false
@@ -33,7 +36,10 @@ class SearchViewModel: ObservableObject {
     private var searchTask: Task<Void, Never>?
     
     // MARK: - Initialization
-    init() {
+    init(repository: PrimeFlixRepository? = nil) {
+        self.repository = repository
+        // Load History from UserDefaults
+        self.searchHistory = UserDefaults.standard.stringArray(forKey: "SearchHistory") ?? []
         setupSubscriptions()
     }
     
@@ -41,9 +47,38 @@ class SearchViewModel: ObservableObject {
         self.repository = repository
     }
     
+    // MARK: - History Management
+    
+    func addToHistory(_ term: String) {
+        guard !term.isEmpty else { return }
+        
+        // Remove duplicates and move to top
+        if let index = searchHistory.firstIndex(of: term) {
+            searchHistory.remove(at: index)
+        }
+        searchHistory.insert(term, at: 0)
+        
+        // Cap at 10 items
+        if searchHistory.count > 10 {
+            searchHistory.removeLast()
+        }
+        
+        saveHistory()
+    }
+    
+    func clearHistory() {
+        searchHistory.removeAll()
+        saveHistory()
+    }
+    
+    private func saveHistory() {
+        UserDefaults.standard.set(searchHistory, forKey: "SearchHistory")
+    }
+    
+    // MARK: - Search Logic
+    
     private func setupSubscriptions() {
         // 1. Debounced Search Trigger
-        // Wait 0.5s to avoid hammering the database while typing
         $query
             .removeDuplicates()
             .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
@@ -58,16 +93,12 @@ class SearchViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
-                // Re-run search with new scope immediately
                 self.handleQueryChange(self.query)
             }
             .store(in: &cancellables)
     }
     
-    // MARK: - Logic
-    
     private func handleQueryChange(_ newQuery: String) {
-        // Cancel any pending search
         searchTask?.cancel()
         
         let cleanQuery = newQuery.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -77,6 +108,8 @@ class SearchViewModel: ObservableObject {
             return
         }
         
+        // Save to history only on significant actions (handled by UI onSubmit generally),
+        // but we can also trigger it here if desired. For now, we leave it to the View's onSubmit.
         performLocalSearch(query: cleanQuery)
     }
     
@@ -87,7 +120,6 @@ class SearchViewModel: ObservableObject {
         self.hasNoResults = false
         
         searchTask = Task {
-            // 1. Configure Filters based on Scope
             var filters = ChannelRepository.SearchFilters()
             switch selectedScope {
             case .movies: filters.onlyMovies = true
@@ -96,8 +128,7 @@ class SearchViewModel: ObservableObject {
             case .all: break
             }
             
-            // 2. Execute Search on Background Thread via Repository
-            // This calls the existing local hybrid search in ChannelRepository
+            // Execute Search via Repository
             let results = await repo.searchHybrid(query: query, filters: filters)
             
             if !Task.isCancelled {
