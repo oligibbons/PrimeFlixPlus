@@ -25,8 +25,9 @@ struct FavoritesView: View {
                     
                     Spacer()
                 }
-                .padding(.top, 50)
-                .padding(.horizontal, 80)
+                .padding(.top, 20)
+                // ALIGNMENT FIX: Use global margin
+                .padding(.horizontal, CinemeltTheme.Layout.margin)
                 .padding(.bottom, 20)
                 
                 if viewModel.isLoading {
@@ -68,6 +69,8 @@ struct FavoritesView: View {
                         .padding(.top, 20)
                         .focusSection()
                     }
+                    // CRITICAL FIX: Safe Padding
+                    .standardSafePadding()
                 }
             }
         }
@@ -78,7 +81,7 @@ struct FavoritesView: View {
     }
 }
 
-// Reusing a similar lane structure to ContinueWatching but with standard MovieCards
+// Lane structure
 struct FavoritesLane: View {
     let title: String
     let items: [Channel]
@@ -89,7 +92,8 @@ struct FavoritesLane: View {
             Text(title)
                 .font(CinemeltTheme.fontTitle(32))
                 .foregroundColor(CinemeltTheme.cream)
-                .padding(.leading, 60)
+                // ALIGNMENT FIX
+                .padding(.leading, CinemeltTheme.Layout.margin)
                 .cinemeltGlow()
             
             ScrollView(.horizontal, showsIndicators: false) {
@@ -100,8 +104,9 @@ struct FavoritesLane: View {
                         }
                     }
                 }
-                .padding(.horizontal, 60)
-                .padding(.vertical, 60) // Padding for focus zoom
+                // Padding for focus expansion & alignment
+                .padding(.horizontal, CinemeltTheme.Layout.margin)
+                .padding(.vertical, 60)
             }
         }
     }

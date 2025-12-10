@@ -7,7 +7,7 @@ struct MovieCard: View {
     
     @FocusState private var isFocused: Bool
     
-    // Use standardized dimensions from the Theme
+    // Using standard TV layout constants from CinemeltStyle
     private let width: CGFloat = CinemeltTheme.Layout.posterWidth
     private let height: CGFloat = CinemeltTheme.Layout.posterHeight
     
@@ -16,7 +16,7 @@ struct MovieCard: View {
             // FIX: The ZStack (Label) must effectively fill the frame for the custom style to work.
             ZStack(alignment: .bottom) {
                 
-                // 1. The Poster Image
+                // 1. Image Layer
                 AsyncImage(url: URL(string: channel.cover ?? "")) { phase in
                     switch phase {
                     case .success(let image):
@@ -32,18 +32,19 @@ struct MovieCard: View {
                     }
                 }
                 
-                // 2. The "Smoked Glass" Gradient Overlay (Visible on Focus)
+                // 2. Metadata Overlay (Only reveals on focus)
                 if isFocused {
                     LinearGradient(
-                        colors: [.clear, CinemeltTheme.coffee.opacity(0.95)],
+                        colors: [.clear, CinemeltTheme.charcoal.opacity(0.95)],
                         startPoint: .center,
                         endPoint: .bottom
                     )
                     
                     VStack(alignment: .leading, spacing: 4) {
+                        Spacer()
+                        
                         Text(channel.title)
-                            // Increased size for TV readability (was 22)
-                            .font(CinemeltTheme.fontTitle(28))
+                            .font(CinemeltTheme.fontTitle(28)) // Larger font
                             .foregroundColor(CinemeltTheme.cream)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
@@ -56,25 +57,25 @@ struct MovieCard: View {
                                 .fontWeight(.bold)
                         }
                     }
-                    .padding(16) // Increased padding
+                    .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .transition(.opacity)
                 }
             }
-            // CRITICAL: Explicit frame required for tvOS focus engine to calculate spacing correctly
+            // CRITICAL: Explicit frame required for tvOS focus engine
             .frame(width: width, height: height)
             .background(CinemeltTheme.charcoal)
-            .cornerRadius(12) // Slightly sharper corners look better on large screens
-            // Border Highlight
+            .cornerRadius(12)
+            // Border glow for active state
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(
-                        isFocused ? Color.white.opacity(0.5) : Color.white.opacity(0.1),
+                        isFocused ? CinemeltTheme.white.opacity(0.5) : Color.white.opacity(0.1),
                         lineWidth: isFocused ? 2 : 1
                     )
             )
         }
-        // Apply the custom "Lift" physics
+        // Apply the custom "Lift" style from CinemeltStyle.swift
         .cinemeltCardStyle()
         .focused($isFocused)
         .onChange(of: isFocused) { focused in
@@ -82,20 +83,14 @@ struct MovieCard: View {
         }
     }
     
-    // Extracted fallback view for cleaner code and guaranteed sizing
     private var fallbackView: some View {
         ZStack {
-            CinemeltTheme.charcoal
-            
-            Circle()
-                .fill(CinemeltTheme.accent.opacity(0.2))
-                .blur(radius: 30)
-                .offset(x: -20, y: -40)
+            CinemeltTheme.coffee
             
             VStack(spacing: 10) {
-                Image(systemName: "film.stack")
-                    .font(.system(size: 50))
-                    .foregroundColor(CinemeltTheme.accent.opacity(0.5))
+                Image(systemName: "film")
+                    .font(.system(size: 60))
+                    .foregroundColor(CinemeltTheme.cream.opacity(0.2))
                 
                 Text(String(channel.title.prefix(1)))
                     .font(CinemeltTheme.fontTitle(80))

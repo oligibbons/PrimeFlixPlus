@@ -236,8 +236,13 @@ extension View {
         self.font(CinemeltTheme.fontBody(28)).foregroundColor(CinemeltTheme.cream.opacity(0.8))
     }
     
-    // NEW: Safe Area Helper
-    // Use this on your root VStacks/ScrollViews to ensure they aren't cut off by the TV bezel
+    /// Applies the custom "Cinemelt" focus lift effect.
+    func cinemeltCardStyle() -> some View {
+        self.buttonStyle(CinemeltCardEffect())
+    }
+    
+    /// Applies standard tvOS safe area padding.
+    /// Use this on Root VStacks/ScrollViews.
     func standardSafePadding() -> some View {
         self.padding(.horizontal, CinemeltTheme.Layout.margin)
             .padding(.vertical, 60)

@@ -15,13 +15,11 @@ struct SearchView: View {
         case scope(SearchViewModel.SearchScope)
     }
     
-    // Grid Layout for Live Channels
+    // Grid Layout for Live Channels (Optimized for 16:9 cards)
     let channelGridColumns = [
-        GridItem(.adaptive(minimum: 220, maximum: 260), spacing: 40)
+        GridItem(.adaptive(minimum: 280, maximum: 320), spacing: 40)
     ]
     
-    // MARK: - Initializer
-    // We remove the repository from init because we use @EnvironmentObject now (cleaner)
     init(repository: PrimeFlixRepository, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
         _viewModel = StateObject(wrappedValue: SearchViewModel(initialScope: .library))
         self.onPlay = onPlay
@@ -53,7 +51,6 @@ struct SearchView: View {
                             placeholder: viewModel.selectedScope == .library ? "Movies & Series..." : "Channels & Groups...",
                             text: $viewModel.query,
                             nextFocus: {
-                                // Save history when user hits Enter
                                 viewModel.addToHistory(viewModel.query)
                             }
                         )
@@ -77,15 +74,17 @@ struct SearchView: View {
                                         )
                                         .cornerRadius(12)
                                 }
-                                .buttonStyle(CinemeltCardButtonStyle())
+                                .cinemeltCardStyle()
                                 .focused($focusedField, equals: .scope(scope))
                             }
                         }
-                        .padding(5)
+                        .padding(20) // Bloom space
                     }
                     .focusSection()
                 }
-                .padding(50)
+                // LAYOUT FIX: Align header with content using global margin
+                .padding(.horizontal, CinemeltTheme.Layout.margin)
+                .padding(.top, 40)
                 .background(
                     LinearGradient(colors: [Color.black.opacity(0.9), Color.clear], startPoint: .top, endPoint: .bottom)
                 )
@@ -104,7 +103,6 @@ struct SearchView: View {
                             .padding(.top, 100)
                         }
                         else if viewModel.query.isEmpty {
-                            // Shows History and Tags
                             SearchDiscoveryView(
                                 viewModel: viewModel,
                                 onTagSelected: { tag in
@@ -124,7 +122,8 @@ struct SearchView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 50)
+                    // CRITICAL: Standardize margins to prevent jumping
+                    .standardSafePadding()
                     .padding(.bottom, 100)
                 }
                 .focusSection()
@@ -150,6 +149,8 @@ struct SearchView: View {
                 ResultSection(title: "Series", items: viewModel.series, onPlay: onPlay)
             }
         }
+        // Remove padding here as ResultSection handles it
+        .padding(.horizontal, -CinemeltTheme.Layout.margin)
     }
     
     @ViewBuilder
@@ -162,7 +163,6 @@ struct SearchView: View {
                     Text("Matching Groups")
                         .font(CinemeltTheme.fontTitle(28))
                         .foregroundColor(CinemeltTheme.accent)
-                        .padding(.leading, 10)
                     
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 20) {
@@ -179,10 +179,9 @@ struct SearchView: View {
                                         .background(Color.white.opacity(0.1))
                                         .cornerRadius(12)
                                 }
-                                .buttonStyle(CinemeltCardButtonStyle())
+                                .cinemeltCardStyle()
                             }
                         }
-                        .padding(.horizontal, 10)
                         .padding(.vertical, 20)
                     }
                     .focusSection()
@@ -220,7 +219,7 @@ struct SearchView: View {
                                         .multilineTextAlignment(.center)
                                 }
                             }
-                            .buttonStyle(.card)
+                            .buttonStyle(.card) // Live channels use simple card
                             .padding(10)
                         }
                     }

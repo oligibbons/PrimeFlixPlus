@@ -12,7 +12,9 @@ struct ResultSection: View {
             Text(title)
                 .font(CinemeltTheme.fontTitle(32))
                 .foregroundColor(CinemeltTheme.cream)
-                .padding(.leading, 50) // Align with grid padding
+                // ALIGNMENT FIX: Match global safe area
+                .padding(.leading, CinemeltTheme.Layout.margin)
+                .cinemeltGlow()
             
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 40) {
@@ -20,8 +22,9 @@ struct ResultSection: View {
                         MovieCard(channel: item, onClick: { onPlay(item) })
                     }
                 }
+                // Padding for focus bloom + alignment
                 .padding(.vertical, 40)
-                .padding(.horizontal, 50)
+                .padding(.horizontal, CinemeltTheme.Layout.margin)
             }
             .focusSection() // Ensures focus stays within this lane until exit
         }

@@ -1,10 +1,12 @@
 {
   "images" : [
     {
+      "filename" : "Cinemelt Icon - Homescreen - Front.png",
       "idiom" : "tv",
       "scale" : "1x"
     },
     {
+      "filename" : "Cinemelt Icon - Homescreen - Front-1.png",
       "idiom" : "tv",
       "scale" : "2x"
     }

@@ -8,7 +8,6 @@ struct WatchlistView: View {
     @EnvironmentObject var repository: PrimeFlixRepository
     
     // FOCUS MANAGEMENT
-    // Used to programmatically force focus onto the content grid when it loads.
     @FocusState private var isContentFocused: Bool
     
     var body: some View {
@@ -29,8 +28,9 @@ struct WatchlistView: View {
                     
                     Spacer()
                 }
-                .padding(.top, 50)
-                .padding(.horizontal, 80)
+                .padding(.top, 20)
+                // ALIGNMENT FIX: Use global margin for the header
+                .padding(.horizontal, CinemeltTheme.Layout.margin)
                 .padding(.bottom, 20)
                 
                 if viewModel.isLoading {
@@ -70,21 +70,19 @@ struct WatchlistView: View {
                             Spacer().frame(height: 100)
                         }
                         .padding(.top, 20)
-                        // Important: Group the content as a section to help directional navigation from Sidebar
                         .focusSection()
-                        // Bind focus state to this container
                         .focused($isContentFocused)
                     }
+                    // CRITICAL FIX: Safe padding prevents TV bezel cropping
+                    .standardSafePadding()
                 }
             }
         }
         .onAppear {
             viewModel.configure(repository: repository)
         }
-        // Auto-Focus Logic: When loading finishes, jump to content
         .onChange(of: viewModel.isLoading) { loading in
             if !loading {
-                // Brief delay to ensure UI layout passes are complete
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     self.isContentFocused = true
                 }
@@ -105,7 +103,8 @@ struct WatchlistLane: View {
             Text(title)
                 .font(CinemeltTheme.fontTitle(32))
                 .foregroundColor(CinemeltTheme.cream)
-                .padding(.leading, 60)
+                // ALIGNMENT FIX: Align title with global margin
+                .padding(.leading, CinemeltTheme.Layout.margin)
                 .cinemeltGlow()
             
             ScrollView(.horizontal, showsIndicators: false) {
@@ -116,10 +115,10 @@ struct WatchlistLane: View {
                         }
                     }
                 }
-                .padding(.horizontal, 60)
-                .padding(.vertical, 60) // Padding for focus zoom
+                // Padding for focus expansion & alignment
+                .padding(.horizontal, CinemeltTheme.Layout.margin)
+                .padding(.vertical, 60)
             }
-            // Adding .focusSection() here improves "Lane vs Sidebar" navigation
             .focusSection()
         }
     }

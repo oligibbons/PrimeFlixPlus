@@ -25,8 +25,9 @@ struct ContinueWatchingView: View {
                     
                     Spacer()
                 }
-                .padding(.top, 50)
-                .padding(.horizontal, 80)
+                .padding(.top, 20)
+                // ALIGNMENT FIX: Use global margin
+                .padding(.horizontal, CinemeltTheme.Layout.margin)
                 .padding(.bottom, 20)
                 
                 if viewModel.isLoading {
@@ -66,8 +67,10 @@ struct ContinueWatchingView: View {
                             Spacer().frame(height: 100)
                         }
                         .padding(.top, 20)
-                        .focusSection() // Ensure navigation flows correctly inside the scroll
+                        .focusSection()
                     }
+                    // CRITICAL FIX: Safe Padding
+                    .standardSafePadding()
                 }
             }
         }
