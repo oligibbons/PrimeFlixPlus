@@ -7,12 +7,17 @@ struct WatchlistView: View {
     @StateObject private var viewModel = WatchlistViewModel()
     @EnvironmentObject var repository: PrimeFlixRepository
     
-    // FOCUS MANAGEMENT
-    @FocusState private var isContentFocused: Bool
+    // Focus Management
+    @FocusState private var focusedField: WatchlistFocus?
+    
+    enum WatchlistFocus: Hashable {
+        case content // The grid/list
+    }
     
     var body: some View {
         ZStack {
             CinemeltTheme.mainBackground
+                .ignoresSafeArea()
             
             VStack(alignment: .leading, spacing: 0) {
                 // Header
@@ -29,7 +34,7 @@ struct WatchlistView: View {
                     Spacer()
                 }
                 .padding(.top, 20)
-                // ALIGNMENT FIX: Use global margin for the header
+                // Match global margins
                 .padding(.horizontal, CinemeltTheme.Layout.margin)
                 .padding(.bottom, 20)
                 
@@ -70,21 +75,21 @@ struct WatchlistView: View {
                             Spacer().frame(height: 100)
                         }
                         .padding(.top, 20)
-                        .focusSection()
-                        .focused($isContentFocused)
+                        // Assign focus tag to content container
+                        .focused($focusedField, equals: .content)
                     }
-                    // CRITICAL FIX: Safe padding prevents TV bezel cropping
+                    // CRITICAL: Standard Safe Padding
                     .standardSafePadding()
                 }
             }
         }
         .onAppear {
             viewModel.configure(repository: repository)
-        }
-        .onChange(of: viewModel.isLoading) { loading in
-            if !loading {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    self.isContentFocused = true
+            
+            // FORCE FOCUS to content, bypassing sidebar
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if focusedField == nil {
+                    focusedField = .content
                 }
             }
         }
@@ -92,7 +97,7 @@ struct WatchlistView: View {
     }
 }
 
-// Reusing a similar lane structure to FavoritesLane
+// Reusing a similar lane structure
 struct WatchlistLane: View {
     let title: String
     let items: [Channel]
@@ -103,7 +108,6 @@ struct WatchlistLane: View {
             Text(title)
                 .font(CinemeltTheme.fontTitle(32))
                 .foregroundColor(CinemeltTheme.cream)
-                // ALIGNMENT FIX: Align title with global margin
                 .padding(.leading, CinemeltTheme.Layout.margin)
                 .cinemeltGlow()
             
@@ -115,7 +119,7 @@ struct WatchlistLane: View {
                         }
                     }
                 }
-                // Padding for focus expansion & alignment
+                // Focus bloom padding
                 .padding(.horizontal, CinemeltTheme.Layout.margin)
                 .padding(.vertical, 60)
             }

@@ -13,6 +13,7 @@ struct SearchView: View {
     enum SearchFocus: Hashable {
         case searchBar
         case scope(SearchViewModel.SearchScope)
+        case content // General content focus
     }
     
     // Grid Layout for Live Channels (Optimized for 16:9 cards)
@@ -32,7 +33,7 @@ struct SearchView: View {
             
             VStack(spacing: 0) {
                 
-                // MARK: - 1. Search Header
+                // MARK: - 1. Search Header (Pinned)
                 VStack(spacing: 25) {
                     HStack(spacing: 20) {
                         Button(action: onBack) {
@@ -52,6 +53,8 @@ struct SearchView: View {
                             text: $viewModel.query,
                             nextFocus: {
                                 viewModel.addToHistory(viewModel.query)
+                                // Move focus down to content on submit
+                                focusedField = .content
                             }
                         )
                         .focused($focusedField, equals: .searchBar)
@@ -80,7 +83,7 @@ struct SearchView: View {
                         }
                         .padding(20) // Bloom space
                     }
-                    .focusSection()
+                    .focusSection() // Keep scope navigation contained
                 }
                 // LAYOUT FIX: Align header with content using global margin
                 .padding(.horizontal, CinemeltTheme.Layout.margin)
@@ -91,48 +94,70 @@ struct SearchView: View {
                 .zIndex(2)
                 
                 // MARK: - 2. Main Content Area
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 50) {
-                        
-                        if viewModel.isLoading {
-                            HStack {
-                                Spacer()
-                                CinemeltLoadingIndicator().scaleEffect(1.5)
-                                Spacer()
-                            }
-                            .padding(.top, 100)
-                        }
-                        else if viewModel.query.isEmpty {
-                            SearchDiscoveryView(
-                                viewModel: viewModel,
-                                onTagSelected: { tag in
-                                    viewModel.query = tag
-                                    viewModel.addToHistory(tag)
+                // FIX: ScrollViewReader allows programmatic scrolling if needed
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 50) {
+                            
+                            if viewModel.isLoading {
+                                HStack {
+                                    Spacer()
+                                    CinemeltLoadingIndicator().scaleEffect(1.5)
+                                    Spacer()
                                 }
-                            )
-                        }
-                        else if viewModel.hasNoResults {
-                            noResultsPlaceholder
-                        }
-                        else {
-                            if viewModel.selectedScope == .library {
-                                libraryResults
-                            } else {
-                                liveTvResults
+                                .padding(.top, 100)
+                            }
+                            else if viewModel.query.isEmpty {
+                                SearchDiscoveryView(
+                                    viewModel: viewModel,
+                                    onTagSelected: { tag in
+                                        viewModel.query = tag
+                                        viewModel.addToHistory(tag)
+                                    }
+                                )
+                            }
+                            else if viewModel.hasNoResults {
+                                noResultsPlaceholder
+                            }
+                            else {
+                                // Results
+                                Group {
+                                    if viewModel.selectedScope == .library {
+                                        libraryResults
+                                    } else {
+                                        liveTvResults
+                                    }
+                                }
+                                // FIX: Assign a generic focus tag to the results container
+                                // so we can restore focus here if needed.
+                                .focused($focusedField, equals: .content)
                             }
                         }
+                        // CRITICAL: Standardize margins to prevent jumping
+                        .standardSafePadding()
+                        .padding(.bottom, 100)
+                        .id("TopContent")
                     }
-                    // CRITICAL: Standardize margins to prevent jumping
-                    .standardSafePadding()
-                    .padding(.bottom, 100)
+                    // FIX: FocusSection ensures scrolling within this view is prioritized
+                    // over jumping back up to the search bar.
+                    .focusSection()
                 }
-                .focusSection()
             }
         }
         .onAppear {
             viewModel.configure(repository: repository)
+            
+            // Smart Focus Restoration
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                if focusedField == nil { focusedField = .searchBar }
+                if focusedField == nil {
+                    // If we have results (restored session), focus content.
+                    // If empty, focus search bar.
+                    if !viewModel.movies.isEmpty || !viewModel.liveChannels.isEmpty {
+                        focusedField = .content
+                    } else {
+                        focusedField = .searchBar
+                    }
+                }
             }
         }
     }
@@ -239,6 +264,13 @@ struct SearchView: View {
                 Text("No results found")
                     .font(CinemeltTheme.fontTitle(28))
                     .foregroundColor(CinemeltTheme.cream)
+                
+                Button("Clear Search") {
+                    viewModel.query = ""
+                    focusedField = .searchBar
+                }
+                .buttonStyle(CinemeltCardButtonStyle())
+                .padding(.top, 20)
             }
             Spacer()
         }

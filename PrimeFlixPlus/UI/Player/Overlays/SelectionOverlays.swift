@@ -380,9 +380,15 @@ struct VersionSelectionOverlay: View {
                 ScrollView {
                     VStack(spacing: 15) {
                         ForEach(viewModel.alternativeVersions, id: \.url) { channel in
+                            // RICH METADATA EXTRACTION
+                            let info = TitleNormalizer.parse(rawTitle: channel.canonicalTitle ?? channel.title)
+                            let quality = info.quality.isEmpty ? (channel.quality ?? "HD") : info.quality
+                            let language = info.language ?? "Unknown"
+                            let label = "\(quality) • \(language)"
+                            
                             Button(action: { viewModel.switchVersion(channel) }) {
                                 HStack {
-                                    Text(channel.quality ?? "Unknown Quality")
+                                    Text(label)
                                         .font(CinemeltTheme.fontTitle(24))
                                         .foregroundColor(.white)
                                     Spacer()

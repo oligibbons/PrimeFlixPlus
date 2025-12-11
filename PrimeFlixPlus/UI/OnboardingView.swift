@@ -46,7 +46,7 @@ struct OnboardingView: View {
                 .foregroundColor(CinemeltTheme.accent)
                 .shadow(color: CinemeltTheme.accent.opacity(0.5), radius: 30)
             
-            Text("Welcome to PrimeFlix+")
+            Text("Welcome to Cinemelt")
                 .font(CinemeltTheme.fontTitle(70))
                 .foregroundColor(CinemeltTheme.cream)
                 .cinemeltGlow()

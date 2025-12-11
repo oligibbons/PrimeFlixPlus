@@ -36,14 +36,49 @@ class SearchViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var searchTask: Task<Void, Never>?
     
+    // MARK: - Session Persistence (Static)
+    // Preserves state when navigating away (Details) and back (re-init)
+    struct SearchSession {
+        let query: String
+        let scope: SearchScope
+        let movieIDs: [NSManagedObjectID]
+        let seriesIDs: [NSManagedObjectID]
+        let liveCats: [String]
+        let liveChanIDs: [NSManagedObjectID]
+    }
+    
+    private static var lastSession: SearchSession?
+    
     // MARK: - Initialization
     init(initialScope: SearchScope = .library) {
-        self.selectedScope = initialScope
         self.searchHistory = UserDefaults.standard.stringArray(forKey: "SearchHistory") ?? []
+        
+        // Restore Session if available
+        if let session = SearchViewModel.lastSession {
+            self.query = session.query
+            self.selectedScope = session.scope
+            // Objects are re-fetched in configure() to ensure context safety
+        } else {
+            self.selectedScope = initialScope
+        }
     }
     
     func configure(repository: PrimeFlixRepository) {
         self.repository = repository
+        
+        // Re-hydrate objects if we restored a session
+        if let session = SearchViewModel.lastSession, !session.query.isEmpty {
+            let context = repository.container.viewContext
+            
+            if session.scope == .library {
+                self.movies = session.movieIDs.compactMap { try? context.existingObject(with: $0) as? Channel }
+                self.series = session.seriesIDs.compactMap { try? context.existingObject(with: $0) as? Channel }
+            } else {
+                self.liveCategories = session.liveCats
+                self.liveChannels = session.liveChanIDs.compactMap { try? context.existingObject(with: $0) as? Channel }
+            }
+        }
+        
         setupSubscriptions()
     }
     
@@ -51,16 +86,11 @@ class SearchViewModel: ObservableObject {
     
     func addToHistory(_ term: String) {
         guard !term.isEmpty else { return }
-        // Remove duplicate if exists, then prepend
         if let index = searchHistory.firstIndex(of: term) {
             searchHistory.remove(at: index)
         }
         searchHistory.insert(term, at: 0)
-        
-        // Cap at 10 items
-        if searchHistory.count > 10 {
-            searchHistory.removeLast()
-        }
+        if searchHistory.count > 10 { searchHistory.removeLast() }
         UserDefaults.standard.set(searchHistory, forKey: "SearchHistory")
     }
     
@@ -72,7 +102,7 @@ class SearchViewModel: ObservableObject {
     // MARK: - Search Logic
     
     private func setupSubscriptions() {
-        // 1. Watch Query (Debounced)
+        // 1. Watch Query
         $query
             .removeDuplicates()
             .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
@@ -80,19 +110,19 @@ class SearchViewModel: ObservableObject {
                 guard let self = self else { return }
                 if !newQuery.isEmpty {
                     self.performSearch()
-                } else {
+                } else if newQuery.isEmpty && !self.movies.isEmpty {
+                    // Only clear if explicitly empty, not just init
                     self.clearResults()
                 }
             }
             .store(in: &cancellables)
         
-        // 2. Watch Scope (Immediate)
+        // 2. Watch Scope
         $selectedScope
             .dropFirst()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
-                // If query exists, re-run search immediately for new scope
                 if !self.query.isEmpty {
                     self.performSearch()
                 } else {
@@ -110,28 +140,22 @@ class SearchViewModel: ObservableObject {
         
         self.isLoading = true
         self.hasNoResults = false
-        
-        // Cancel any existing task
         searchTask?.cancel()
         
         let currentQuery = query
         let currentScope = selectedScope
         
         searchTask = Task {
-            // Perform heavy lifting on background context
             let bgContext = repo.container.newBackgroundContext()
             
             await bgContext.perform { [weak self] in
                 guard let self = self else { return }
-                
                 let searchRepo = ChannelRepository(context: bgContext)
                 
                 if currentScope == .library {
-                    // --- LIBRARY SEARCH ---
-                    // FIX: Calls the dedicated 'searchLibrary' method we restored
+                    // Use deduplicated logic from Repository
                     let results = searchRepo.searchLibrary(query: currentQuery)
                     
-                    // Map to ObjectIDs for thread transfer
                     let movieIDs = results.movies.map { $0.objectID }
                     let seriesIDs = results.series.map { $0.objectID }
                     
@@ -139,14 +163,12 @@ class SearchViewModel: ObservableObject {
                         if Task.isCancelled { return }
                         
                         let viewContext = repo.container.viewContext
-                        // Re-fetch objects on Main Thread
                         self.movies = movieIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
                         self.series = seriesIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
                         
-                        self.isLoading = false
-                        self.hasNoResults = self.movies.isEmpty && self.series.isEmpty
+                        self.finalizeSearch(scope: .library, mIDs: movieIDs, sIDs: seriesIDs)
                         
-                        // Trigger Enrichment (optional, for missing covers)
+                        // Background Enrichment
                         if !self.movies.isEmpty || !self.series.isEmpty {
                             let combined = Array((self.movies + self.series).prefix(8))
                             await repo.enrichContent(items: combined)
@@ -154,26 +176,42 @@ class SearchViewModel: ObservableObject {
                     }
                     
                 } else {
-                    // --- LIVE TV SEARCH ---
-                    // FIX: Calls 'searchLive' (renamed from searchLiveContent to match repo)
+                    // Live TV
                     let results = searchRepo.searchLive(query: currentQuery)
-                    
-                    let channelIDs = results.channels.map { $0.objectID }
-                    let foundCategories = results.categories
+                    let chanIDs = results.channels.map { $0.objectID }
                     
                     Task { @MainActor in
                         if Task.isCancelled { return }
                         
                         let viewContext = repo.container.viewContext
-                        self.liveCategories = foundCategories
-                        self.liveChannels = channelIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
+                        self.liveCategories = results.categories
+                        self.liveChannels = chanIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
                         
-                        self.isLoading = false
-                        self.hasNoResults = self.liveCategories.isEmpty && self.liveChannels.isEmpty
+                        self.finalizeSearch(scope: .liveTV, liveCats: results.categories, liveIDs: chanIDs)
                     }
                 }
             }
         }
+    }
+    
+    private func finalizeSearch(scope: SearchScope, mIDs: [NSManagedObjectID] = [], sIDs: [NSManagedObjectID] = [], liveCats: [String] = [], liveIDs: [NSManagedObjectID] = []) {
+        self.isLoading = false
+        
+        if scope == .library {
+            self.hasNoResults = self.movies.isEmpty && self.series.isEmpty
+        } else {
+            self.hasNoResults = self.liveCategories.isEmpty && self.liveChannels.isEmpty
+        }
+        
+        // Save Session
+        SearchViewModel.lastSession = SearchSession(
+            query: self.query,
+            scope: self.selectedScope,
+            movieIDs: mIDs,
+            seriesIDs: sIDs,
+            liveCats: liveCats,
+            liveChanIDs: liveIDs
+        )
     }
     
     func clearResults() {
@@ -183,13 +221,13 @@ class SearchViewModel: ObservableObject {
         self.liveChannels = []
         self.isLoading = false
         self.hasNoResults = false
+        
+        SearchViewModel.lastSession = nil
     }
     
     // MARK: - Actions
     
-    /// Allows clicking a category in search results to refine the search to that category name
     func refineSearch(to category: String) {
         self.query = category
-        // The subscription to $query will pick this up and trigger a search automatically
     }
 }

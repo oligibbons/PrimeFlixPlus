@@ -7,9 +7,16 @@ struct ContinueWatchingView: View {
     @StateObject private var viewModel = ContinueWatchingViewModel()
     @EnvironmentObject var repository: PrimeFlixRepository
     
+    // Focus Management
+    @FocusState private var focusedField: CWFocus?
+    
+    enum CWFocus: Hashable {
+        case content
+    }
+    
     var body: some View {
         ZStack {
-            CinemeltTheme.mainBackground
+            CinemeltTheme.mainBackground.ignoresSafeArea()
             
             VStack(alignment: .leading, spacing: 0) {
                 // Header
@@ -33,7 +40,7 @@ struct ContinueWatchingView: View {
                 if viewModel.isLoading {
                     VStack {
                         Spacer()
-                        ProgressView().tint(CinemeltTheme.accent).scaleEffect(2.0)
+                        CinemeltLoadingIndicator()
                         Spacer()
                     }
                     .frame(maxWidth: .infinity)
@@ -61,13 +68,14 @@ struct ContinueWatchingView: View {
                             }
                             
                             if !viewModel.liveChannels.isEmpty {
-                                ContinueWatchingLane(title: "Live TV (Last 10)", items: viewModel.liveChannels, onItemClick: onPlay)
+                                ContinueWatchingLane(title: "Live TV", items: viewModel.liveChannels, onItemClick: onPlay)
                             }
                             
                             Spacer().frame(height: 100)
                         }
                         .padding(.top, 20)
-                        .focusSection()
+                        // Assign focus tag so we can force selection here
+                        .focused($focusedField, equals: .content)
                     }
                     // CRITICAL FIX: Safe Padding
                     .standardSafePadding()
@@ -76,6 +84,13 @@ struct ContinueWatchingView: View {
         }
         .onAppear {
             viewModel.configure(repository: repository)
+            
+            // FORCE FOCUS to content
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if focusedField == nil {
+                    focusedField = .content
+                }
+            }
         }
         .onExitCommand { onBack() }
     }

@@ -109,15 +109,68 @@ class RecommendationService {
                 }
             }
             
-            // B. History Analysis
+            // B. History Analysis (Enhanced for 50% Rule)
             let historyReq = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
-            historyReq.fetchLimit = 50
+            // Fetch enough history to determine series progress
+            historyReq.fetchLimit = 200
+            
             if let history = try? context.fetch(historyReq) {
+                // Batch fetch channels to avoid N+1
+                let urls = history.map { $0.channelUrl }
+                let chReq = NSFetchRequest<Channel>(entityName: "Channel")
+                chReq.predicate = NSPredicate(format: "url IN %@", urls)
+                let channels = (try? context.fetch(chReq)) ?? []
+                let channelMap = Dictionary(uniqueKeysWithValues: channels.map { ($0.url, $0) })
+                
+                // Track Series Progress: "SeriesID_SeasonNum" -> Set<EpisodeURL>
+                var seasonProgress: [String: Set<String>] = [:]
+                
                 for item in history {
-                    if let ch = self.getChannel(byUrl: item.channelUrl), ch.type == type {
-                        preferredGroups.insert(ch.group)
-                        if let prefix = extractRegionPrefix(from: ch.group) {
-                            regionalWhitelist.insert(prefix)
+                    guard let ch = channelMap[item.channelUrl], ch.type == type else { continue }
+                    
+                    let progress = Double(item.duration) > 0 ? Double(item.position) / Double(item.duration) : 0
+                    
+                    // Logic for Movies: > 50% watched
+                    if type == "movie" {
+                        if progress > 0.5 {
+                            preferredGroups.insert(ch.group)
+                            if let prefix = extractRegionPrefix(from: ch.group) {
+                                regionalWhitelist.insert(prefix)
+                            }
+                        }
+                    }
+                    // Logic for Series: Accumulate watched episodes (> 50% progress each)
+                    else if type == "series" {
+                        if progress > 0.5 {
+                            if let sid = ch.seriesId, !sid.isEmpty {
+                                let key = "\(sid)_\(ch.season)"
+                                seasonProgress[key, default: []].insert(ch.url)
+                            }
+                        }
+                    }
+                }
+                
+                // Finalize Series Logic: Check "More than half of episodes in a single season"
+                if type == "series" {
+                    for (key, watchedEps) in seasonProgress {
+                        let parts = key.components(separatedBy: "_")
+                        guard parts.count == 2, let seasonNum = Int(parts[1]) else { continue }
+                        let sid = parts[0]
+                        
+                        // Count total episodes for this season in DB
+                        let countReq = NSFetchRequest<Channel>(entityName: "Channel")
+                        countReq.predicate = NSPredicate(format: "seriesId == %@ AND season == %d AND type == 'series_episode'", sid, seasonNum)
+                        let total = (try? context.count(for: countReq)) ?? 0
+                        
+                        // Rule: Watched > 50% of season
+                        if total > 0 && Double(watchedEps.count) / Double(total) > 0.5 {
+                            // Find a representative channel to extract Group/Region info
+                            if let sampleUrl = watchedEps.first, let ch = channelMap[sampleUrl] {
+                                preferredGroups.insert(ch.group)
+                                if let prefix = extractRegionPrefix(from: ch.group) {
+                                    regionalWhitelist.insert(prefix)
+                                }
+                            }
                         }
                     }
                 }
@@ -136,6 +189,7 @@ class RecommendationService {
             }
         }
         
+        // Execute Search with preferences
         let request = NSFetchRequest<Channel>(entityName: "Channel")
         var predicates: [NSPredicate] = [NSPredicate(format: "type == %@", type)]
         

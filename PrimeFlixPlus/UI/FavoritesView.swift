@@ -7,9 +7,17 @@ struct FavoritesView: View {
     @StateObject private var viewModel = FavoritesViewModel()
     @EnvironmentObject var repository: PrimeFlixRepository
     
+    // Focus Management
+    @FocusState private var focusedField: FavoritesFocus?
+    
+    enum FavoritesFocus: Hashable {
+        case content // The grid/list
+    }
+    
     var body: some View {
         ZStack {
             CinemeltTheme.mainBackground
+                .ignoresSafeArea()
             
             VStack(alignment: .leading, spacing: 0) {
                 // Header
@@ -26,14 +34,14 @@ struct FavoritesView: View {
                     Spacer()
                 }
                 .padding(.top, 20)
-                // ALIGNMENT FIX: Use global margin
+                // Match global margins
                 .padding(.horizontal, CinemeltTheme.Layout.margin)
                 .padding(.bottom, 20)
                 
                 if viewModel.isLoading {
                     VStack {
                         Spacer()
-                        ProgressView().tint(CinemeltTheme.accent).scaleEffect(2.0)
+                        CinemeltLoadingIndicator()
                         Spacer()
                     }
                     .frame(maxWidth: .infinity)
@@ -52,36 +60,61 @@ struct FavoritesView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 50) {
                             
+                            // 1. Series
                             if !viewModel.series.isEmpty {
-                                FavoritesLane(title: "Series", items: viewModel.series, onPlay: onPlay)
+                                FavoritesLane(
+                                    title: "Series",
+                                    items: viewModel.series,
+                                    onPlay: onPlay
+                                )
                             }
                             
+                            // 2. Movies
                             if !viewModel.movies.isEmpty {
-                                FavoritesLane(title: "Movies", items: viewModel.movies, onPlay: onPlay)
+                                FavoritesLane(
+                                    title: "Movies",
+                                    items: viewModel.movies,
+                                    onPlay: onPlay
+                                )
                             }
                             
+                            // 3. Live TV
                             if !viewModel.liveChannels.isEmpty {
-                                FavoritesLane(title: "Live TV", items: viewModel.liveChannels, onPlay: onPlay)
+                                FavoritesLane(
+                                    title: "Live TV",
+                                    items: viewModel.liveChannels,
+                                    onPlay: onPlay
+                                )
                             }
                             
                             Spacer().frame(height: 100)
                         }
                         .padding(.top, 20)
-                        .focusSection()
+                        
+                        // Assign the focus tag to the whole content block
+                        // This allows the "onAppear" force-focus to land somewhere valid
+                        .focused($focusedField, equals: .content)
                     }
-                    // CRITICAL FIX: Safe Padding
+                    // CRITICAL: Standard Safe Padding
                     .standardSafePadding()
                 }
             }
         }
         .onAppear {
             viewModel.configure(repository: repository)
+            
+            // FORCE FOCUS to content, bypassing sidebar
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if focusedField == nil {
+                    focusedField = .content
+                }
+            }
         }
         .onExitCommand { onBack() }
     }
 }
 
-// Lane structure
+// Helper Subview
 struct FavoritesLane: View {
     let title: String
     let items: [Channel]
@@ -92,7 +125,6 @@ struct FavoritesLane: View {
             Text(title)
                 .font(CinemeltTheme.fontTitle(32))
                 .foregroundColor(CinemeltTheme.cream)
-                // ALIGNMENT FIX
                 .padding(.leading, CinemeltTheme.Layout.margin)
                 .cinemeltGlow()
             
@@ -104,10 +136,11 @@ struct FavoritesLane: View {
                         }
                     }
                 }
-                // Padding for focus expansion & alignment
+                // Focus bloom padding
                 .padding(.horizontal, CinemeltTheme.Layout.margin)
                 .padding(.vertical, 60)
             }
+            .focusSection()
         }
     }
 }

@@ -51,7 +51,7 @@ class EpgGridViewModel: ObservableObject {
         loadPersistedState()
         generateTimeSlots()
         loadData()
-        setupSearch()
+        setupListeners()
     }
     
     // MARK: - Persistence
@@ -78,45 +78,61 @@ class EpgGridViewModel: ObservableObject {
     
     // MARK: - Data Loading
     
-    private func loadData() {
+    private func setupListeners() {
         guard let repo = repository else { return }
         
-        Task {
-            // 1. Fetch Metadata (Favs/Recents)
-            let favs = repo.getFavorites(type: "live")
-            let recents = repo.getSmartContinueWatching(type: "live")
-            
-            self.favoriteIds = Set(favs.map { $0.url })
-            self.recentIds = Set(recents.map { $0.url })
-            
-            // 2. Fetch All Channels (Background Context for speed)
-            if let pl = repo.getAllPlaylists().first {
-                let all = repo.getBrowsingContent(playlistUrl: pl.url, type: "live", group: "All")
-                
-                // 3. Extract Categories
-                let groups = Set(all.map { $0.group }).sorted()
-                
-                await MainActor.run {
-                    self.allChannels = all
-                    self.availableCategories = groups
-                    
-                    // Default: if "Custom" is selected but no categories picked, pick all (better UX)
-                    if self.selectedCategories.isEmpty && !groups.isEmpty {
-                        // Optional: could default to all, but let's leave it empty to force user choice or "All" mode
-                    }
-                    
-                    self.applyFilters()
-                }
-            }
-        }
-    }
-    
-    private func setupSearch() {
+        // 1. Search Debounce
         $searchText
             .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .removeDuplicates()
             .sink { [weak self] _ in self?.applyFilters() }
             .store(in: &cancellables)
+            
+        // 2. Repository Updates (Fixes "No Channels" on cold start)
+        repo.objectWillChange
+            .debounce(for: .milliseconds(500), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.loadData()
+            }
+            .store(in: &cancellables)
+    }
+    
+    private func loadData() {
+        guard let repo = repository else { return }
+        
+        Task {
+            // 1. Fetch Metadata (Favs/Recents)
+            // Always refetch these as they change dynamically
+            let favs = repo.getFavorites(type: "live")
+            let recents = repo.getSmartContinueWatching(type: "live")
+            
+            let newFavIds = Set(favs.map { $0.url })
+            let newRecentIds = Set(recents.map { $0.url })
+            
+            await MainActor.run {
+                self.favoriteIds = newFavIds
+                self.recentIds = newRecentIds
+            }
+            
+            // 2. Fetch All Channels (Only if needed or empty)
+            if self.allChannels.isEmpty {
+                if let pl = repo.getAllPlaylists().first {
+                    let all = repo.getBrowsingContent(playlistUrl: pl.url, type: "live", group: "All")
+                    let groups = Set(all.map { $0.group }).sorted()
+                    
+                    await MainActor.run {
+                        self.allChannels = all
+                        self.availableCategories = groups
+                        self.applyFilters()
+                    }
+                }
+            } else {
+                // If channels already loaded, just re-apply filters with new Favs/Recents
+                await MainActor.run {
+                    self.applyFilters()
+                }
+            }
+        }
     }
     
     // MARK: - Filter Logic (The Core)
@@ -308,11 +324,21 @@ struct EpgGridView: View {
                         Text("No channels found.")
                             .font(CinemeltTheme.fontTitle(32))
                             .foregroundColor(CinemeltTheme.cream)
-                        Text("Try changing your filter settings.")
-                            .font(CinemeltTheme.fontBody(24))
-                            .foregroundColor(.gray)
-                        Button("Open Filters") { showFilterSettings = true }
+                        
+                        if viewModel.filterMode == .myChannels {
+                            Text("You haven't added any favorites or watched live TV yet.")
+                                .font(CinemeltTheme.fontBody(24))
+                                .foregroundColor(.gray)
+                        } else {
+                            Text("Try changing your filter settings.")
+                                .font(CinemeltTheme.fontBody(24))
+                                .foregroundColor(.gray)
+                        }
+                        
+                        Button("Change Filter") { showFilterSettings = true }
                             .buttonStyle(CinemeltCardButtonStyle())
+                            .padding(.top, 20)
+                        
                         Spacer()
                     }
                 } else {
@@ -599,3 +625,14 @@ struct EpgProgramCell: View {
         return "\(f.string(from: program.start)) - \(f.string(from: program.end))"
     }
 }
+
+}
+
+**Next Step:**
+We're almost done with the critical updates. The next item is to ensure that opening secondary pages (**Favorites**, **Watchlist**, **Continue Watching**) selects the **content** first, not the sidebar.
+This involves a small tweak to:
+1.  **`FavoritesView.swift`**
+2.  **`WatchlistView.swift`**
+3.  **`ContinueWatchingView.swift`**
+
+I'll provide **`FavoritesView.swift`** first.
