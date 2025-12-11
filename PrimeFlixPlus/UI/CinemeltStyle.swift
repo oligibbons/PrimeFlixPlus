@@ -56,17 +56,22 @@ struct CinemeltTheme {
         .ignoresSafeArea()
     }
     
-    // MARK: - Fonts (tvOS Optimized)
+    // MARK: - Fonts (tvOS Optimized - Scaled Down)
     
-    /// Returns a title font. Automatically upgrades small sizes to tvOS standards (38pt+ recommended).
+    // Scaling Factor to reduce all text by ~25% globally
+    static let fontScale: CGFloat = 0.75
+    
+    /// Returns a title font. Automatically upgrades small sizes to tvOS standards (scaled).
     static func fontTitle(_ size: CGFloat) -> Font {
-        let effectiveSize = size < 30 ? 38 : size
+        // Was 38, now ~28 minimum
+        let effectiveSize = (size < 30 ? 38 : size) * fontScale
         return .custom("Zain-Bold", size: effectiveSize)
     }
     
-    /// Returns a body font. Enforces minimum readability (26pt+ recommended).
+    /// Returns a body font. Enforces minimum readability (scaled).
     static func fontBody(_ size: CGFloat) -> Font {
-        let effectiveSize = size < 20 ? 26 : size
+        // Was 26, now ~19.5 minimum
+        let effectiveSize = (size < 20 ? 26 : size) * fontScale
         return .custom("Zain-Regular", size: effectiveSize)
     }
     
@@ -74,12 +79,15 @@ struct CinemeltTheme {
     struct Layout {
         // Critical: Apple TV Safe Area margins (90pt standard).
         static let margin: CGFloat = 90
-        static let verticalSpacing: CGFloat = 60
-        static let gutter: CGFloat = 40
         
-        // Standardized Card Sizes
-        static let posterWidth: CGFloat = 250
-        static let posterHeight: CGFloat = 375
+        // Tightened spacing for smaller content
+        static let verticalSpacing: CGFloat = 45 // Was 60
+        static let gutter: CGFloat = 30          // Was 40
+        
+        // Standardized Card Sizes (Reduced by ~25% for density)
+        // Was 250 x 375
+        static let posterWidth: CGFloat = 185
+        static let posterHeight: CGFloat = 278
     }
 }
 
@@ -108,8 +116,8 @@ struct CinemeltLoadingIndicator: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.white.opacity(0.1), lineWidth: 8)
-                .frame(width: 80, height: 80)
+                .stroke(Color.white.opacity(0.1), lineWidth: 6) // Reduced stroke
+                .frame(width: 60, height: 60) // Reduced size
             
             Circle()
                 .trim(from: 0, to: 0.6)
@@ -118,9 +126,9 @@ struct CinemeltLoadingIndicator: View {
                         gradient: Gradient(colors: [CinemeltTheme.accent, CinemeltTheme.accentDim]),
                         center: .center
                     ),
-                    style: StrokeStyle(lineWidth: 8, lineCap: .round)
+                    style: StrokeStyle(lineWidth: 6, lineCap: .round)
                 )
-                .frame(width: 80, height: 80)
+                .frame(width: 60, height: 60)
                 .rotationEffect(Angle(degrees: isAnimating ? 360 : 0))
                 .animation(
                     Animation.linear(duration: 1.0)
@@ -170,15 +178,16 @@ struct CinemeltCardButtonView: View {
     var body: some View {
         configuration.label
             // The "Lift" Effect
-            .scaleEffect(configuration.isPressed ? 0.95 : (isFocused ? 1.15 : 1.0))
-            .offset(y: isFocused ? -10 : 0)
+            // FIX: Reduced scale from 1.15 to 1.10 to prevent cropping issues in grids
+            .scaleEffect(configuration.isPressed ? 0.95 : (isFocused ? 1.10 : 1.0))
+            .offset(y: isFocused ? -8 : 0) // Reduced offset
             
             // Ambilight Glow
             .shadow(
                 color: isFocused ? CinemeltTheme.accent.opacity(0.6) : .black.opacity(0.3),
-                radius: isFocused ? 30 : 5,
+                radius: isFocused ? 25 : 5, // Tighter radius
                 x: 0,
-                y: isFocused ? 20 : 2
+                y: isFocused ? 15 : 2
             )
             
             // Background Plate
@@ -226,6 +235,7 @@ extension View {
         self.modifier(CinemeltTextGlow())
     }
     
+    // Default sizes applied here will be scaled by the 0.75 factor in the font methods
     func cinemeltTitle() -> some View {
         self.font(CinemeltTheme.fontTitle(40)).foregroundColor(CinemeltTheme.cream)
     }
@@ -237,7 +247,7 @@ extension View {
     /// Applies standard tvOS safe area padding.
     func standardSafePadding() -> some View {
         self.padding(.horizontal, CinemeltTheme.Layout.margin)
-            .padding(.vertical, 60)
+            .padding(.vertical, 40) // Reduced vertical padding
     }
     
     /// Applies the custom "Cinemelt" focus lift effect.

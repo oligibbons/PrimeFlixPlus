@@ -50,7 +50,7 @@ struct SettingsView: View {
                 Spacer()
                 
                 // Version Info
-                Text("Cinemelt v1.6 (Optimized)")
+                Text("Cinemelt v2.1")
                     .font(CinemeltTheme.fontBody(18))
                     .foregroundColor(.gray)
                     .padding(.horizontal, 20)
@@ -88,7 +88,108 @@ struct SettingsView: View {
                         .padding(40)
                         .cinemeltGlass()
                         
-                        // --- SECTION 2: CONTENT & FILTERING ---
+                        // --- SECTION 2: PLAYER EXPERIENCE (NEW) ---
+                        VStack(alignment: .leading, spacing: 30) {
+                            Text("Player Experience")
+                                .font(CinemeltTheme.fontTitle(32))
+                                .foregroundColor(CinemeltTheme.accent)
+                                .cinemeltGlow()
+                            
+                            // 1. Scrubbing Sensitivity
+                            VStack(alignment: .leading, spacing: 15) {
+                                HStack {
+                                    Image(systemName: "hand.draw.fill")
+                                        .foregroundColor(CinemeltTheme.cream)
+                                    Text("Scrubbing Sensitivity")
+                                        .font(CinemeltTheme.fontBody(22))
+                                        .foregroundColor(CinemeltTheme.cream)
+                                    Spacer()
+                                    Text("\(Int(viewModel.scrubSensitivity * 100))%")
+                                        .font(CinemeltTheme.fontBody(22))
+                                        .fontWeight(.bold)
+                                        .foregroundColor(CinemeltTheme.accent)
+                                }
+                                
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 15) {
+                                        ForEach(viewModel.sensitivityOptions, id: \.1) { label, value in
+                                            Button(action: { viewModel.scrubSensitivity = value }) {
+                                                Text(label)
+                                                    .font(CinemeltTheme.fontBody(18))
+                                                    .fontWeight(viewModel.scrubSensitivity == value ? .bold : .regular)
+                                                    .padding(.horizontal, 20)
+                                                    .padding(.vertical, 12)
+                                                    .background(
+                                                        viewModel.scrubSensitivity == value ?
+                                                        CinemeltTheme.accent : Color.white.opacity(0.05)
+                                                    )
+                                                    .cornerRadius(12)
+                                            }
+                                            .buttonStyle(CinemeltCardButtonStyle())
+                                            .foregroundColor(viewModel.scrubSensitivity == value ? .black : CinemeltTheme.cream)
+                                        }
+                                    }
+                                    .padding(5) // Bloom padding
+                                }
+                            }
+                            
+                            Divider().background(Color.white.opacity(0.1))
+                            
+                            // 2. Subtitles
+                            VStack(alignment: .leading, spacing: 15) {
+                                Button(action: { viewModel.areSubtitlesEnabled.toggle() }) {
+                                    HStack {
+                                        Image(systemName: "captions.bubble.fill")
+                                            .foregroundColor(viewModel.areSubtitlesEnabled ? CinemeltTheme.accent : .gray)
+                                        Text("Subtitles")
+                                            .font(CinemeltTheme.fontBody(22))
+                                            .foregroundColor(CinemeltTheme.cream)
+                                        Spacer()
+                                        Text(viewModel.areSubtitlesEnabled ? "On" : "Off")
+                                            .font(CinemeltTheme.fontBody(22))
+                                            .fontWeight(.bold)
+                                            .foregroundColor(viewModel.areSubtitlesEnabled ? CinemeltTheme.accent : .gray)
+                                    }
+                                    .padding()
+                                    .background(Color.white.opacity(0.05))
+                                    .cornerRadius(12)
+                                }
+                                .buttonStyle(CinemeltCardButtonStyle())
+                                
+                                if viewModel.areSubtitlesEnabled {
+                                    Text("Subtitle Size")
+                                        .font(CinemeltTheme.fontBody(18))
+                                        .foregroundColor(.gray)
+                                        .padding(.top, 10)
+                                    
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: 15) {
+                                            ForEach(viewModel.subtitleSizes, id: \.1) { label, value in
+                                                Button(action: { viewModel.subtitleScale = value }) {
+                                                    Text(label)
+                                                        .font(CinemeltTheme.fontBody(18 * value)) // Dynamic Preview
+                                                        .fontWeight(viewModel.subtitleScale == value ? .bold : .regular)
+                                                        .padding(.horizontal, 20)
+                                                        .padding(.vertical, 12)
+                                                        .background(
+                                                            viewModel.subtitleScale == value ?
+                                                            CinemeltTheme.accent : Color.white.opacity(0.05)
+                                                        )
+                                                        .cornerRadius(12)
+                                                }
+                                                .buttonStyle(CinemeltCardButtonStyle())
+                                                .foregroundColor(viewModel.subtitleScale == value ? .black : CinemeltTheme.cream)
+                                            }
+                                        }
+                                        .padding(5)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(40)
+                        .cinemeltGlass()
+                        
+                        // --- SECTION 3: CONTENT & FILTERING ---
                         VStack(alignment: .leading, spacing: 25) {
                             Text("Content Preferences")
                                 .font(CinemeltTheme.fontTitle(32))
@@ -193,7 +294,7 @@ struct SettingsView: View {
                         .padding(40)
                         .cinemeltGlass()
                         
-                        // --- SECTION 3: PLAYBACK OPTIMIZATION (NEW) ---
+                        // --- SECTION 4: PLAYBACK OPTIMIZATION ---
                         VStack(alignment: .leading, spacing: 30) {
                             HStack {
                                 Text("Playback Optimization")
@@ -237,7 +338,6 @@ struct SettingsView: View {
                                         .foregroundColor(CinemeltTheme.accent)
                                 }
                                 
-                                // Custom Segmented Control for Buffer
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: 15) {
                                         ForEach(viewModel.bufferOptions, id: \.1) { label, value in
@@ -333,55 +433,96 @@ struct SettingsView: View {
                         .padding(40)
                         .cinemeltGlass()
                         
-                        // --- SECTION 4: DATA & SYNC ---
+                        // --- SECTION 5: DATA & SYNC ---
                         VStack(alignment: .leading, spacing: 25) {
                             Text("Data & Sync")
                                 .font(CinemeltTheme.fontTitle(32))
                                 .foregroundColor(CinemeltTheme.accent)
                                 .cinemeltGlow()
                             
-                            ActionCard(
-                                icon: "bolt.badge.a",
-                                title: "Network Speed Test",
-                                subtitle: "Check connection quality for streaming",
-                                action: onSpeedTest
-                            )
-                            
-                            HStack(spacing: 30) {
-                                ActionCard(
-                                    icon: "arrow.triangle.2.circlepath",
-                                    title: "Update Library",
-                                    subtitle: "Fetch new content",
-                                    action: { viewModel.forceUpdate() }
-                                )
-                                
-                                Button(action: { viewModel.nuclearResync() }) {
-                                    HStack(spacing: 15) {
-                                        Image(systemName: "exclamationmark.arrow.circlepath")
-                                            .font(.title)
-                                            .foregroundColor(.red)
-                                            .frame(width: 40)
-                                        
-                                        VStack(alignment: .leading) {
-                                            Text("Nuclear Resync")
-                                                .font(CinemeltTheme.fontBody(22))
-                                                .fontWeight(.bold)
-                                                .foregroundColor(.red.opacity(0.9))
-                                            Text("Wipe and rebuild all data")
-                                                .font(CinemeltTheme.fontBody(16))
-                                                .foregroundColor(.gray)
-                                        }
-                                    }
-                                    .padding(20)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Color.red.opacity(0.05))
-                                    .cornerRadius(16)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                            HStack(alignment: .top, spacing: 30) {
+                                VStack(spacing: 20) {
+                                    ActionCard(
+                                        icon: "bolt.badge.a",
+                                        title: "Network Speed Test",
+                                        subtitle: "Check connection quality",
+                                        action: onSpeedTest
                                     )
+                                    
+                                    // VPN Toggle (NEW)
+                                    Button(action: { viewModel.vpnAlertEnabled.toggle() }) {
+                                        HStack {
+                                            Image(systemName: viewModel.vpnAlertEnabled ? "lock.shield.fill" : "lock.slash.fill")
+                                                .font(.title2)
+                                                .foregroundColor(viewModel.vpnAlertEnabled ? .green : .gray)
+                                                .frame(width: 40)
+                                            
+                                            VStack(alignment: .leading) {
+                                                Text("VPN Warnings")
+                                                    .font(CinemeltTheme.fontBody(22))
+                                                    .fontWeight(.bold)
+                                                    .foregroundColor(CinemeltTheme.cream)
+                                                Text(viewModel.vpnAlertEnabled ? "Shown when unsafe" : "Disabled")
+                                                    .font(CinemeltTheme.fontBody(16))
+                                                    .foregroundColor(.gray)
+                                            }
+                                            
+                                            Spacer()
+                                            
+                                            ZStack {
+                                                Capsule()
+                                                    .fill(viewModel.vpnAlertEnabled ? .green : Color.white.opacity(0.2))
+                                                    .frame(width: 60, height: 32)
+                                                
+                                                Circle()
+                                                    .fill(.white)
+                                                    .frame(width: 24, height: 24)
+                                                    .offset(x: viewModel.vpnAlertEnabled ? 14 : -14)
+                                            }
+                                        }
+                                        .padding(20)
+                                        .background(Color.white.opacity(0.05))
+                                        .cornerRadius(16)
+                                    }
+                                    .buttonStyle(CinemeltCardButtonStyle())
                                 }
-                                .buttonStyle(CinemeltCardButtonStyle())
+                                
+                                VStack(spacing: 20) {
+                                    ActionCard(
+                                        icon: "arrow.triangle.2.circlepath",
+                                        title: "Update Library",
+                                        subtitle: "Fetch new content",
+                                        action: { viewModel.forceUpdate() }
+                                    )
+                                    
+                                    Button(action: { viewModel.nuclearResync() }) {
+                                        HStack(spacing: 15) {
+                                            Image(systemName: "exclamationmark.arrow.circlepath")
+                                                .font(.title)
+                                                .foregroundColor(.red)
+                                                .frame(width: 40)
+                                            
+                                            VStack(alignment: .leading) {
+                                                Text("Nuclear Resync")
+                                                    .font(CinemeltTheme.fontBody(22))
+                                                    .fontWeight(.bold)
+                                                    .foregroundColor(.red.opacity(0.9))
+                                                Text("Wipe and rebuild all data")
+                                                    .font(CinemeltTheme.fontBody(16))
+                                                    .foregroundColor(.gray)
+                                            }
+                                        }
+                                        .padding(20)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Color.red.opacity(0.05))
+                                        .cornerRadius(16)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                                        )
+                                    }
+                                    .buttonStyle(CinemeltCardButtonStyle())
+                                }
                             }
                             
                             ActionCard(
@@ -394,7 +535,7 @@ struct SettingsView: View {
                         .padding(40)
                         .cinemeltGlass()
                         
-                        // --- SECTION 5: PROFILES ---
+                        // --- SECTION 6: PROFILES ---
                         if !viewModel.playlists.isEmpty {
                             VStack(alignment: .leading, spacing: 25) {
                                 Text("Active Profiles")
@@ -436,7 +577,6 @@ struct SettingsView: View {
                             .cinemeltGlass()
                         }
                     }
-                    // CRITICAL FIX: Safe Padding for Settings
                     .standardSafePadding()
                 }
                 .background(Color.clear)
@@ -458,7 +598,7 @@ struct SettingsView: View {
     }
 }
 
-// (ActionCard and LanguageSelectionView reused from previous file)
+// ActionCard and LanguageSelectionView remain unchanged from previous implementation
 struct ActionCard: View {
     let icon: String
     let title: String

@@ -7,14 +7,8 @@ struct DetailsView: View {
     var onPlay: (Channel) -> Void
     var onBack: () -> Void
     
-    // UI State for "Read More" text
+    // UI State
     @State private var showFullDescription: Bool = false
-    
-    init(channel: Channel, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
-        _viewModel = StateObject(wrappedValue: DetailsViewModel(channel: channel))
-        self.onPlay = onPlay
-        self.onBack = onBack
-    }
     
     // Focus Management
     @FocusState private var focusedField: FocusField?
@@ -25,6 +19,12 @@ struct DetailsView: View {
         case season(Int)
         case episode(String)
         case cast(Int)
+    }
+    
+    init(channel: Channel, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
+        _viewModel = StateObject(wrappedValue: DetailsViewModel(channel: channel))
+        self.onPlay = onPlay
+        self.onBack = onBack
     }
     
     var body: some View {
@@ -79,7 +79,7 @@ struct DetailsView: View {
         .sheet(isPresented: $showFullDescription) {
             ScrollView {
                 Text(viewModel.omdbDetails?.plot ?? viewModel.tmdbDetails?.overview ?? viewModel.channel.overview ?? "")
-                    .font(CinemeltTheme.fontBody(32))
+                    .font(CinemeltTheme.fontBody(32)) // Description stays large for readability in sheet
                     .foregroundColor(CinemeltTheme.cream)
                     .padding(60)
             }
@@ -87,7 +87,7 @@ struct DetailsView: View {
             .ignoresSafeArea()
         }
         
-        // 3. Listener for Play Trigger (from ViewModel bubble-up)
+        // 3. Listeners for Playback Triggers
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PlayChannel"))) { note in
             if let channel = note.object as? Channel {
                 onPlay(channel)
@@ -142,12 +142,12 @@ struct DetailsView: View {
     
     private var contentScrollView: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 40) {
+            VStack(alignment: .leading, spacing: 30) { // Tightened vertical spacing
                 
                 Spacer().frame(height: 350)
                 
                 // --- Title & Metadata ---
-                VStack(alignment: .leading, spacing: 15) {
+                VStack(alignment: .leading, spacing: 10) {
                     Text(viewModel.omdbDetails?.title ?? viewModel.tmdbDetails?.displayTitle ?? viewModel.channel.title)
                         .font(CinemeltTheme.fontTitle(90))
                         .foregroundColor(CinemeltTheme.cream)
@@ -159,11 +159,11 @@ struct DetailsView: View {
                     // Description (Clickable)
                     Button(action: { showFullDescription = true }) {
                         Text(viewModel.omdbDetails?.plot ?? viewModel.tmdbDetails?.overview ?? viewModel.channel.overview ?? "No synopsis available.")
-                            .font(CinemeltTheme.fontBody(28))
-                            .lineSpacing(8)
+                            .font(CinemeltTheme.fontBody(26))
+                            .lineSpacing(6)
                             .foregroundColor(focusedField == .description ? .white : CinemeltTheme.cream.opacity(0.9))
-                            .frame(maxWidth: 950, alignment: .leading)
-                            .lineLimit(4)
+                            .frame(maxWidth: 900, alignment: .leading)
+                            .lineLimit(3) // Limit lines to keep UI compact
                             .padding(10)
                             .background(
                                 RoundedRectangle(cornerRadius: 12)
@@ -173,7 +173,7 @@ struct DetailsView: View {
                     .buttonStyle(.plain)
                     .focused($focusedField, equals: .description)
                 }
-                .padding(.horizontal, 10) // Small local padding, real margin handled by parent
+                .padding(.horizontal, 10)
                 .focusSection()
                 
                 // --- Action Buttons ---
@@ -192,23 +192,23 @@ struct DetailsView: View {
                     castRail
                 }
                 
-                Spacer(minLength: 150)
+                Spacer(minLength: 100)
             }
-            // CRITICAL FIX: Safe Padding for Layout Safety
+            // CRITICAL FIX: Safe Padding
             .standardSafePadding()
         }
     }
     
     private var metadataRow: some View {
         HStack(spacing: 25) {
-            // Quality Badge (Shows Best Available)
+            // Quality Badge
             if let best = viewModel.movieVersions.first {
                 Badge(text: best.quality)
             } else if let epQuality = viewModel.displayedEpisodes.first?.versions.first?.quality {
-                 Badge(text: epQuality) // Show quality of first episode if series
+                 Badge(text: epQuality)
             }
             
-            // Ratings (OMDB or TMDB)
+            // Ratings
             if let score = viewModel.omdbDetails?.imdbRating {
                 HStack(spacing: 6) {
                     Text("IMDb").fontWeight(.bold).foregroundColor(.yellow)
@@ -233,7 +233,7 @@ struct DetailsView: View {
     }
     
     private var actionButtons: some View {
-        HStack(spacing: 30) {
+        HStack(spacing: 25) {
             // Smart Play Button
             Button(action: {
                 viewModel.onPlaySmartTarget()
@@ -244,20 +244,20 @@ struct DetailsView: View {
                 }
                 .font(CinemeltTheme.fontTitle(28))
                 .foregroundColor(.black)
-                .padding(.horizontal, 40)
-                .padding(.vertical, 18)
+                .padding(.horizontal, 35)
+                .padding(.vertical, 16)
                 .background(CinemeltTheme.accent)
-                .cornerRadius(16)
+                .cornerRadius(12)
             }
-            .cinemeltCardStyle() // NEW: Apply Lift Effect
+            .cinemeltCardStyle()
             .focused($focusedField, equals: .play)
             
             // Watch List Button
             Button(action: { viewModel.toggleWatchlist() }) {
                 Image(systemName: viewModel.isInWatchlist ? "bookmark.fill" : "bookmark")
-                    .font(.system(size: 30))
+                    .font(.system(size: 28))
                     .foregroundColor(viewModel.isInWatchlist ? CinemeltTheme.accent : .white)
-                    .padding(22)
+                    .padding(18)
                     .background(Color.white.opacity(0.1))
                     .clipShape(Circle())
             }
@@ -267,16 +267,16 @@ struct DetailsView: View {
             // Favorite Button
             Button(action: { viewModel.toggleFavorite() }) {
                 Image(systemName: viewModel.isFavorite ? "heart.fill" : "heart")
-                    .font(.system(size: 30))
+                    .font(.system(size: 28))
                     .foregroundColor(viewModel.isFavorite ? CinemeltTheme.accent : .white)
-                    .padding(22)
+                    .padding(18)
                     .background(Color.white.opacity(0.1))
                     .clipShape(Circle())
             }
             .cinemeltCardStyle()
             .focused($focusedField, equals: .favorite)
             
-            // Versions Button (Movies Only - Manual Override)
+            // Versions Button
             if !viewModel.movieVersions.isEmpty {
                 Button(action: { viewModel.onPlayMovie() }) {
                     HStack {
@@ -296,30 +296,30 @@ struct DetailsView: View {
     }
     
     private var seriesContent: some View {
-        VStack(alignment: .leading, spacing: 25) {
-            // Season Selector (Tabs)
+        VStack(alignment: .leading, spacing: 20) {
+            // Season Selector
             if viewModel.seasons.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 20) {
+                    HStack(spacing: 15) {
                         ForEach(viewModel.seasons, id: \.self) { season in
                             Button(action: { Task { await viewModel.loadSeasonContent(season) } }) {
                                 Text("Season \(season)")
                                     .font(CinemeltTheme.fontTitle(22))
                                     .foregroundColor(viewModel.selectedSeason == season ? .black : CinemeltTheme.cream)
-                                    .padding(.horizontal, 24)
-                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 8)
                                     .background(
                                         viewModel.selectedSeason == season ?
                                         CinemeltTheme.accent : Color.white.opacity(0.05)
                                     )
-                                    .cornerRadius(30)
+                                    .cornerRadius(20)
                             }
                             .cinemeltCardStyle()
                             .focused($focusedField, equals: .season(season))
                         }
                     }
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 20) // Padding for focus bloom
+                    .padding(.vertical, 20)
                 }
                 .focusSection()
             }
@@ -331,21 +331,38 @@ struct DetailsView: View {
                     .foregroundColor(.gray)
                     .padding(.horizontal, 10)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: 50) {
-                        ForEach(viewModel.displayedEpisodes) { ep in
-                            Button(action: {
-                                viewModel.onPlayEpisode(ep)
-                            }) {
-                                EpisodeCard(episode: ep)
+                // FIXED: ScrollViewReader for Auto-Scrolling
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: 40) {
+                            ForEach(viewModel.displayedEpisodes) { ep in
+                                Button(action: {
+                                    viewModel.onPlayEpisode(ep)
+                                }) {
+                                    EpisodeCard(episode: ep)
+                                }
+                                .cinemeltCardStyle()
+                                // FIXED: Strict frame constraint to prevent "Way too tall" cards
+                                .frame(width: 360, height: 230)
+                                .focused($focusedField, equals: .episode(ep.id))
+                                .id(ep.id) // ID for scrolling
                             }
-                            .cinemeltCardStyle()
-                            .frame(width: 350) // Use fixed width to match EpisodeCard
-                            .focused($focusedField, equals: .episode(ep.id))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 40)
+                    }
+                    .onAppear {
+                        // Scroll to next up episode on load
+                        if let target = viewModel.nextUpEpisode {
+                            proxy.scrollTo(target.id, anchor: .center)
                         }
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 40)
+                    .onChange(of: viewModel.displayedEpisodes.count) { _ in
+                        // Scroll if season changes
+                        if let target = viewModel.nextUpEpisode {
+                            proxy.scrollTo(target.id, anchor: .center)
+                        }
+                    }
                 }
                 .focusSection()
             }
@@ -353,31 +370,31 @@ struct DetailsView: View {
     }
     
     private var castRail: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 15) {
             Text("Cast")
                 .font(CinemeltTheme.fontTitle(32))
                 .foregroundColor(CinemeltTheme.cream)
                 .padding(.leading, 10)
             
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 40) {
+                LazyHStack(spacing: 30) {
                     ForEach(Array(viewModel.cast.prefix(15).enumerated()), id: \.element.id) { index, actor in
-                        VStack(spacing: 15) {
+                        VStack(spacing: 10) {
                             AsyncImage(url: URL(string: "https://image.tmdb.org/t/p/w200\(actor.profilePath ?? "")")) { img in
                                 img.resizable().aspectRatio(contentMode: .fill)
                             } placeholder: {
                                 Circle().fill(Color.white.opacity(0.1))
                                     .overlay(Text(String(actor.name.prefix(1))).font(.title))
                             }
-                            .frame(width: 120, height: 120)
+                            .frame(width: 100, height: 100)
                             .clipShape(Circle())
                             .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 2))
                             
                             Text(actor.name)
-                                .font(CinemeltTheme.fontBody(20))
+                                .font(CinemeltTheme.fontBody(18))
                                 .foregroundColor(CinemeltTheme.cream.opacity(0.8))
                                 .lineLimit(1)
-                                .frame(width: 140)
+                                .frame(width: 120)
                         }
                         .focusable(true)
                         .focused($focusedField, equals: .cast(index))

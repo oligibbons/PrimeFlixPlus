@@ -13,7 +13,6 @@ struct HomeView: View {
     @EnvironmentObject var repository: PrimeFlixRepository
     
     // Callbacks provided by parent (ContentView)
-    // Kept for API compatibility, even if unused in this View now
     var onPlayChannel: (Channel) -> Void
     var onAddPlaylist: () -> Void
     var onSettings: () -> Void
@@ -25,7 +24,7 @@ struct HomeView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var showEpgGrid: Bool = false
     
-    // FOCUS MANAGEMENT (LIFTED)
+    // FOCUS MANAGEMENT
     @FocusState private var focusedField: HomeFocusField?
     
     enum HomeFocusField: Hashable {
@@ -80,7 +79,8 @@ struct HomeView: View {
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showEpgGrid)
         .onAppear {
             viewModel.configure(repository: repository)
-            // Default focus to the movie tab on load
+            
+            // CRITICAL: Force focus to tabs on load to prevent Sidebar from grabbing it
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if focusedField == nil {
                     focusedField = .tab(.movie)
@@ -205,10 +205,8 @@ struct HomeHeaderView: View {
                     .font(CinemeltTheme.fontTitle(60))
             }
             Spacer()
-            
-            // Note: Search/Settings buttons removed as they are accessible via Sidebar
         }
-        // Padding is now handled by standardSafePadding() on the parent, so we reduce local padding
+        // Padding is handled by standardSafePadding() on parent, so we reduce local padding
         .padding(.horizontal, 10)
     }
 }
@@ -256,7 +254,7 @@ struct HomeFilterBar: View {
     }
 }
 
-// MARK: - Passthrough Components (Unchanged logic, just wrappers)
+// MARK: - Passthrough Components
 
 struct HomeBackgroundView: View {
     let heroChannel: Channel?

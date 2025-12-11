@@ -230,6 +230,8 @@ class ChannelRepository {
         return Array(deduplicate(channels: raw, isSeries: type == "series").prefix(limit))
     }
     
+    // MARK: - Smart Continue Watching (Updated Logic)
+    
     func getSmartContinueWatching(type: String) -> [Channel] {
         let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
         request.sortDescriptors = [NSSortDescriptor(key: "lastPlayed", ascending: false)]
@@ -248,22 +250,31 @@ class ChannelRepository {
                 
                 guard let channel = self.getChannel(byUrl: item.channelUrl), channel.type == type else { continue }
                 
-                let pct = Double(item.duration) > 0 ? Double(item.position) / Double(item.duration) : 0
+                // --- NEW LOGIC: 2% OR 30 seconds ---
+                let positionSeconds = Double(item.position) / 1000.0
+                let durationSeconds = Double(item.duration) / 1000.0
+                let pct = durationSeconds > 0 ? positionSeconds / durationSeconds : 0
+                
+                let hasStarted = (pct > 0.02) || (positionSeconds > 30.0)
+                let notFinished = pct < 0.95
                 
                 if channel.type == "movie" {
-                    if pct > 0.05 && pct < 0.95 {
+                    if hasStarted && notFinished {
                         results.append(channel)
                         seenUrls.insert(channel.url)
                     }
                 } else if channel.type == "series" || channel.type == "series_episode" {
-                     if pct > 0.95, let next = nextEpService.findNextEpisode(currentChannel: channel) {
-                         results.append(next)
-                         seenUrls.insert(next.url)
-                     } else {
+                     if !notFinished { // Finished
+                         if let next = nextEpService.findNextEpisode(currentChannel: channel) {
+                             results.append(next)
+                             seenUrls.insert(next.url)
+                         }
+                     } else if hasStarted { // In Progress
                          results.append(channel)
                          seenUrls.insert(channel.url)
                      }
                 } else {
+                    // Live TV logic (Always show if recent)
                     results.append(channel)
                     seenUrls.insert(channel.url)
                 }

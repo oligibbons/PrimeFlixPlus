@@ -14,7 +14,7 @@ class DetailsViewModel: ObservableObject {
     
     // --- UI State ---
     @Published var isFavorite: Bool = false
-    @Published var isInWatchlist: Bool = false // NEW: Watch List State
+    @Published var isInWatchlist: Bool = false
     @Published var isLoading: Bool = true
     @Published var backgroundUrl: URL?
     @Published var posterUrl: URL?
@@ -43,13 +43,13 @@ class DetailsViewModel: ObservableObject {
     private let omdbClient = OmdbClient()
     private let xtreamClient = XtreamClient()
     private var repository: PrimeFlixRepository?
+    private var nextEpisodeService: NextEpisodeService?
     
     // --- Internal ---
     private var seriesEcosystem: [Int: [Int: [ChannelStruct]]] = [:]
     private var tmdbSeasonCache: [Int: [TmdbEpisode]] = [:]
-    private var omdbSeasonCache: [Int: [OmdbEpisodeDetails]] = [:] // OMDB Cache
+    private var omdbSeasonCache: [Int: [OmdbEpisodeDetails]] = [:]
     
-    // Stores metadata derived from Parent Containers
     private var seriesMetadataMap: [String: ContentInfo] = [:]
     
     // MARK: - Models
@@ -83,7 +83,7 @@ class DetailsViewModel: ObservableObject {
     init(channel: Channel) {
         self.channel = channel
         self.isFavorite = channel.isFavorite
-        self.isInWatchlist = channel.inWatchlist // Init Watch List state
+        self.isInWatchlist = channel.inWatchlist
         if let cover = channel.cover {
             self.posterUrl = URL(string: cover)
             self.backgroundUrl = URL(string: cover)
@@ -92,6 +92,7 @@ class DetailsViewModel: ObservableObject {
     
     func configure(repository: PrimeFlixRepository) {
         self.repository = repository
+        self.nextEpisodeService = NextEpisodeService(context: repository.container.viewContext)
     }
     
     // MARK: - Main Load Logic
@@ -158,7 +159,6 @@ class DetailsViewModel: ObservableObject {
         // 2. Process Results
         self.seriesMetadataMap = result.metaMap
         
-        // CRITICAL: Fetch Metadata FIRST to ensure we have OMDB IDs for the season fallback
         await fetchMetadata()
         
         if isSeriesType {
@@ -166,8 +166,6 @@ class DetailsViewModel: ObservableObject {
         } else {
             processMovieVersions(structs: result.versions)
         }
-        
-        await recalculateSmartPlay()
         
         withAnimation { self.isLoading = false }
         withAnimation(.easeIn(duration: 0.5)) { self.backdropOpacity = 1.0 }
@@ -198,7 +196,7 @@ class DetailsViewModel: ObservableObject {
         try? context.performAndWait { try context.save() }
     }
     
-    // MARK: - Series Processing
+    // MARK: - Series Processing & Resume Logic
     
     private func processSeriesData(episodes: [ChannelStruct]) async {
         var hierarchy: [Int: [Int: [ChannelStruct]]] = [:]
@@ -215,12 +213,96 @@ class DetailsViewModel: ObservableObject {
         self.seriesEcosystem = hierarchy
         self.seasons = foundSeasons.sorted()
         
-        if !seasons.contains(selectedSeason), let first = seasons.first {
-            self.selectedSeason = first
+        // Smart Resume: Determine which season/episode to show
+        if let resumeState = await determineInitialState(episodes: episodes) {
+            self.selectedSeason = resumeState.season
+            self.nextUpEpisode = resumeState.targetEpisode
+            
+            // Format button
+            self.playButtonIcon = (resumeState.isResume) ? "play.circle.fill" : "forward.end.fill"
+            self.playButtonLabel = (resumeState.isResume)
+                ? "Resume S\(resumeState.season) E\(resumeState.targetEpisode.number)"
+                : "Play S\(resumeState.season) E\(resumeState.targetEpisode.number)"
+            
+        } else {
+            // Default: First Season
+            if !seasons.contains(selectedSeason), let first = seasons.first {
+                self.selectedSeason = first
+            }
+            self.playButtonLabel = "Start Series"
+            self.playButtonIcon = "play.fill"
         }
         
         await loadSeasonContent(selectedSeason)
     }
+    
+    /// Logic: Find last watched -> if < 95% resume, if > 95% find next.
+    private func determineInitialState(episodes: [ChannelStruct]) async -> (season: Int, targetEpisode: MergedEpisode, isResume: Bool)? {
+        guard let repo = repository else { return nil }
+        
+        // 1. Get Watch History for this show
+        let urls = Set(episodes.map { $0.url })
+        let ctx = repo.container.viewContext
+        let req = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
+        req.predicate = NSPredicate(format: "channelUrl IN %@", urls)
+        req.sortDescriptors = [NSSortDescriptor(key: "lastPlayed", ascending: false)]
+        req.fetchLimit = 1
+        
+        guard let lastWatch = try? ctx.fetch(req).first,
+              let lastEpStruct = episodes.first(where: { $0.url == lastWatch.channelUrl }) else {
+            return nil
+        }
+        
+        // Calculate progress
+        let pct = (lastWatch.duration > 0) ? Double(lastWatch.position) / Double(lastWatch.duration) : 0
+        
+        if pct < 0.95 {
+            // CASE A: Resume current episode
+            let merged = createMergedEpisode(from: lastEpStruct, progress: pct, isWatched: false)
+            return (lastEpStruct.season, merged, true)
+        } else {
+            // CASE B: Find next episode
+            // We temporarily map the struct to a managed object ID if needed, but since we have the struct:
+            // Find S/E
+            let currentS = lastEpStruct.season
+            let currentE = lastEpStruct.episode
+            
+            // Look for S, E+1
+            if let nextEpStruct = findEpisodeStruct(season: currentS, episode: currentE + 1) {
+                let merged = createMergedEpisode(from: nextEpStruct, progress: 0, isWatched: false)
+                return (currentS, merged, false)
+            }
+            // Look for S+1, E1
+            if let nextSeasonFirst = findEpisodeStruct(season: currentS + 1, episode: 1) {
+                let merged = createMergedEpisode(from: nextSeasonFirst, progress: 0, isWatched: false)
+                return (currentS + 1, merged, false)
+            }
+        }
+        
+        return nil
+    }
+    
+    private func findEpisodeStruct(season: Int, episode: Int) -> ChannelStruct? {
+        // Just grab the first version of the target episode we find in the ecosystem
+        return seriesEcosystem[season]?[episode]?.first
+    }
+    
+    private func createMergedEpisode(from structItem: ChannelStruct, progress: Double, isWatched: Bool) -> MergedEpisode {
+        // Quick helper for the Smart Resume logic (minimal metadata)
+        return MergedEpisode(
+            id: "S\(structItem.season)E\(structItem.episode)",
+            season: structItem.season,
+            number: structItem.episode,
+            title: structItem.title, // Will be enriched later
+            overview: "",
+            stillPath: nil,
+            versions: processVersions([structItem]),
+            isWatched: isWatched,
+            progress: progress
+        )
+    }
+    
+    // MARK: - Season Content Loader
     
     func loadSeasonContent(_ season: Int) async {
         self.selectedSeason = season
@@ -230,13 +312,11 @@ class DetailsViewModel: ObservableObject {
         var omdbData: [OmdbEpisodeDetails] = []
         var tmdbData: [TmdbEpisode] = []
         
-        // A. Check Caches
         if let oCached = omdbSeasonCache[season] {
             omdbData = oCached
         } else if let tCached = tmdbSeasonCache[season] {
             tmdbData = tCached
         } else {
-            // B. Try OMDB First (Primary Source for Series)
             var omdbSuccess = false
             if let imdbID = omdbDetails?.imdbID {
                 if let fetched = await omdbClient.getSeasonDetails(imdbID: imdbID, season: season) {
@@ -245,8 +325,6 @@ class DetailsViewModel: ObservableObject {
                     omdbSuccess = true
                 }
             }
-            
-            // C. Try TMDB (Fallback)
             if !omdbSuccess, let tmdbId = tmdbDetails?.id {
                 if let fetched = try? await tmdbClient.getTvSeason(tvId: tmdbId, seasonNumber: season) {
                     tmdbData = fetched.episodes
@@ -255,33 +333,25 @@ class DetailsViewModel: ObservableObject {
             }
         }
         
+        // 2. Build Merged List
         var list: [MergedEpisode] = []
+        let sortedKeys = epMap.keys.sorted()
         
-        for epNum in epMap.keys.sorted() {
+        for epNum in sortedKeys {
             guard let variants = epMap[epNum] else { continue }
             let processedVersions = processVersions(variants)
-            
-            // OPTIMIZATION: If the resolution cap filters out ALL versions of this episode,
-            // we skip adding it to the UI to avoid "Unplayable" states.
-            // Exception: If you prefer to show it grayed out, remove this check.
             if processedVersions.isEmpty { continue }
             
-            // 2. Resolve Metadata
-            // Priority: OMDB -> TMDB -> Local Enriched -> Generic
+            // Metadata Resolution
             var title = "Episode \(epNum)"
             var overview = ""
             var still: URL? = nil
             
-            // Source 1: OMDB
             if let meta = omdbData.first(where: { Int($0.episode ?? "0") == epNum }) {
                 title = meta.title
                 overview = meta.plot ?? ""
-                if let poster = meta.poster, poster != "N/A" {
-                    still = URL(string: poster)
-                }
-            }
-            // Source 2: TMDB
-            else if let meta = tmdbData.first(where: { $0.episodeNumber == epNum }) {
+                if let poster = meta.poster, poster != "N/A" { still = URL(string: poster) }
+            } else if let meta = tmdbData.first(where: { $0.episodeNumber == epNum }) {
                 title = meta.name
                 overview = meta.overview ?? ""
                 if let path = meta.stillPath {
@@ -289,26 +359,14 @@ class DetailsViewModel: ObservableObject {
                 }
             }
             
-            // Source 3: Local Enriched / Fallback
-            // Find a variant that has a meaningful title or valid cover
-            let localData = variants.first(where: { c in
-                return c.cover != nil
-            })
-            
-            // If title is generic "Episode X", try to see if local title is better
+            let localData = variants.first(where: { $0.cover != nil })
             if title.hasPrefix("Episode"), let localTitle = localData?.title {
-                if !localTitle.lowercased().contains("episode") {
-                    title = localTitle
-                }
+                if !localTitle.lowercased().contains("episode") { title = localTitle }
             }
             
             if still == nil {
-                if let localCover = localData?.cover {
-                    still = URL(string: localCover)
-                } else if let fallbackCover = self.posterUrl {
-                    // Ultimate Fallback: Use Show Poster if episode image is completely missing
-                    still = fallbackCover
-                }
+                if let localCover = localData?.cover { still = URL(string: localCover) }
+                else if let fallbackCover = self.posterUrl { still = fallbackCover }
             }
             
             let (isWatched, progress) = await getCompositeProgress(for: variants)
@@ -328,16 +386,28 @@ class DetailsViewModel: ObservableObject {
         }
         
         withAnimation { self.displayedEpisodes = list }
+        
+        // Update Play Button state if we just switched seasons manually
+        // We only do this if the smart "Next Up" isn't locking us elsewhere
+        if self.nextUpEpisode?.season == season {
+            // Keep the smart button
+        } else {
+            // We are exploring a different season, reset button to generic play of first ep
+            if let first = list.first {
+                self.playButtonLabel = "Play S\(season) E\(first.number)"
+                self.nextUpEpisode = first
+                self.playButtonIcon = "play.fill"
+            }
+        }
     }
     
-    // MARK: - Version Metadata Logic (Optimized)
+    // MARK: - Version Metadata Logic
     
     private func processVersions(_ structs: [ChannelStruct]) -> [VersionOption] {
         let preferredLang = UserDefaults.standard.string(forKey: "preferredLanguage") ?? "English"
         let preferredRes = UserDefaults.standard.string(forKey: "preferredResolution") ?? "4K"
         let maxRes = UserDefaults.standard.string(forKey: "maxStreamResolution") ?? "Unlimited"
         
-        // Use compactMap to filter out nil results (capped items)
         return structs.compactMap { ch -> VersionOption? in
             var quality = ch.quality ?? "HD"
             var language = "Unknown"
@@ -351,23 +421,13 @@ class DetailsViewModel: ObservableObject {
             if language == "Unknown", let eLang = epInfo.language { language = eLang }
             if quality == "HD" && !epInfo.quality.isEmpty { quality = epInfo.quality }
             
-            // --- OPTIMIZATION FILTERING ---
-            // "Creative Solution": We strictly filter out files that exceed the user's connection cap.
             if maxRes != "Unlimited" {
                 let is4K = quality.contains("4K") || quality.contains("UHD") || quality.contains("2160")
                 let is1080p = quality.contains("1080") || quality.contains("FHD")
                 
-                // If Cap is 1080p, reject 4K
-                if maxRes == "1080p" && is4K {
-                    return nil
-                }
-                
-                // If Cap is 720p, reject 1080p and 4K
-                if maxRes == "720p" && (is4K || is1080p) {
-                    return nil
-                }
+                if maxRes == "1080p" && is4K { return nil }
+                if maxRes == "720p" && (is4K || is1080p) { return nil }
             }
-            // ------------------------------
             
             var score = 0
             if quality.contains("4K") { score += 4000 } else if quality.contains("1080") { score += 1080 }
@@ -386,12 +446,7 @@ class DetailsViewModel: ObservableObject {
     
     private func processMovieVersions(structs: [ChannelStruct]) {
         self.movieVersions = processVersions(structs)
-        
-        // Safety Fallback: If the user sets a strict cap (e.g. 720p) but the movie
-        // ONLY exists in 4K, the list would be empty.
-        // In this specific edge case, we restore the original list to prevent broken UI.
         if self.movieVersions.isEmpty && !structs.isEmpty {
-            // Re-run mapping without filtering
             let fallback = structs.map { ch -> VersionOption in
                 let q = ch.quality ?? "HD"
                 return VersionOption(id: ch.url, channelStruct: ch, quality: q, language: "Unknown", score: 0)
@@ -467,29 +522,12 @@ class DetailsViewModel: ObservableObject {
         }.value
     }
     
-    private func recalculateSmartPlay() async {
-        if channel.type == "series" || channel.type == "series_episode" {
-            if let next = displayedEpisodes.first(where: { !$0.isWatched }) {
-                self.nextUpEpisode = next
-                self.playButtonLabel = "Continue S\(next.season) E\(next.number)"
-            } else {
-                self.nextUpEpisode = displayedEpisodes.first
-                self.playButtonLabel = "Start Series"
-            }
-        } else {
-            self.playButtonLabel = "Play Movie"
-        }
-    }
-    
-    // MARK: - Metadata Fetcher (High Quality Image Update)
-    
     private func fetchMetadata() async {
         let info = TitleNormalizer.parse(rawTitle: channel.canonicalTitle ?? channel.title)
         async let tmdb = tmdbClient.findBestMatch(title: info.normalizedTitle, year: info.year, type: channel.type == "series" ? "series" : "movie")
         async let omdb = omdbClient.getSeriesMetadata(title: info.normalizedTitle, year: info.year)
         let (tmdbMatch, omdbData) = await (tmdb, omdb)
         
-        // 1. Assign Data Objects
         if let omdb = omdbData { self.omdbDetails = omdb }
         
         if let match = tmdbMatch {
@@ -506,19 +544,16 @@ class DetailsViewModel: ObservableObject {
             }
         }
         
-        // 2. Resolve Background Image (High Quality Logic)
         var newBg: URL? = nil
         let isSeries = (channel.type == "series" || channel.type == "series_episode")
         
         if isSeries {
-            // Series Strategy: OMDB Poster (High Res) -> TMDB Backdrop -> Default
             if let poster = self.omdbDetails?.poster, poster != "N/A" {
                 newBg = URL(string: getHighResOmdbImage(poster))
             } else if let bg = self.tmdbDetails?.backdropPath {
                 newBg = URL(string: "https://image.tmdb.org/t/p/original\(bg)")
             }
         } else {
-            // Movie Strategy: TMDB Backdrop -> OMDB Poster -> Default
             if let bg = self.tmdbDetails?.backdropPath {
                 newBg = URL(string: "https://image.tmdb.org/t/p/original\(bg)")
             } else if let poster = self.omdbDetails?.poster, poster != "N/A" {
@@ -526,12 +561,9 @@ class DetailsViewModel: ObservableObject {
             }
         }
         
-        if let highRes = newBg {
-             self.backgroundUrl = highRes
-        }
+        if let highRes = newBg { self.backgroundUrl = highRes }
     }
     
-    /// Patches OMDB URLs to remove compression suffixes for highest resolution
     private func getHighResOmdbImage(_ url: String) -> String {
         return url.replacingOccurrences(of: "_SX300", with: "")
                   .replacingOccurrences(of: "_SX3000", with: "")
@@ -542,7 +574,6 @@ class DetailsViewModel: ObservableObject {
         self.isFavorite.toggle()
     }
     
-    // NEW: Watch List Toggle
     func toggleWatchlist() {
         repository?.toggleWatchlist(channel)
         self.isInWatchlist.toggle()

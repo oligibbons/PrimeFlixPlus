@@ -108,12 +108,14 @@ class SettingsViewModel: ObservableObject {
     @AppStorage("autoHideForeign") var autoHideForeign: Bool = false
     @AppStorage("defaultPlaybackSpeed") var defaultPlaybackSpeed: Double = 1.0
     
+    // --- Player Customization (NEW) ---
+    @AppStorage("scrubSensitivity") var scrubSensitivity: Double = 0.2 // Default 20%
+    @AppStorage("subtitleScale") var subtitleScale: Double = 1.0        // 1.0 = Normal
+    @AppStorage("areSubtitlesEnabled") var areSubtitlesEnabled: Bool = true
+    @AppStorage("vpnAlertEnabled") var vpnAlertEnabled: Bool = true
+    
     // --- Playback Optimization Settings ---
-    
-    // NEW: Capacity Limit (MB). Default 300MB.
-    // 300MB = ~40s of 4K, or ~3m of 1080p.
     @AppStorage("bufferMemoryLimit") var bufferMemoryLimit: Int = 300
-    
     @AppStorage("useHardwareDecoding") var useHardwareDecoding: Bool = true
     @AppStorage("maxStreamResolution") var maxStreamResolution: String = "Unlimited"
     @AppStorage("defaultDeinterlace") var defaultDeinterlace: Bool = false
@@ -126,6 +128,23 @@ class SettingsViewModel: ObservableObject {
     ]
     
     let availableResolutions = ["4K UHD", "1080p", "720p", "SD"]
+    
+    // Sensitivity Presets
+    let sensitivityOptions: [(String, Double)] = [
+        ("Very Low (5%)", 0.05),
+        ("Low (10%)", 0.10),
+        ("Standard (20%)", 0.20),
+        ("High (30%)", 0.30),
+        ("Very High (40%)", 0.40)
+    ]
+    
+    // Subtitle Sizes
+    let subtitleSizes: [(String, Double)] = [
+        ("Small", 0.75),
+        ("Standard", 1.0),
+        ("Large", 1.25),
+        ("Extra Large", 1.5)
+    ]
     
     // Optimization Presets (RAM Allocations)
     let bufferOptions: [(String, Int)] = [

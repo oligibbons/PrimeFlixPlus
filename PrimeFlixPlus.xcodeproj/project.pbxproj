@@ -16,6 +16,7 @@
 		D228AD1B2EDF7952007C6114 /* UnsafeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D228AD1A2EDF7952007C6114 /* UnsafeSession.swift */; };
 		D228AD1D2EDFA8E3007C6114 /* DetailsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D228AD1C2EDFA8E3007C6114 /* DetailsViewModel.swift */; };
 		D228AD1F2EDFA961007C6114 /* DetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D228AD1E2EDFA961007C6114 /* DetailsView.swift */; };
+		D28274B62EEA3CBD0057117C /* VLCKitSPM in Frameworks */ = {isa = PBXBuildFile; productRef = D28274B52EEA3CBD0057117C /* VLCKitSPM */; };
 		D292D6272EDF458100E8845A /* PrimeFlixPlusApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6262EDF458100E8845A /* PrimeFlixPlusApp.swift */; };
 		D292D6292EDF458100E8845A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D292D6282EDF458100E8845A /* ContentView.swift */; };
 		D292D62B2EDF458300E8845A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D292D62A2EDF458300E8845A /* Assets.xcassets */; };
@@ -60,8 +61,6 @@
 		D2AC8B0D2EE1FB2F00D440C3 /* FavoritesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B0C2EE1FB2F00D440C3 /* FavoritesViewModel.swift */; };
 		D2AC8B0F2EE1FB4700D440C3 /* FavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B0E2EE1FB4700D440C3 /* FavoritesView.swift */; };
 		D2AC8B112EE22EAF00D440C3 /* ManageCategoriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2AC8B102EE22EAF00D440C3 /* ManageCategoriesView.swift */; };
-		D2AC8B1D2EE27D2A00D440C3 /* TVVLCKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B1B2EE27D1E00D440C3 /* TVVLCKit.xcframework */; };
-		D2AC8B1E2EE27D2A00D440C3 /* TVVLCKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B1B2EE27D1E00D440C3 /* TVVLCKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		D2AC8B232EE27D7A00D440C3 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B222EE27D7A00D440C3 /* AVFoundation.framework */; };
 		D2AC8B252EE27D8B00D440C3 /* VideoToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B242EE27D8A00D440C3 /* VideoToolbox.framework */; };
 		D2AC8B272EE27D9600D440C3 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D2AC8B262EE27D9600D440C3 /* AudioToolbox.framework */; };
@@ -113,20 +112,6 @@
 			remoteInfo = PrimeFlixPlus;
 		};
 /* End PBXContainerItemProxy section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		D2AC8B172EE26F2400D440C3 /* Embed Frameworks */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
-			files = (
-				D2AC8B1E2EE27D2A00D440C3 /* TVVLCKit.xcframework in Embed Frameworks */,
-			);
-			name = "Embed Frameworks";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		D228AD0A2EDF5A22007C6114 /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
@@ -231,8 +216,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				D2AC8B232EE27D7A00D440C3 /* AVFoundation.framework in Frameworks */,
-				D2AC8B1D2EE27D2A00D440C3 /* TVVLCKit.xcframework in Frameworks */,
 				D2AC8B252EE27D8B00D440C3 /* VideoToolbox.framework in Frameworks */,
+				D28274B62EEA3CBD0057117C /* VLCKitSPM in Frameworks */,
 				D2AC8B272EE27D9600D440C3 /* AudioToolbox.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -508,7 +493,6 @@
 				D292D61F2EDF458100E8845A /* Sources */,
 				D292D6202EDF458100E8845A /* Frameworks */,
 				D292D6212EDF458100E8845A /* Resources */,
-				D2AC8B172EE26F2400D440C3 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -1055,6 +1039,14 @@
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D28274B52EEA3CBD0057117C /* VLCKitSPM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D2AC8B182EE2775800D440C3 /* XCRemoteSwiftPackageReference "vlckit-spm" */;
+			productName = VLCKitSPM;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = D292D61B2EDF458100E8845A /* Project object */;
 }

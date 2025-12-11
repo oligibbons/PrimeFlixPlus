@@ -36,8 +36,9 @@ class HomeViewModel: ObservableObject {
     // --- Navigation & State ---
     @Published var selectedTab: StreamType = .movie
     @Published var selectedPlaylist: Playlist?
+    @Published var playlists: [Playlist] = []
     @Published var sections: [HomeSection] = []
-    @Published var isLoading: Bool = false
+    @Published var isLoading: Bool = true // Start true to show spinner immediately
     @Published var isLoadingMore: Bool = false
     
     // Greetings
@@ -59,6 +60,7 @@ class HomeViewModel: ObservableObject {
     private let tmdbClient = TmdbClient()
     private var cancellables = Set<AnyCancellable>()
     private var currentFetchTask: Task<Void, Never>?
+    private var watchdogTimer: Timer?
     
     // MARK: - Setup
     
@@ -66,34 +68,59 @@ class HomeViewModel: ObservableObject {
         self.repository = repository
         self.playlists = repository.getAllPlaylists()
         
-        if selectedPlaylist == nil, let first = playlists.first {
-            selectedPlaylist = first
+        // 1. Immediate Playlist Selection
+        if selectedPlaylist == nil {
+            if let first = playlists.first {
+                self.selectedPlaylist = first
+            }
         }
         
         updateGreeting()
-        loadTab(selectedTab)
         setupListeners()
+        
+        // 2. Initial Load
+        // If we have a playlist, load immediately.
+        // If not, the listener below will trigger it when data arrives.
+        if selectedPlaylist != nil {
+            loadTab(selectedTab)
+        }
+        
+        startContentWatchdog()
     }
     
     private func setupListeners() {
         guard let repository = repository else { return }
         
-        // 1. Sync Completion
-        repository.$isSyncing
-            .removeDuplicates()
-            .receive(on: RunLoop.main)
-            .sink { [weak self] isSyncing in
-                if !isSyncing { self?.invalidateCache() }
+        // A. Watch for Playlist Updates (Fix for "Blank on First Launch")
+        repository.objectWillChange
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                let freshPlaylists = repository.getAllPlaylists()
+                self.playlists = freshPlaylists
+                
+                // If we didn't have a playlist before, select one now and load
+                if self.selectedPlaylist == nil, let first = freshPlaylists.first {
+                    self.selectedPlaylist = first
+                    self.updateGreeting()
+                    self.loadTab(self.selectedTab)
+                }
             }
             .store(in: &cancellables)
         
-        // 2. Data Changes (Debounced)
-        repository.objectWillChange
-            .debounce(for: .seconds(2), scheduler: RunLoop.main)
-            .sink { [weak self] _ in self?.invalidateCache() }
+        // B. Sync Completion (Refetch Data)
+        repository.$isSyncing
+            .dropFirst() // Ignore initial state
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] isSyncing in
+                // When sync finishes (goes to false), force reload
+                if !isSyncing {
+                    self?.invalidateCache()
+                }
+            }
             .store(in: &cancellables)
         
-        // 3. Settings/Language Changes
+        // C. Settings/Language Changes
         NotificationCenter.default.publisher(for: CategoryPreferences.didChangeNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.invalidateCache() }
@@ -107,12 +134,27 @@ class HomeViewModel: ObservableObject {
             .store(in: &cancellables)
     }
     
-    @Published var playlists: [Playlist] = []
-    
     func selectPlaylist(_ playlist: Playlist) {
         self.selectedPlaylist = playlist
         updateGreeting()
         invalidateCache()
+    }
+    
+    // MARK: - Safety Mechanisms
+    
+    /// Watchdog: If the screen remains blank for 5 seconds, force a reload.
+    /// This fixes race conditions where the view might load before Core Data is ready.
+    private func startContentWatchdog() {
+        watchdogTimer?.invalidate()
+        watchdogTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                if self.sections.isEmpty && self.selectedPlaylist != nil {
+                    print("⚠️ [HomeViewModel] Watchdog triggered reload.")
+                    self.invalidateCache()
+                }
+            }
+        }
     }
     
     // MARK: - Tab Logic
@@ -122,8 +164,9 @@ class HomeViewModel: ObservableObject {
         currentFetchTask?.cancel()
         self.selectedTab = tab
         
-        if tabCache[tab]?.hasLoadedInitial == true {
-            self.sections = tabCache[tab]?.sections ?? []
+        // Use Cache if valid
+        if let state = tabCache[tab], state.hasLoadedInitial, !state.sections.isEmpty {
+            self.sections = state.sections
             self.isLoading = false
         } else {
             self.sections = []
@@ -133,18 +176,26 @@ class HomeViewModel: ObservableObject {
     }
     
     private func invalidateCache() {
+        // Clear everything to force fresh fetch from Core Data
         tabCache = [.movie: HomeTabState(), .series: HomeTabState(), .live: HomeTabState()]
         loadTab(selectedTab)
     }
     
-    // MARK: - Core Logic (Refactored)
+    // MARK: - Core Logic
     
     private func loadTab(_ tab: StreamType) {
         guard let repo = repository else { return }
+        
+        // Ensure we actually have a source
+        guard let pl = selectedPlaylist else {
+            self.isLoading = false
+            return
+        }
+        
         currentFetchTask?.cancel()
         self.isLoading = true
         
-        let playlistUrl = selectedPlaylist?.url ?? ""
+        let playlistUrl = pl.url
         let lang = preferredLanguage
         let type = tab.rawValue
         
@@ -154,7 +205,13 @@ class HomeViewModel: ObservableObject {
             // 1. Fetch Trending from API first (Network)
             var trendingTitles: [String] = []
             if tab != .live {
-                trendingTitles = (try? await tmdbClient.getTrending(type: type))?.map { $0.displayTitle } ?? []
+                // We wrap this in do-catch so network failure doesn't kill the whole load
+                do {
+                    let trending = try await tmdbClient.getTrending(type: type)
+                    trendingTitles = trending.map { $0.displayTitle }
+                } catch {
+                    print("⚠️ Trending Fetch Failed: \(error.localizedDescription)")
+                }
             }
             
             if Task.isCancelled { return }
@@ -261,6 +318,7 @@ class HomeViewModel: ObservableObject {
                     let items = readRepo.getByGenre(type: type, groupName: rawGroup, limit: 15)
                     if !items.isEmpty {
                         let cleanTitle = CategoryPreferences.shared.cleanName(rawGroup)
+                        // Heuristic for "Provider" lanes
                         let isPremium = ["Netflix", "HBO", "Apple", "Disney"].contains { rawGroup.localizedCaseInsensitiveContains($0) }
                         newSections.append(HomeSection(title: cleanTitle, type: isPremium ? .provider(rawGroup) : .genre(rawGroup), items: items))
                     }
@@ -274,7 +332,9 @@ class HomeViewModel: ObservableObject {
     }
     
     private func finalizeMoreGenres(newSections: [HomeSection], newIndex: Int) {
-        var currentState = self.tabCache[self.selectedTab]!
+        // Safety check if tab changed while loading
+        guard var currentState = self.tabCache[self.selectedTab] else { return }
+        
         currentState.sections.append(contentsOf: newSections)
         currentState.loadedGroupIndex = newIndex
         self.tabCache[self.selectedTab] = currentState
@@ -282,6 +342,7 @@ class HomeViewModel: ObservableObject {
         withAnimation { self.sections.append(contentsOf: newSections) }
         self.isLoadingMore = false
         
+        // Recursive load if screen is still empty (e.g., all 5 groups were empty)
         if self.sections.count < 4 && newIndex < currentState.allGroupNames.count {
             self.loadMoreGenres()
         }

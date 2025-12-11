@@ -4,7 +4,7 @@ import TVVLCKit
 
 /// A robust, SwiftUI-friendly wrapper around VLCMediaPlayer.
 /// Includes Watchdog logic, Safe Seeking, Resume support, AV Sync, and Video Settings.
-/// OPTIMIZATION UPDATE: Implements Dynamic RAM-Based Buffering and Hardware Decoding Control.
+/// OPTIMIZATION UPDATE: Implements Dynamic RAM-Based Buffering, Hardware Decoding Control, and Subtitle Styling.
 class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     // MARK: - Published State
@@ -52,7 +52,7 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     
     // MARK: - Playback Control
     
-    /// Loads media with Dynamic RAM Buffering calculation.
+    /// Loads media with Dynamic RAM Buffering calculation and Subtitle preferences.
     /// - Parameters:
     ///   - quality: Used to estimate bitrate (e.g., "4K", "1080p").
     func load(url: String, isLive: Bool, quality: String?, startTime: Double = 0) {
@@ -72,13 +72,10 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // --- SMART BUFFERING LOGIC ---
         
         // 1. Get User RAM Cap (Default 300MB if not set)
-        // This setting ensures we never exceed safe memory limits on the Apple TV.
         let memoryLimitMB = UserDefaults.standard.integer(forKey: "bufferMemoryLimit")
         let limit = memoryLimitMB > 0 ? memoryLimitMB : 300
         
         // 2. Estimate Bitrate (Mbps) based on Quality Tag
-        // These are conservative "High Quality" estimates to ensure safety.
-        // A 4K Remux might spike to 80-100Mbps, so we use a safe average of 60Mbps.
         let estimatedBitrate: Double
         if let q = quality {
             if q.contains("4K") || q.contains("UHD") {
@@ -95,13 +92,9 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
         
         // 3. Calculate Duration Capacity
-        // Formula: (MB * 8 bits) / Mbps = Seconds
-        // Example: (300MB * 8) / 15Mbps = 160 seconds buffer
         let capacitySeconds = (Double(limit) * 8.0) / estimatedBitrate
         
         // 4. Apply Constraints
-        // Live TV needs a floor (3s) to handle jitter, but a ceiling (30s) to avoid huge lag behind live edge.
-        // VOD uses the full calculated capacity, capped at 300s (5 mins) to prevent seek issues.
         let finalCacheMs: Int
         if isLive {
             let clamped = min(max(capacitySeconds, 3.0), 30.0)
@@ -113,17 +106,24 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         
         print("[StreamOptimizer] RAM Cap: \(limit)MB | Quality: \(quality ?? "Unknown") | Bitrate Est: \(estimatedBitrate)Mbps | Buffer: \(finalCacheMs)ms")
         
-        // --- HARDWARE SETTINGS ---
+        // --- HARDWARE & SUBTITLE SETTINGS ---
         
-        // Default to true (Hardware) as it's standard for Apple TV.
-        // Disabling this is a "Secret Weapon" for fixing green/glitchy streams.
         let useHardware = UserDefaults.standard.object(forKey: "useHardwareDecoding") as? Bool ?? true
+        
+        // Calculate Subtitle Scale (Base 16px is standard relative size in VLC)
+        // 0.75 -> 12, 1.0 -> 16, 1.25 -> 20, 1.5 -> 24
+        let scalePref = UserDefaults.standard.double(forKey: "subtitleScale")
+        let effectiveScale = scalePref > 0 ? scalePref : 1.0
+        let fontSize = Int(16 * effectiveScale)
         
         var options: [String: Any] = [
             "network-caching": finalCacheMs,
             "clock-jitter": 0,
             "clock-synchro": 0,
-            "http-reconnect": true
+            "http-reconnect": true,
+            // Subtitle Styling
+            "freetype-rel-fontsize": fontSize,
+            "freetype-bold": 1 // Make subs slightly bolder for readability
         ]
         
         if !useHardware {
@@ -231,19 +231,33 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         
         if let names = player.videoSubTitlesNames as? [String],
            let indexes = player.videoSubTitlesIndexes as? [Int] {
-            self.subtitleTracks = names
-            let internalId = Int(player.currentVideoSubTitleIndex)
-            if let found = indexes.firstIndex(of: internalId) { self.currentSubtitleIndex = found }
+            
+            // Check Global Subtitle Toggle
+            let areSubsEnabled = UserDefaults.standard.object(forKey: "areSubtitlesEnabled") as? Bool ?? true
+            
+            if !areSubsEnabled {
+                // If disabled, force VLC to turn them off (-1)
+                if player.currentVideoSubTitleIndex != -1 {
+                    player.currentVideoSubTitleIndex = -1
+                }
+                // We still populate the list so the user can manually enable one if they change their mind
+                self.subtitleTracks = names
+                self.currentSubtitleIndex = -1
+            } else {
+                self.subtitleTracks = names
+                let internalId = Int(player.currentVideoSubTitleIndex)
+                if let found = indexes.firstIndex(of: internalId) { self.currentSubtitleIndex = found }
+            }
         }
     }
     
-    func setAudioTrack(_ index: Int) {
+    func setAudioTrack(index: Int) {
         guard let indexes = player.audioTrackIndexes as? [Int], index < indexes.count else { return }
         player.currentAudioTrackIndex = Int32(indexes[index])
         self.currentAudioIndex = index
     }
     
-    func setSubtitleTrack(_ index: Int) {
+    func setSubtitleTrack(index: Int) {
         guard let indexes = player.videoSubTitlesIndexes as? [Int], index < indexes.count else { return }
         player.currentVideoSubTitleIndex = Int32(indexes[index])
         self.currentSubtitleIndex = index
@@ -267,6 +281,7 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             case .playing:
                 self.isBuffering = false
                 self.isPlaying = true
+                // Refresh tracks when playback starts to apply subtitle preferences
                 self.refreshTracks()
             case .paused:
                 self.isPlaying = false

@@ -60,6 +60,7 @@ class PlayerViewModel: ObservableObject {
     @Published var nextEpisode: Channel? = nil
     @Published var canPlayNext: Bool = false
     @Published var autoPlayCounter: Int = 20
+    private var hasTriggeredAutoPlay: Bool = false
     
     // Versions
     @Published var alternativeVersions: [Channel] = []
@@ -69,7 +70,7 @@ class PlayerViewModel: ObservableObject {
     private let tmdbClient = TmdbClient()
     private let omdbClient = OmdbClient()
     
-    // NEW: EPG Service for Live TV Metadata
+    // EPG Service for Live TV Metadata
     private var epgService: EpgService?
     
     private var currentChannel: Channel?
@@ -90,7 +91,12 @@ class PlayerViewModel: ObservableObject {
         self.currentUrl = channel.url
         self.qualityBadge = channel.quality ?? "HD"
         self.nextEpisodeService = NextEpisodeService(context: repository.container.viewContext)
-        self.epgService = EpgService(context: repository.container.viewContext) // Init EPG
+        self.epgService = EpgService(context: repository.container.viewContext)
+        
+        // Reset State for new video
+        self.hasTriggeredAutoPlay = false
+        self.showAutoPlay = false
+        self.autoPlayCounter = 20
         
         // 1. Read Global Playback Speed Default
         let speed = UserDefaults.standard.double(forKey: "defaultPlaybackSpeed")
@@ -103,7 +109,6 @@ class PlayerViewModel: ObservableObject {
         
         // 3. Metadata & Logic
         Task {
-            // Branch logic based on content type
             if channel.type == "live" {
                 await fetchLiveMetadata(channel: channel)
             } else {
@@ -124,7 +129,6 @@ class PlayerViewModel: ObservableObject {
     private func checkForResume(channel: Channel) {
         guard let repo = repository else { return }
         
-        // Live TV generally shouldn't resume from a timestamp unless it's catchup (not supported yet)
         if channel.type == "live" {
             startPlayback(from: 0)
             return
@@ -155,7 +159,7 @@ class PlayerViewModel: ObservableObject {
         guard let channel = currentChannel else { return }
         self.showResumePrompt = false
         
-        // 1. Load Engine with Optimization Data
+        // 1. Load Engine
         playerEngine.setRate(self.playbackRate)
         
         playerEngine.load(
@@ -165,21 +169,17 @@ class PlayerViewModel: ObservableObject {
             startTime: time
         )
         
-        // 2. Apply User Defaults for Video Settings
+        // 2. Apply User Defaults
         let defDeinterlace = UserDefaults.standard.bool(forKey: "defaultDeinterlace")
         let defRatio = UserDefaults.standard.string(forKey: "defaultAspectRatio") ?? "Default"
         
-        // Deinterlace Logic
         if defDeinterlace {
             self.isDeinterlaceEnabled = true
         } else {
             self.isDeinterlaceEnabled = (channel.type == "live")
         }
         
-        // Aspect Ratio Logic
         self.aspectRatio = defRatio
-        
-        // Reset Sync
         self.audioDelay = 0
         self.subtitleDelay = 0
         
@@ -198,9 +198,17 @@ class PlayerViewModel: ObservableObject {
             if self.isScrubbing || self.isSeekingCommit { return }
             self.currentTime = time
             
-            // Auto-save progress
+            // A. Auto-save progress every 10s
             if abs(time - self.lastSavedTime) > 10 {
                 self.saveProgress()
+            }
+            
+            // B. Auto-Play Check (20 seconds remaining)
+            if self.duration > 0 && !self.hasTriggeredAutoPlay && self.canPlayNext {
+                let remaining = self.duration - time
+                if remaining <= 20 && remaining > 0 {
+                    self.triggerAutoPlay()
+                }
             }
         }.store(in: &cancellables)
         
@@ -237,15 +245,15 @@ class PlayerViewModel: ObservableObject {
     
     func seekForward() {
         let newTime = currentTime + 10
-        startScrubbing(translation: 0, screenWidth: 1)
-        currentTime = newTime
+        startScrubbing(translation: 0, screenWidth: 1) // Using 0 translation with manual logic handled by caller usually, but here checking helper
+        // Simplified seek for button press:
+        self.currentTime = max(0, min(newTime, duration))
         endScrubbing()
     }
     
     func seekBackward() {
         let newTime = currentTime - 10
-        startScrubbing(translation: 0, screenWidth: 1)
-        currentTime = newTime
+        self.currentTime = max(0, min(newTime, duration))
         endScrubbing()
     }
     
@@ -256,8 +264,17 @@ class PlayerViewModel: ObservableObject {
         if screenWidth > 1 {
             let percent = Double(translation / screenWidth)
             let totalDuration = duration > 0 ? duration : 3600
-            let sensitivity = max(120.0, totalDuration * 0.15)
-            let delta = sensitivity * percent
+            
+            // --- SENSITIVITY FIX ---
+            // Read user preference (default 0.2 / 20%)
+            let userSensitivity = UserDefaults.standard.double(forKey: "scrubSensitivity")
+            let sensitivityFactor = userSensitivity > 0 ? userSensitivity : 0.2
+            
+            // Base calculation logic:
+            // "100%" swipe (full width) = sensitivityFactor * totalDuration
+            // e.g., 20% sensitivity on 1 hour video = 12 minutes max scrub per full swipe
+            let delta = (totalDuration * sensitivityFactor) * percent
+            
             self.currentTime = max(0, min(currentTime + delta, duration))
         }
     }
@@ -324,11 +341,8 @@ class PlayerViewModel: ObservableObject {
     private func fetchLiveMetadata(channel: Channel) async {
         guard let service = epgService else { return }
         
-        // 1. Setup Basic Info
         if let cover = channel.cover, let url = URL(string: cover) { self.posterImage = url }
         
-        // 2. Fetch Fresh EPG
-        // We do this in a task to not block basic UI
         await service.refreshEpg(for: [channel])
         
         let map = service.getCurrentPrograms(for: [channel])
@@ -340,7 +354,7 @@ class PlayerViewModel: ObservableObject {
                 let f = DateFormatter()
                 f.timeStyle = .short
                 let timeStr = "\(f.string(from: program.start)) - \(f.string(from: program.end))"
-                self.videoYear = timeStr // Re-using videoYear slot for Time display in Player
+                self.videoYear = timeStr
             }
         } else {
             await MainActor.run {
@@ -441,9 +455,6 @@ class PlayerViewModel: ObservableObject {
         self.lastSavedTime = currentTime
         let pos = Int64(currentTime * 1000)
         let dur = Int64(duration * 1000)
-        
-        // For Live TV, we might simply mark it as "watched" recently without saving a specific time
-        // but keeping it in the repo updates "Recently Watched" logic.
         repo.saveProgress(url: channel.url, pos: pos, dur: dur)
     }
     
@@ -454,17 +465,28 @@ class PlayerViewModel: ObservableObject {
     }
     
     func triggerAutoPlay() {
-        guard canPlayNext else { return }
-        showAutoPlay = true
-        autoPlayCounter = 20
+        guard canPlayNext, !hasTriggeredAutoPlay else { return }
+        self.hasTriggeredAutoPlay = true
+        self.showAutoPlay = true
+        self.autoPlayCounter = 20
+        
         autoPlayTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            if self.autoPlayCounter > 0 { self.autoPlayCounter -= 1 }
-            else { self.confirmAutoPlay() }
+            if self.autoPlayCounter > 0 {
+                self.autoPlayCounter -= 1
+            } else {
+                self.confirmAutoPlay()
+            }
         }
     }
     
-    func cancelAutoPlay() { autoPlayTimer?.invalidate(); showAutoPlay = false }
+    func cancelAutoPlay() {
+        autoPlayTimer?.invalidate()
+        showAutoPlay = false
+        // Prevent re-triggering for this playback session
+        // (User explicitly cancelled)
+        hasTriggeredAutoPlay = true
+    }
     
     func confirmAutoPlay() {
         autoPlayTimer?.invalidate()

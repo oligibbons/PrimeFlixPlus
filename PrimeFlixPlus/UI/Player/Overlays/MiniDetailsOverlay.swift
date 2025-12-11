@@ -8,7 +8,7 @@ struct MiniDetailsOverlay: View {
     var onPlayNext: () -> Void
     var onClose: () -> Void
     
-    // Control Actions (New)
+    // Control Actions
     var onShowTracks: () -> Void
     var onShowVersions: () -> Void
     var onShowSettings: () -> Void
@@ -16,7 +16,15 @@ struct MiniDetailsOverlay: View {
     
     @FocusState private var focusedButton: String?
     
-    // Grid layout for the buttons
+    // Settings Access (Direct binding for toggle/size)
+    @AppStorage("subtitleScale") var subtitleScale: Double = 1.0
+    @AppStorage("areSubtitlesEnabled") var areSubtitlesEnabled: Bool = true
+    
+    let subtitleSizes: [(String, Double)] = [
+        ("S", 0.75), ("M", 1.0), ("L", 1.25), ("XL", 1.5)
+    ]
+    
+    // Grid layout for the main options
     let columns = [
         GridItem(.flexible()),
         GridItem(.flexible())
@@ -35,7 +43,7 @@ struct MiniDetailsOverlay: View {
                     } placeholder: {
                         Rectangle().fill(Color.white.opacity(0.1))
                     }
-                    .frame(width: 240, height: 360)
+                    .frame(width: 220, height: 330) // Reduced slightly
                     .cornerRadius(16)
                     .shadow(radius: 20)
                 } else {
@@ -44,14 +52,14 @@ struct MiniDetailsOverlay: View {
                     } placeholder: {
                         Rectangle().fill(Color.white.opacity(0.1))
                     }
-                    .frame(width: 240, height: 360)
+                    .frame(width: 220, height: 330)
                     .cornerRadius(16)
                 }
                 
                 // 2. Info Block
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 10) {
                     Text(viewModel.videoTitle.isEmpty ? channel.title : viewModel.videoTitle)
-                        .font(CinemeltTheme.fontTitle(50))
+                        .font(CinemeltTheme.fontTitle(46)) // Slightly smaller
                         .foregroundColor(CinemeltTheme.cream)
                         .lineLimit(2)
                         .shadow(color: .black, radius: 2)
@@ -66,28 +74,28 @@ struct MiniDetailsOverlay: View {
                                     .foregroundColor(CinemeltTheme.accent)
                                     .font(.caption)
                                 Text(viewModel.videoRating)
-                                    .font(CinemeltTheme.fontBody(22))
+                                    .font(CinemeltTheme.fontBody(20))
                                     .foregroundColor(CinemeltTheme.cream)
                             }
                         }
                         
                         if !viewModel.videoYear.isEmpty {
                             Text(viewModel.videoYear)
-                                .font(CinemeltTheme.fontBody(22))
+                                .font(CinemeltTheme.fontBody(20))
                                 .foregroundColor(.gray)
                         }
                         
                         if let dur = viewModel.duration as Double?, dur > 0 {
                             Text("\(Int(dur / 60)) min")
-                                .font(CinemeltTheme.fontBody(22))
+                                .font(CinemeltTheme.fontBody(20))
                                 .foregroundColor(.gray)
                         }
                     }
                     
                     Text(viewModel.videoOverview.isEmpty ? "No details available." : viewModel.videoOverview)
-                        .font(CinemeltTheme.fontBody(24))
+                        .font(CinemeltTheme.fontBody(22))
                         .foregroundColor(CinemeltTheme.cream.opacity(0.8))
-                        .lineLimit(4)
+                        .lineLimit(3)
                         .lineSpacing(4)
                     
                     Spacer()
@@ -103,14 +111,10 @@ struct MiniDetailsOverlay: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 
-                // 3. Actions & Controls Block
+                // 3. Actions & Controls Block (Right Column)
                 VStack(alignment: .leading, spacing: 20) {
                     
                     // A. Playback Flow
-                    Text("Playback")
-                        .font(CinemeltTheme.fontBody(20))
-                        .foregroundColor(.gray)
-                    
                     if viewModel.canPlayNext {
                         Button(action: onPlayNext) {
                             HStack {
@@ -128,7 +132,8 @@ struct MiniDetailsOverlay: View {
                                 }
                             }
                             .padding(.horizontal, 20)
-                            .padding(.vertical, 15)
+                            .padding(.vertical, 12)
+                            .frame(maxWidth: .infinity)
                             .background(CinemeltTheme.accent)
                             .cornerRadius(12)
                         }
@@ -138,9 +143,10 @@ struct MiniDetailsOverlay: View {
                         Button(action: { viewModel.restartPlayback() }) {
                             HStack {
                                 Image(systemName: "arrow.counterclockwise")
-                                Text("Restart")
+                                Text("Restart Episode")
                             }
-                            .padding()
+                            .font(CinemeltTheme.fontBody(20))
+                            .padding(.vertical, 12)
                             .frame(maxWidth: .infinity)
                             .background(Color.white.opacity(0.1))
                             .cornerRadius(12)
@@ -151,21 +157,60 @@ struct MiniDetailsOverlay: View {
                     
                     Divider().background(Color.white.opacity(0.2))
                     
-                    // B. Options Grid (Settings, Tracks, etc.)
-                    Text("Options")
-                        .font(CinemeltTheme.fontBody(20))
-                        .foregroundColor(.gray)
-                    
-                    LazyVGrid(columns: columns, spacing: 15) {
-                        // 1. Audio/Subs
-                        Button(action: onShowTracks) {
-                            VStack {
-                                Image(systemName: "captions.bubble.fill")
-                                    .font(.title2)
-                                Text("Tracks")
-                                    .font(.caption)
+                    // B. Subtitles (New Section)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Subtitles")
+                            .font(CinemeltTheme.fontBody(18))
+                            .foregroundColor(.gray)
+                        
+                        HStack(spacing: 10) {
+                            // Toggle
+                            Button(action: {
+                                areSubtitlesEnabled.toggle()
+                                viewModel.refreshTracks() // Apply immediately
+                            }) {
+                                Image(systemName: areSubtitlesEnabled ? "captions.bubble.fill" : "captions.bubble")
+                                    .foregroundColor(areSubtitlesEnabled ? .black : .white)
+                                    .padding(12)
+                                    .background(areSubtitlesEnabled ? CinemeltTheme.accent : Color.white.opacity(0.1))
+                                    .clipShape(Circle())
                             }
-                            .frame(height: 70)
+                            .buttonStyle(CinemeltCardButtonStyle())
+                            .focused($focusedButton, equals: "subToggle")
+                            
+                            // Size Picker
+                            ForEach(subtitleSizes, id: \.0) { label, size in
+                                Button(action: {
+                                    subtitleScale = size
+                                    viewModel.refreshTracks() // Reload styles
+                                }) {
+                                    Text(label)
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(subtitleScale == size ? .black : .white)
+                                        .frame(width: 40, height: 40)
+                                        .background(subtitleScale == size ? CinemeltTheme.white : Color.white.opacity(0.1))
+                                        .cornerRadius(8)
+                                }
+                                .buttonStyle(CinemeltCardButtonStyle())
+                                .disabled(!areSubtitlesEnabled)
+                                .opacity(areSubtitlesEnabled ? 1.0 : 0.3)
+                                .focused($focusedButton, equals: "subSize_\(label)")
+                            }
+                        }
+                    }
+                    
+                    Divider().background(Color.white.opacity(0.2))
+                    
+                    // C. Options Grid
+                    LazyVGrid(columns: columns, spacing: 10) {
+                        // 1. Audio/Subs (Advanced)
+                        Button(action: onShowTracks) {
+                            HStack {
+                                Image(systemName: "slider.horizontal.3")
+                                Text("Sync")
+                            }
+                            .font(CinemeltTheme.fontBody(18))
+                            .frame(height: 50)
                             .frame(maxWidth: .infinity)
                             .background(Color.white.opacity(0.1))
                             .cornerRadius(12)
@@ -173,15 +218,14 @@ struct MiniDetailsOverlay: View {
                         .buttonStyle(CinemeltCardButtonStyle())
                         .focused($focusedButton, equals: "tracks")
                         
-                        // 2. Settings (Triggers the new Optimization Overlay)
+                        // 2. Settings (Quality/Speed)
                         Button(action: onShowSettings) {
-                            VStack {
+                            HStack {
                                 Image(systemName: "gearshape.fill")
-                                    .font(.title2)
-                                Text("Settings")
-                                    .font(.caption)
+                                Text("Quality")
                             }
-                            .frame(height: 70)
+                            .font(CinemeltTheme.fontBody(18))
+                            .frame(height: 50)
                             .frame(maxWidth: .infinity)
                             .background(Color.white.opacity(0.1))
                             .cornerRadius(12)
@@ -189,16 +233,15 @@ struct MiniDetailsOverlay: View {
                         .buttonStyle(CinemeltCardButtonStyle())
                         .focused($focusedButton, equals: "settings")
                         
-                        // 3. Versions (If available)
+                        // 3. Versions
                         if !viewModel.alternativeVersions.isEmpty {
                             Button(action: onShowVersions) {
-                                VStack {
+                                HStack {
                                     Image(systemName: "square.stack.3d.up.fill")
-                                        .font(.title2)
                                     Text("Versions")
-                                        .font(.caption)
                                 }
-                                .frame(height: 70)
+                                .font(CinemeltTheme.fontBody(18))
+                                .frame(height: 50)
                                 .frame(maxWidth: .infinity)
                                 .background(Color.white.opacity(0.1))
                                 .cornerRadius(12)
@@ -209,14 +252,13 @@ struct MiniDetailsOverlay: View {
                         
                         // 4. Favorite
                         Button(action: onToggleFavorite) {
-                            VStack {
+                            HStack {
                                 Image(systemName: viewModel.isFavorite ? "heart.fill" : "heart")
-                                    .font(.title2)
                                     .foregroundColor(viewModel.isFavorite ? CinemeltTheme.accent : .white)
-                                Text("Favorite")
-                                    .font(.caption)
+                                Text("List")
                             }
-                            .frame(height: 70)
+                            .font(CinemeltTheme.fontBody(18))
+                            .frame(height: 50)
                             .frame(maxWidth: .infinity)
                             .background(Color.white.opacity(0.1))
                             .cornerRadius(12)
@@ -225,9 +267,9 @@ struct MiniDetailsOverlay: View {
                         .focused($focusedButton, equals: "favorite")
                     }
                 }
-                .frame(width: 400) // Fixed width for actions column
+                .frame(width: 380) // Fixed width for actions column
             }
-            .padding(50)
+            .padding(40)
             .background(
                 Rectangle()
                     .fill(.ultraThinMaterial)
@@ -240,15 +282,19 @@ struct MiniDetailsOverlay: View {
                     )
                     .ignoresSafeArea()
             )
-            .frame(height: 600) // Increased height to fit new controls
+            .frame(height: 550) // Reduced total height to fit screen better
             .cornerRadius(40, corners: [.topLeft, .topRight])
             .shadow(radius: 50)
         }
         .onExitCommand { onClose() }
         .onAppear {
+            // Delay focus to ensure view is ready
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                // Default focus to primary action
-                focusedButton = viewModel.canPlayNext ? "next" : "restart"
+                if viewModel.canPlayNext {
+                    focusedButton = "next"
+                } else {
+                    focusedButton = "restart"
+                }
             }
         }
     }
