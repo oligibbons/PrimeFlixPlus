@@ -1,6 +1,10 @@
 import SwiftUI
 
 struct ContinueWatchingView: View {
+    // FIXED: Added callbacks to match ContentView arguments
+    var onPlay: (Channel) -> Void
+    var onBack: () -> Void
+    
     @EnvironmentObject var repository: PrimeFlixRepository
     @StateObject private var viewModel = ContinueWatchingViewModel()
     
@@ -38,7 +42,8 @@ struct ContinueWatchingView: View {
                         // Grid
                         LazyVGrid(columns: columns, spacing: 40) {
                             ForEach(viewModel.items, id: \.url) { channel in
-                                NavigationLink(destination: PlayerView(channel: channel, repository: repository, onBack: {}, onPlayChannel: { _ in })) {
+                                // FIXED: Switched from NavigationLink to Button call to parent
+                                Button(action: { onPlay(channel) }) {
                                     ContinueWatchingCard(channel: channel)
                                 }
                                 .buttonStyle(CinemeltCardButtonStyle())
@@ -69,6 +74,10 @@ struct ContinueWatchingView: View {
         }
         .onAppear {
             viewModel.configure(repository: repository)
+        }
+        // FIXED: Exit command calls onBack callback
+        .onExitCommand {
+            onBack()
         }
     }
     

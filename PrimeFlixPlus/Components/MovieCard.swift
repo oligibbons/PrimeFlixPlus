@@ -13,7 +13,7 @@ struct MovieCard: View {
     
     var body: some View {
         Button(action: onClick) {
-            // FIX: The ZStack (Label) must effectively fill the frame for the custom style to work.
+            // The ZStack (Label) must effectively fill the frame for the custom style to work.
             ZStack(alignment: .bottom) {
                 
                 // 1. Image Layer
@@ -44,7 +44,7 @@ struct MovieCard: View {
                         Spacer()
                         
                         Text(channel.title)
-                            .font(CinemeltTheme.fontTitle(28)) // Larger font
+                            .font(CinemeltTheme.fontTitle(28))
                             .foregroundColor(CinemeltTheme.cream)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
@@ -66,14 +66,8 @@ struct MovieCard: View {
             .frame(width: width, height: height)
             .background(CinemeltTheme.charcoal)
             .cornerRadius(12)
-            // Border glow for active state
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(
-                        isFocused ? CinemeltTheme.white.opacity(0.5) : Color.white.opacity(0.1),
-                        lineWidth: isFocused ? 2 : 1
-                    )
-            )
+            // REMOVED: The white border overlay.
+            // Focus state is now indicated purely by the scale/shadow in .cinemeltCardStyle()
         }
         // Apply the custom "Lift" style from CinemeltStyle.swift
         .cinemeltCardStyle()

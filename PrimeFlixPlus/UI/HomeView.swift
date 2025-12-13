@@ -16,20 +16,21 @@ struct HomeView: View {
     var onPlayChannel: (Channel) -> Void
     var onAddPlaylist: () -> Void
     var onSettings: () -> Void
-    var onSearch: (String) -> Void // Changed to String to match your SearchViewModel requirement
+    var onSearch: (String) -> Void
     
     @State private var heroChannel: Channel?
-    
-    // Navigation & Focus State
     @State private var scrollOffset: CGFloat = 0
     @State private var showEpgGrid: Bool = false
+    
+    // Preferences (Added for VPN Toggle Logic)
+    @AppStorage("vpnAlertEnabled") var vpnAlertEnabled: Bool = true
     
     // FOCUS MANAGEMENT
     @FocusState private var focusedField: HomeFocusField?
     
     enum HomeFocusField: Hashable {
         case tab(StreamType)
-        case content // General content focus
+        case content
     }
     
     var body: some View {
@@ -75,8 +76,8 @@ struct HomeView: View {
                 .transition(.opacity.animation(.easeInOut(duration: 0.3)))
             }
             
-            // 3. NEW: VPN Indicator (Top Right Pinned)
-            if !showEpgGrid && viewModel.drillDownCategory == nil {
+            // 3. VPN Indicator (Controlled by Settings)
+            if vpnAlertEnabled && !showEpgGrid && viewModel.drillDownCategory == nil {
                 VPNStatusIndicator()
                     .padding(.top, CinemeltTheme.Layout.margin)
                     .padding(.trailing, CinemeltTheme.Layout.margin)
@@ -174,10 +175,8 @@ struct HomeView: View {
                             withAnimation(.easeInOut(duration: 0.5)) { heroChannel = ch }
                         },
                         onLoadMore: { viewModel.loadMoreGenres() },
-                        // Pass Removal Action down
                         onRemoveItem: { ch, sec in
                             // Call VM logic if available or handle here
-                            // For now assume VM handles backend removal, we just animate UI
                         }
                     )
                     // MENU BUTTON HANDLER: Return to Tabs
@@ -381,8 +380,8 @@ struct HomeSectionRow: View {
                     ForEach(section.items) { channel in
                         ZStack {
                             if case .continueWatching = section.type {
-                                ContinueWatchingCard(channel: channel) // Removed closure, just view
-                                    .onTapGesture { onPlay(channel) } // Simplified action
+                                ContinueWatchingCard(channel: channel)
+                                    .onTapGesture { onPlay(channel) }
                             } else {
                                 MovieCard(channel: channel, onClick: { onPlay(channel) }, onFocus: { onFocus(channel) })
                                     .contextMenu {

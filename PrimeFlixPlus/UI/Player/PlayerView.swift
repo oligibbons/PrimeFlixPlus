@@ -445,17 +445,3 @@ struct FavoritesPromptOverlay: View {
         }
     }
 }
-
-// MARK: - Helper: VLC Video Surface
-struct VLCVideoSurface: UIViewRepresentable {
-    @ObservedObject var viewModel: PlayerViewModel
-    
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        view.backgroundColor = .black
-        viewModel.assignView(view)
-        return view
-    }
-    
-    func updateUIView(_ uiView: UIView, context: Context) {}
-}

@@ -410,19 +410,6 @@ struct DetailsView: View {
 
 // MARK: - Components Helper
 
-struct Badge: View {
-    let text: String
-    var body: some View {
-        Text(text)
-            .font(CinemeltTheme.fontBody(18))
-            .foregroundColor(.black)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(CinemeltTheme.accent)
-            .cornerRadius(4)
-    }
-}
-
 // Adapter to use the shared EpisodeCard with the ViewModel struct
 extension EpisodeCard {
     init(episode: DetailsViewModel.MergedEpisode) {

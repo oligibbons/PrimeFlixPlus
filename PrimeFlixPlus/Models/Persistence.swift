@@ -19,7 +19,6 @@ struct PersistenceController {
         let playlistEntity = NSEntityDescription()
         playlistEntity.name = "Playlist"
         playlistEntity.managedObjectClassName = "Playlist"
-        playlistEntity.configuration = "User" // Was "Cloud"
         
         playlistEntity.properties = [
             NSAttributeDescription(name: "url", type: .stringAttributeType),
@@ -31,7 +30,6 @@ struct PersistenceController {
         let progEntity = NSEntityDescription()
         progEntity.name = "WatchProgress"
         progEntity.managedObjectClassName = "WatchProgress"
-        progEntity.configuration = "User"
         
         progEntity.properties = [
             NSAttributeDescription(name: "channelUrl", type: .stringAttributeType),
@@ -44,7 +42,6 @@ struct PersistenceController {
         let tasteProfileEntity = NSEntityDescription()
         tasteProfileEntity.name = "TasteProfile"
         tasteProfileEntity.managedObjectClassName = "TasteProfile"
-        tasteProfileEntity.configuration = "User"
         
         tasteProfileEntity.properties = [
             NSAttributeDescription(name: "id", type: .stringAttributeType),
@@ -57,7 +54,6 @@ struct PersistenceController {
         let tasteItemEntity = NSEntityDescription()
         tasteItemEntity.name = "TasteItem"
         tasteItemEntity.managedObjectClassName = "TasteItem"
-        tasteItemEntity.configuration = "User"
         
         tasteItemEntity.properties = [
             NSAttributeDescription(name: "tmdbId", type: .integer64AttributeType),
@@ -77,7 +73,6 @@ struct PersistenceController {
         let channelEntity = NSEntityDescription()
         channelEntity.name = "Channel"
         channelEntity.managedObjectClassName = "Channel"
-        channelEntity.configuration = "Cache" // Was "Local"
         
         channelEntity.properties = [
             NSAttributeDescription(name: "url", type: .stringAttributeType),
@@ -107,7 +102,6 @@ struct PersistenceController {
         let epgEntity = NSEntityDescription()
         epgEntity.name = "Programme"
         epgEntity.managedObjectClassName = "Programme"
-        epgEntity.configuration = "Cache"
         
         epgEntity.properties = [
             NSAttributeDescription(name: "id", type: .stringAttributeType),
@@ -124,7 +118,6 @@ struct PersistenceController {
         let metaEntity = NSEntityDescription()
         metaEntity.name = "MediaMetadata"
         metaEntity.managedObjectClassName = "MediaMetadata"
-        metaEntity.configuration = "Cache"
         
         metaEntity.properties = [
             NSAttributeDescription(name: "tmdbId", type: .integer64AttributeType),
@@ -139,10 +132,16 @@ struct PersistenceController {
         ]
 
         // --- Finalize Model ---
+        // 1. Assign Entities to Model
         model.entities = [
             playlistEntity, channelEntity, progEntity, epgEntity, metaEntity,
             tasteProfileEntity, tasteItemEntity
         ]
+        
+        // 2. Assign Configurations (Fix for Compiler Error)
+        // Note: You must define configurations on the model object, not the entity description.
+        model.setEntities([playlistEntity, progEntity, tasteProfileEntity, tasteItemEntity], forConfigurationName: "User")
+        model.setEntities([channelEntity, epgEntity, metaEntity], forConfigurationName: "Cache")
         
         // 2. Initialize Container (Standard)
         container = NSPersistentContainer(name: "PrimeFlixPlus", managedObjectModel: model)

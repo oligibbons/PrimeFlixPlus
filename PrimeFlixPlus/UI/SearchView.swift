@@ -260,35 +260,7 @@ struct SearchView: View {
 
 // MARK: - Helper Components (Internal)
 
-struct ResultSection: View {
-    let title: String
-    let items: [Channel]
-    let onPlay: (Channel) -> Void
-    
-    // Standard Grid for Posters
-    let columns = [
-        GridItem(.adaptive(minimum: 200, maximum: 240), spacing: 40)
-    ]
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 25) {
-            Text(title)
-                .font(CinemeltTheme.fontTitle(32))
-                .foregroundColor(CinemeltTheme.cream)
-                .padding(.leading, CinemeltTheme.Layout.margin)
-            
-            LazyVGrid(columns: columns, spacing: 60) {
-                ForEach(items) { item in
-                    Button(action: { onPlay(item) }) {
-                        MovieCard(channel: item)
-                    }
-                    .buttonStyle(CinemeltCardButtonStyle())
-                }
-            }
-            .padding(.horizontal, CinemeltTheme.Layout.margin)
-        }
-    }
-}
+// NOTE: ResultSection removed from here as it is now in SearchUIComponents.swift
 
 struct LiveChannelCard: View {
     let channel: Channel

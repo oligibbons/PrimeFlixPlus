@@ -28,22 +28,22 @@ class ContinueWatchingViewModel: ObservableObject {
         guard let repo = repository else { return }
         self.isLoading = true
         
-        // We perform the heavy filtering on a background context to avoid UI stutters
+        // Use a background context for the heavy fetch/filter logic
         let bgContext = repo.container.newBackgroundContext()
         
         Task.detached(priority: .userInitiated) {
-            await bgContext.perform {
-                // 1. Fetch all progress records sorted by last played (newest first)
+            // 1. Fetch & Filter in Background (Synchronous block inside Task)
+            var validObjectIDs: [NSManagedObjectID] = []
+            
+            // Using performAndWait avoids the "async closure in sync context" compiler error
+            bgContext.performAndWait {
+                // A. Fetch progress history
                 let request = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
                 request.sortDescriptors = [NSSortDescriptor(key: "lastPlayed", ascending: false)]
                 
-                guard let progressItems = try? bgContext.fetch(request) else {
-                    await MainActor.run { self.isLoading = false }
-                    return
-                }
+                guard let progressItems = try? bgContext.fetch(request) else { return }
                 
-                // 2. Apply Strict 5% - 95% Logic
-                // We do this in memory because calculating percentages in NSPredicate is complex/slow
+                // B. Filter percentages (5% - 95%)
                 let validUrls = progressItems.compactMap { item -> String? in
                     let pos = Double(item.position)
                     let dur = Double(item.duration)
@@ -51,33 +51,31 @@ class ContinueWatchingViewModel: ObservableObject {
                     guard dur > 0 else { return nil }
                     let percentage = pos / dur
                     
-                    // The "Goldilocks" Zone: Started (>5%) but not Finished (<95%)
                     if percentage > 0.05 && percentage < 0.95 {
                         return item.channelUrl
                     }
                     return nil
                 }
                 
-                // 3. Fetch corresponding Channels
-                // We verify they still exist in the library
-                var validChannels: [Channel] = []
+                // C. Resolve to Channel ObjectIDs
                 let channelRepo = ChannelRepository(context: bgContext)
-                
                 for url in validUrls {
-                    if let channel = channelRepo.getChannel(by: url) {
-                        validChannels.append(channel)
+                    // FIX: Corrected argument label from 'by:' to 'byUrl:'
+                    if let channel = channelRepo.getChannel(byUrl: url) {
+                        validObjectIDs.append(channel.objectID)
                     }
                 }
-                
-                // 4. Map ObjectIDs for Main Context
-                let objectIDs = validChannels.map { $0.objectID }
-                
-                await MainActor.run {
-                    // Re-fetch on main thread using IDs to respect thread safety
+            }
+            
+            // 2. Update UI on Main Actor
+            await MainActor.run {
+                if validObjectIDs.isEmpty {
+                    self.items = []
+                } else {
                     let viewContext = repo.container.viewContext
-                    self.items = objectIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
-                    self.isLoading = false
+                    self.items = validObjectIDs.compactMap { try? viewContext.existingObject(with: $0) as? Channel }
                 }
+                self.isLoading = false
             }
         }
     }
@@ -87,16 +85,19 @@ class ContinueWatchingViewModel: ObservableObject {
     func removeFromHistory(_ channel: Channel) {
         guard let repo = repository else { return }
         
+        // Fix: Capture URL string to avoid passing non-Sendable 'Channel' into async/bg context
+        let targetUrl = channel.url
+        
         // Optimistic UI Update
         withAnimation {
-            items.removeAll { $0.url == channel.url }
+            items.removeAll { $0.url == targetUrl }
         }
         
         // Database Delete
         let context = repo.container.newBackgroundContext()
         context.perform {
             let req = NSFetchRequest<WatchProgress>(entityName: "WatchProgress")
-            req.predicate = NSPredicate(format: "channelUrl == %@", channel.url)
+            req.predicate = NSPredicate(format: "channelUrl == %@", targetUrl)
             req.fetchLimit = 1
             
             if let object = try? context.fetch(req).first {
@@ -107,13 +108,12 @@ class ContinueWatchingViewModel: ObservableObject {
     }
     
     func playChannel(_ channel: Channel) {
-        // Handled by parent view, but we could add tracking logic here if needed
+        // Handled by parent view
     }
     
     // MARK: - Observers
     
     private func setupObservers() {
-        // Reload if the user watches something elsewhere in the app
         NotificationCenter.default.publisher(for: NSNotification.Name("WatchProgressUpdated"))
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] _ in
