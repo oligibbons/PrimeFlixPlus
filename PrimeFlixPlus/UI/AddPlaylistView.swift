@@ -60,7 +60,8 @@ struct AddPlaylistView: View, Equatable {
                         .foregroundColor(CinemeltTheme.cream)
                         .cinemeltGlow()
                     
-                    Text("Enter your provider details securely.\nPrimeFlix supports Xtream Codes API.")
+                    // REBRANDED HERE
+                    Text("Enter your provider details securely.\nCinemelt supports Xtream Codes API.")
                         .font(CinemeltTheme.fontBody(26))
                         .foregroundColor(CinemeltTheme.cream.opacity(0.7))
                         .lineSpacing(8)

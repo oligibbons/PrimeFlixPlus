@@ -16,12 +16,12 @@ struct SyncStatusOverlay: View {
                     
                     // Text
                     VStack(spacing: 5) {
-                        Text(statusText)
+                        Text(statusTitle)
                             .font(CinemeltTheme.fontTitle(28))
                             .foregroundColor(CinemeltTheme.cream)
                         
-                        if repository.enrichmentQueue.count > 0 {
-                            Text("\(repository.enrichmentQueue.count) items remaining")
+                        if let msg = repository.syncStatusMessage {
+                            Text(msg)
                                 .font(CinemeltTheme.fontBody(20))
                                 .foregroundColor(CinemeltTheme.cream.opacity(0.6))
                         }
@@ -40,31 +40,27 @@ struct SyncStatusOverlay: View {
                 .padding(.top, 40)
             }
         }
-        .onChange(of: repository.isSyncing) { newValue in
-            updateVisibility()
-        }
-        .onChange(of: repository.enrichmentQueue.count) { newValue in
-            updateVisibility()
-        }
+        .onChange(of: repository.isSyncing) { _ in updateVisibility() }
+        .onChange(of: repository.syncStatusMessage) { _ in updateVisibility() }
         .onAppear {
             updateVisibility()
         }
     }
     
-    private var statusText: String {
-        if repository.isSyncing { return "Updating Library..." }
-        if !repository.enrichmentQueue.isEmpty { return "Enriching Metadata..." }
-        return "Complete"
+    private var statusTitle: String {
+        if repository.isInitialSync { return "Setup in Progress" }
+        return "Updating Library"
     }
     
     private func updateVisibility() {
-        let shouldShow = repository.isSyncing || !repository.enrichmentQueue.isEmpty
+        // Show if we are syncing OR if there is a lingering status message (e.g. "Enriching...")
+        let shouldShow = repository.isSyncing || repository.syncStatusMessage != nil
         
         withAnimation(.spring()) {
             self.isVisible = shouldShow
         }
         
-        // Safety Fallback: If it says 0 items but is still showing, force hide after 2 seconds
+        // Safety Fallback: Force hide if status clears but UI gets stuck
         if !shouldShow && isVisible {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                 withAnimation { self.isVisible = false }
