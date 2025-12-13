@@ -31,6 +31,15 @@ class UserPreferencesRepository: ObservableObject {
         }
     }
     
+    // NEW: Added missing method to update the entire profile at once
+    func saveProfile(genres: String, moods: String, isComplete: Bool) {
+        let profile = getProfile()
+        profile.selectedGenres = genres
+        profile.selectedMoods = moods
+        profile.isOnboardingComplete = isComplete
+        save()
+    }
+    
     func completeOnboarding(moods: [String], genres: [String]) {
         let profile = getProfile()
         profile.selectedMoods = moods.joined(separator: ",")

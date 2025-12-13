@@ -380,8 +380,10 @@ struct HomeSectionRow: View {
                     ForEach(section.items) { channel in
                         ZStack {
                             if case .continueWatching = section.type {
-                                ContinueWatchingCard(channel: channel)
-                                    .onTapGesture { onPlay(channel) }
+                                // FIXED: Provided required closure for onClick
+                                ContinueWatchingCard(channel: channel) {
+                                    onPlay(channel)
+                                }
                             } else {
                                 MovieCard(channel: channel, onClick: { onPlay(channel) }, onFocus: { onFocus(channel) })
                                     .contextMenu {

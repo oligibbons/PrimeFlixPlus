@@ -25,7 +25,6 @@ struct SearchView: View {
     init(repository: PrimeFlixRepository, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
         self.onPlay = onPlay
         self.onBack = onBack
-        // Note: ViewModel is initialized via StateObject, but we configure it in onAppear
     }
     
     var body: some View {
@@ -128,17 +127,13 @@ struct SearchView: View {
                                         liveTvResults
                                     }
                                 }
-                                // FIX: Assign a generic focus tag to the results container
-                                // so we can restore focus here if needed.
                                 .focused($focusedField, equals: .content)
                             }
                         }
-                        // CRITICAL: Standardize margins to prevent jumping
                         .standardSafePadding()
                         .padding(.bottom, 100)
                         .id("TopContent")
                     }
-                    // FIX: FocusSection ensures scrolling within this view is prioritized
                     .focusSection()
                 }
             }
@@ -149,8 +144,6 @@ struct SearchView: View {
             // Smart Focus Restoration
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 if focusedField == nil {
-                    // If we have results (restored session), focus content.
-                    // If empty, focus search bar.
                     if !viewModel.movies.isEmpty || !viewModel.liveChannels.isEmpty {
                         focusedField = .content
                     } else {
@@ -173,7 +166,6 @@ struct SearchView: View {
                 ResultSection(title: "Series", items: viewModel.series, onPlay: onPlay)
             }
         }
-        // Remove padding here as ResultSection handles it
         .padding(.horizontal, -CinemeltTheme.Layout.margin)
     }
     
@@ -223,7 +215,8 @@ struct SearchView: View {
                     LazyVGrid(columns: channelGridColumns, spacing: 50) {
                         ForEach(viewModel.liveChannels) { channel in
                             Button(action: { onPlay(channel) }) {
-                                LiveChannelCard(channel: channel)
+                                // RENAMED COMPONENT USAGE
+                                SearchLiveCard(channel: channel)
                             }
                             .buttonStyle(CinemeltCardButtonStyle())
                         }
@@ -260,9 +253,8 @@ struct SearchView: View {
 
 // MARK: - Helper Components (Internal)
 
-// NOTE: ResultSection removed from here as it is now in SearchUIComponents.swift
-
-struct LiveChannelCard: View {
+// RENAMED: To avoid conflict with LiveTVView's LiveChannelCard
+struct SearchLiveCard: View {
     let channel: Channel
     @Environment(\.isFocused) private var isFocused
     

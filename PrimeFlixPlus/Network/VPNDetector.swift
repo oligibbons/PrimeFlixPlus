@@ -48,7 +48,7 @@ class VPNDetector: ObservableObject {
     
     // MARK: - Detection Logic
     /// Checks for the presence of ACTIVE, ROUTABLE VPN interfaces.
-    private static func checkVPNStatus() -> VPNStatus {
+    static func checkVPNStatus() -> VPNStatus {
         // 1. Check System Proxy Settings (Highest Confidence for App VPNs)
         // VPN apps on tvOS usually register a scoped proxy configuration.
         if let dict = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any] {
