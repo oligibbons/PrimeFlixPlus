@@ -173,7 +173,6 @@ struct VideoSettingsOverlay: View {
                         useHardwareDecoding = true
                         bufferMemoryLimit = 300 // Safe middle ground
                         viewModel.isDeinterlaceEnabled = true
-                        viewModel.toggleDeinterlace() // Toggle twice to force refresh if needed or just set
                         viewModel.setDeinterlace(true)
                     }) {
                         HStack {
@@ -255,7 +254,7 @@ struct TrackSelectionOverlay: View {
                 
                 // 2. Subtitle Column
                 VStack(spacing: 20) {
-                    trackColumn(title: "Subtitles", tracks: viewModel.subtitleTracks, currentIndex: viewModel.currentSubtitleIndex) { i in
+                    trackColumn(title: "Subtitles", tracks: viewModel.subtitleTracks, currentIndex: viewModel.currentSubtitleIndex, isSubtitle: true) { i in
                         viewModel.setSubtitleTrack(index: i)
                     }
                     
@@ -274,7 +273,7 @@ struct TrackSelectionOverlay: View {
         .onExitCommand { onClose() }
     }
     
-    private func trackColumn(title: String, tracks: [String], currentIndex: Int, action: @escaping (Int) -> Void) -> some View {
+    private func trackColumn(title: String, tracks: [String], currentIndex: Int, isSubtitle: Bool = false, action: @escaping (Int) -> Void) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             Text(title)
                 .font(CinemeltTheme.fontTitle(32))
@@ -282,6 +281,26 @@ struct TrackSelectionOverlay: View {
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
+                    // "OFF" Option for Subtitles
+                    if isSubtitle {
+                        Button(action: { action(-1) }) {
+                            HStack {
+                                Text("Off")
+                                    .font(CinemeltTheme.fontBody(22))
+                                    .foregroundColor(.red)
+                                Spacer()
+                                if currentIndex == -1 {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.red)
+                                }
+                            }
+                            .padding()
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(12)
+                        }
+                        .buttonStyle(CinemeltCardButtonStyle())
+                    }
+                    
                     if tracks.isEmpty {
                         Text("No tracks found")
                             .font(CinemeltTheme.fontBody(20))
@@ -310,7 +329,7 @@ struct TrackSelectionOverlay: View {
                     }
                 }
             }
-            .frame(height: 300)
+            .focusSection() // CRITICAL: This allows the Focus Engine to "escape" the scroll view boundaries
         }
     }
 }
@@ -408,6 +427,7 @@ struct VersionSelectionOverlay: View {
                     .padding(40)
                 }
                 .frame(width: 500, height: 600)
+                .focusSection() // Allow escaping
             }
         }
         .onExitCommand { onClose() }

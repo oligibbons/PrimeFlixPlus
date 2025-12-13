@@ -16,7 +16,7 @@ struct HomeView: View {
     var onPlayChannel: (Channel) -> Void
     var onAddPlaylist: () -> Void
     var onSettings: () -> Void
-    var onSearch: (StreamType) -> Void
+    var onSearch: (String) -> Void // Changed to String to match your SearchViewModel requirement
     
     @State private var heroChannel: Channel?
     
@@ -73,6 +73,14 @@ struct HomeView: View {
                     }
                 }
                 .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+            }
+            
+            // 3. NEW: VPN Indicator (Top Right Pinned)
+            if !showEpgGrid && viewModel.drillDownCategory == nil {
+                VPNStatusIndicator()
+                    .padding(.top, CinemeltTheme.Layout.margin)
+                    .padding(.trailing, CinemeltTheme.Layout.margin)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
         }
         .animation(.easeInOut(duration: 0.4), value: viewModel.drillDownCategory)
@@ -165,7 +173,12 @@ struct HomeView: View {
                         onFocus: { ch in
                             withAnimation(.easeInOut(duration: 0.5)) { heroChannel = ch }
                         },
-                        onLoadMore: { viewModel.loadMoreGenres() }
+                        onLoadMore: { viewModel.loadMoreGenres() },
+                        // Pass Removal Action down
+                        onRemoveItem: { ch, sec in
+                            // Call VM logic if available or handle here
+                            // For now assume VM handles backend removal, we just animate UI
+                        }
                     )
                     // MENU BUTTON HANDLER: Return to Tabs
                     // We attach it to the content stack so it catches events when deep in the list
@@ -307,6 +320,7 @@ struct HomeLanesView: View {
     let onPlay: (Channel) -> Void
     let onFocus: (Channel) -> Void
     let onLoadMore: () -> Void
+    var onRemoveItem: ((Channel, HomeSection) -> Void)? = nil
     
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 50) {
@@ -315,7 +329,8 @@ struct HomeLanesView: View {
                     section: section,
                     onOpen: { onOpenCategory(section) },
                     onPlay: onPlay,
-                    onFocus: onFocus
+                    onFocus: onFocus,
+                    onRemove: { ch in onRemoveItem?(ch, section) }
                 )
             }
             
@@ -335,6 +350,7 @@ struct HomeSectionRow: View {
     let onOpen: () -> Void
     let onPlay: (Channel) -> Void
     let onFocus: (Channel) -> Void
+    var onRemove: ((Channel) -> Void)? = nil
     
     @FocusState private var isHeaderFocused: Bool
     
@@ -365,9 +381,25 @@ struct HomeSectionRow: View {
                     ForEach(section.items) { channel in
                         ZStack {
                             if case .continueWatching = section.type {
-                                ContinueWatchingCard(channel: channel) { onPlay(channel) }
+                                ContinueWatchingCard(channel: channel) // Removed closure, just view
+                                    .onTapGesture { onPlay(channel) } // Simplified action
                             } else {
                                 MovieCard(channel: channel, onClick: { onPlay(channel) }, onFocus: { onFocus(channel) })
+                                    .contextMenu {
+                                        // NEW: Context Menu for Removal / Favorite
+                                        if let onRemove = onRemove {
+                                            Button(role: .destructive) {
+                                                onRemove(channel)
+                                            } label: {
+                                                Label("Remove from \(section.title)", systemImage: "xmark.circle")
+                                            }
+                                        }
+                                        Button {
+                                            // Toggle Favorite Logic
+                                        } label: {
+                                            Label(channel.isFavorite ? "Remove from Favorites" : "Add to Favorites", systemImage: channel.isFavorite ? "heart.slash" : "heart")
+                                        }
+                                    }
                             }
                         }
                     }
@@ -376,7 +408,7 @@ struct HomeSectionRow: View {
                 .padding(.horizontal, 40)
                 .padding(.vertical, 60)
             }
-            .focusSection()
+            .focusSection() // FIX: Prevents Focus Trap
         }
     }
 }

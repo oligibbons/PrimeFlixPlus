@@ -18,6 +18,7 @@ struct HomeSection: Identifiable {
         case recent
         case recommended
         case freshContent
+        case tasteBreakers // New Logic
         case genre(String)
         case provider(String)
     }
@@ -38,7 +39,7 @@ class HomeViewModel: ObservableObject {
     @Published var selectedPlaylist: Playlist?
     @Published var playlists: [Playlist] = []
     @Published var sections: [HomeSection] = []
-    @Published var isLoading: Bool = true // Start true to show spinner immediately
+    @Published var isLoading: Bool = true
     @Published var isLoadingMore: Bool = false
     
     // Greetings
@@ -68,19 +69,13 @@ class HomeViewModel: ObservableObject {
         self.repository = repository
         self.playlists = repository.getAllPlaylists()
         
-        // 1. Immediate Playlist Selection
-        if selectedPlaylist == nil {
-            if let first = playlists.first {
-                self.selectedPlaylist = first
-            }
+        if selectedPlaylist == nil, let first = playlists.first {
+            self.selectedPlaylist = first
         }
         
         updateGreeting()
         setupListeners()
         
-        // 2. Initial Load
-        // If we have a playlist, load immediately.
-        // If not, the listener below will trigger it when data arrives.
         if selectedPlaylist != nil {
             loadTab(selectedTab)
         }
@@ -91,45 +86,31 @@ class HomeViewModel: ObservableObject {
     private func setupListeners() {
         guard let repository = repository else { return }
         
-        // A. Watch for Playlist Updates (Fix for "Blank on First Launch")
+        // Playlist Updates
         repository.objectWillChange
             .sink { [weak self] _ in
                 guard let self = self else { return }
-                let freshPlaylists = repository.getAllPlaylists()
-                self.playlists = freshPlaylists
-                
-                // If we didn't have a playlist before, select one now and load
-                if self.selectedPlaylist == nil, let first = freshPlaylists.first {
+                self.playlists = repository.getAllPlaylists()
+                if self.selectedPlaylist == nil, let first = self.playlists.first {
                     self.selectedPlaylist = first
-                    self.updateGreeting()
                     self.loadTab(self.selectedTab)
                 }
             }
             .store(in: &cancellables)
         
-        // B. Sync Completion (Refetch Data)
+        // Sync Completion
         repository.$isSyncing
-            .dropFirst() // Ignore initial state
+            .dropFirst()
             .removeDuplicates()
             .receive(on: RunLoop.main)
             .sink { [weak self] isSyncing in
-                // When sync finishes (goes to false), force reload
-                if !isSyncing {
-                    self?.invalidateCache()
-                }
+                if !isSyncing { self?.invalidateCache() }
             }
             .store(in: &cancellables)
-        
-        // C. Settings/Language Changes
+            
+        // Preferences
         NotificationCenter.default.publisher(for: CategoryPreferences.didChangeNotification)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.invalidateCache() }
-            .store(in: &cancellables)
-            
-        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
-            .compactMap { _ in UserDefaults.standard.string(forKey: "preferredLanguage") }
-            .removeDuplicates()
-            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.invalidateCache() }
             .store(in: &cancellables)
     }
@@ -140,16 +121,15 @@ class HomeViewModel: ObservableObject {
         invalidateCache()
     }
     
-    // MARK: - Safety Mechanisms
+    // MARK: - Watchdog
     
-    /// Watchdog: If the screen remains blank for 5 seconds, force a reload.
-    /// This fixes race conditions where the view might load before Core Data is ready.
     private func startContentWatchdog() {
         watchdogTimer?.invalidate()
         watchdogTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                if self.sections.isEmpty && self.selectedPlaylist != nil {
+                // If screen is blank but we have a playlist, force reload
+                if self.sections.isEmpty && self.selectedPlaylist != nil && !self.isLoading {
                     print("⚠️ [HomeViewModel] Watchdog triggered reload.")
                     self.invalidateCache()
                 }
@@ -164,7 +144,6 @@ class HomeViewModel: ObservableObject {
         currentFetchTask?.cancel()
         self.selectedTab = tab
         
-        // Use Cache if valid
         if let state = tabCache[tab], state.hasLoadedInitial, !state.sections.isEmpty {
             self.sections = state.sections
             self.isLoading = false
@@ -176,7 +155,6 @@ class HomeViewModel: ObservableObject {
     }
     
     private func invalidateCache() {
-        // Clear everything to force fresh fetch from Core Data
         tabCache = [.movie: HomeTabState(), .series: HomeTabState(), .live: HomeTabState()]
         loadTab(selectedTab)
     }
@@ -184,10 +162,7 @@ class HomeViewModel: ObservableObject {
     // MARK: - Core Logic
     
     private func loadTab(_ tab: StreamType) {
-        guard let repo = repository else { return }
-        
-        // Ensure we actually have a source
-        guard let pl = selectedPlaylist else {
+        guard let repo = repository, let pl = selectedPlaylist else {
             self.isLoading = false
             return
         }
@@ -202,10 +177,9 @@ class HomeViewModel: ObservableObject {
         currentFetchTask = Task {
             let context = repo.container.newBackgroundContext()
             
-            // 1. Fetch Trending from API first (Network)
+            // 1. Network Fetch (Trending)
             var trendingTitles: [String] = []
             if tab != .live {
-                // We wrap this in do-catch so network failure doesn't kill the whole load
                 do {
                     let trending = try await tmdbClient.getTrending(type: type)
                     trendingTitles = trending.map { $0.displayTitle }
@@ -221,25 +195,25 @@ class HomeViewModel: ObservableObject {
             var allGroups: [String] = []
             
             await context.perform {
-                // Initialize Services
                 let recService = RecommendationService(context: context)
                 let readRepo = ChannelRepository(context: context)
+                let prefsRepo = UserPreferencesRepository(container: repo.container)
                 
-                // A. Continue Watching (Basic)
+                // A. Continue Watching
                 let resume = readRepo.getSmartContinueWatching(type: type)
                 if !resume.isEmpty {
                     initialSections.append(HomeSection(title: "Continue Watching", type: .continueWatching, items: resume))
                 }
                 
-                // B. Fresh Content (Smart Service)
+                // B. Fresh For You (Sequels / New Seasons)
                 if tab != .live {
                     let fresh = recService.getFreshFranchiseContent(type: type)
                     if !fresh.isEmpty {
-                        initialSections.append(HomeSection(title: "Your Fresh Content", type: .freshContent, items: fresh))
+                        initialSections.append(HomeSection(title: "Fresh For You", type: .freshContent, items: fresh))
                     }
                 }
                 
-                // C. Trending (Smart Service)
+                // C. Trending (TMDB Mapping)
                 if !trendingTitles.isEmpty {
                     let trending = recService.getTrendingMatches(type: type, tmdbResults: trendingTitles)
                     if !trending.isEmpty {
@@ -247,21 +221,30 @@ class HomeViewModel: ObservableObject {
                     }
                 }
                 
-                // D. Favorites (Basic)
-                let favs = readRepo.getFavorites(type: type)
-                if !favs.isEmpty {
-                    initialSections.append(HomeSection(title: "My List", type: .favorites, items: favs))
-                }
-                
-                // E. Recommended (Smart Service)
+                // D. Recommended (Based on Genres/History)
                 if tab != .live {
                     let recommended = recService.getRecommended(type: type)
                     if !recommended.isEmpty {
-                        initialSections.append(HomeSection(title: "Recommended For You", type: .recommended, items: recommended))
+                        initialSections.append(HomeSection(title: "Recommended", type: .recommended, items: recommended))
                     }
                 }
                 
-                // F. Recently Added (Basic)
+                // E. Taste Breakers (NEW Logic)
+                if tab != .live {
+                    let profile = prefsRepo.getProfile()
+                    let userGenres = Set((profile.selectedGenres ?? "").components(separatedBy: ","))
+                    
+                    let tasteBreakers = self.fetchTasteBreakers(
+                        context: context,
+                        type: type,
+                        avoidGenres: userGenres
+                    )
+                    if !tasteBreakers.isEmpty {
+                        initialSections.append(HomeSection(title: "Taste Breakers", type: .tasteBreakers, items: tasteBreakers))
+                    }
+                }
+                
+                // F. Recently Added (Fallback)
                 if tab != .live {
                     let recent = readRepo.getRecentlyAdded(type: type, limit: 20)
                     if !recent.isEmpty {
@@ -269,7 +252,7 @@ class HomeViewModel: ObservableObject {
                     }
                 }
                 
-                // G. Groups
+                // G. Groups (For "View All Categories")
                 allGroups = readRepo.getGroups(playlistUrl: playlistUrl, type: type)
             }
             
@@ -278,6 +261,46 @@ class HomeViewModel: ObservableObject {
             self.finalizeInitialLoad(tab: tab, sections: initialSections, allGroups: allGroups, lang: lang)
         }
     }
+    
+    // MARK: - Taste Breakers Logic
+    
+    private func fetchTasteBreakers(context: NSManagedObjectContext, type: String, avoidGenres: Set<String>) -> [Channel] {
+        // 1. Identify "Breaker" Categories (Groups that don't match user prefs)
+        let groupReq = NSFetchRequest<NSDictionary>(entityName: "Channel")
+        groupReq.resultType = .dictionaryResultType
+        groupReq.propertiesToFetch = ["group"]
+        groupReq.returnsDistinctResults = true
+        groupReq.predicate = NSPredicate(format: "type == %@", type)
+        
+        guard let results = try? context.fetch(groupReq) as? [[String: String]] else { return [] }
+        let allGroups = results.compactMap { $0["group"] }
+        
+        // Find groups that do NOT contain any of the user's preferred genre strings
+        let candidateGroups = allGroups.filter { group in
+            !avoidGenres.contains { group.localizedCaseInsensitiveContains($0) }
+        }
+        
+        if candidateGroups.isEmpty { return [] }
+        
+        // 2. Fetch random highly-rated items from these groups
+        // We use "4K" or "UHD" as a proxy for high quality since external ratings might be sparse initially
+        let req = NSFetchRequest<Channel>(entityName: "Channel")
+        let groupsToCheck = Array(candidateGroups.prefix(10)) // Limit check to 10 random groups for speed
+        
+        req.predicate = NSPredicate(
+            format: "type == %@ AND group IN %@ AND (quality CONTAINS[cd] '4K' OR quality CONTAINS[cd] 'UHD' OR quality CONTAINS[cd] '1080')",
+            type, groupsToCheck
+        )
+        req.fetchLimit = 50
+        req.sortDescriptors = [NSSortDescriptor(key: "addedAt", ascending: false)]
+        
+        guard let items = try? context.fetch(req) else { return [] }
+        
+        // Shuffle in memory to ensure variety
+        return Array(items.shuffled().prefix(15))
+    }
+    
+    // MARK: - Finalization
     
     private func finalizeInitialLoad(tab: StreamType, sections: [HomeSection], allGroups: [String], lang: String) {
         let cleanGroups = allGroups.filter { CategoryPreferences.shared.shouldShow(group: $0, language: lang) }
@@ -290,11 +313,16 @@ class HomeViewModel: ObservableObject {
         self.tabCache[tab] = state
         
         if self.selectedTab == tab {
-            self.sections = sections
-            self.isLoading = false
+            withAnimation {
+                self.sections = sections
+                self.isLoading = false
+            }
+            // Trigger loading of standard genres after main content is ready
             self.loadMoreGenres()
         }
     }
+    
+    // MARK: - Lazy Loading Groups
     
     func loadMoreGenres() {
         guard let repo = repository, !isLoadingMore else { return }
@@ -318,7 +346,6 @@ class HomeViewModel: ObservableObject {
                     let items = readRepo.getByGenre(type: type, groupName: rawGroup, limit: 15)
                     if !items.isEmpty {
                         let cleanTitle = CategoryPreferences.shared.cleanName(rawGroup)
-                        // Heuristic for "Provider" lanes
                         let isPremium = ["Netflix", "HBO", "Apple", "Disney"].contains { rawGroup.localizedCaseInsensitiveContains($0) }
                         newSections.append(HomeSection(title: cleanTitle, type: isPremium ? .provider(rawGroup) : .genre(rawGroup), items: items))
                     }
@@ -332,7 +359,6 @@ class HomeViewModel: ObservableObject {
     }
     
     private func finalizeMoreGenres(newSections: [HomeSection], newIndex: Int) {
-        // Safety check if tab changed while loading
         guard var currentState = self.tabCache[self.selectedTab] else { return }
         
         currentState.sections.append(contentsOf: newSections)
@@ -342,13 +368,12 @@ class HomeViewModel: ObservableObject {
         withAnimation { self.sections.append(contentsOf: newSections) }
         self.isLoadingMore = false
         
-        // Recursive load if screen is still empty (e.g., all 5 groups were empty)
         if self.sections.count < 4 && newIndex < currentState.allGroupNames.count {
             self.loadMoreGenres()
         }
     }
     
-    // MARK: - UI Logic
+    // MARK: - UI Helpers
     
     private func updateGreeting() {
         let hour = Calendar.current.component(.hour, from: Date())
@@ -377,7 +402,12 @@ class HomeViewModel: ObservableObject {
             return
         }
         if case .freshContent = section.type {
-            self.drillDownCategory = "Your Fresh Content"
+            self.drillDownCategory = "Fresh For You"
+            self.displayedGridChannels = section.items
+            return
+        }
+        if case .tasteBreakers = section.type {
+            self.drillDownCategory = "Taste Breakers"
             self.displayedGridChannels = section.items
             return
         }

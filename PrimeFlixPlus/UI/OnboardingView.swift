@@ -1,373 +1,349 @@
 import SwiftUI
 
 struct OnboardingView: View {
-    var onComplete: () -> Void
-    @EnvironmentObject var repository: PrimeFlixRepository
     @StateObject private var viewModel = OnboardingViewModel()
+    @EnvironmentObject var repository: PrimeFlixRepository
     
-    // Focus Management
-    @FocusState private var focusedMood: String?
-    @FocusState private var focusedGenre: String?
-    @FocusState private var isNextButtonFocused: Bool
+    // Callbacks provided by parent
+    var onComplete: () -> Void
+    
+    // Focus State
+    @FocusState private var focusedField: OnboardingFocus?
+    
+    enum OnboardingFocus: Hashable {
+        case nextButton
+        case item(String) // For Moods/Genres
+        case searchBar
+        case searchResult(Int)
+        case favoriteItem(Int)
+    }
+    
+    // Grid Layouts
+    let columns = [GridItem(.adaptive(minimum: 200, maximum: 250), spacing: 30)]
+    let searchColumns = [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 30)]
     
     var body: some View {
         ZStack {
+            // 1. Background
             CinemeltTheme.mainBackground.ignoresSafeArea()
             
+            // 2. Content Flow
             VStack {
                 switch viewModel.step {
                 case .intro:
-                    introStep.transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading).combined(with: .opacity)))
+                    introStep
+                        .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading)))
                 case .moods:
-                    moodsStep.transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                    selectionStep(
+                        title: "How are you feeling?",
+                        subtitle: "Select moods to tailor your recommendations.",
+                        items: viewModel.availableMoods,
+                        selected: viewModel.selectedMoods,
+                        onToggle: { viewModel.toggleMood($0) }
+                    )
+                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
                 case .genres:
-                    genresStep.transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                    selectionStep(
+                        title: "What do you like?",
+                        subtitle: "Pick at least 3 genres you enjoy.",
+                        items: viewModel.availableGenres,
+                        selected: viewModel.selectedGenres,
+                        onToggle: { viewModel.toggleGenre($0) }
+                    )
+                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
                 case .favorites:
-                    favoritesStep.transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                    favoritesStep
+                        .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
                 case .processing:
-                    processingStep.transition(.opacity)
+                    processingStep
+                        .transition(.opacity)
                 case .done:
-                    doneStep.transition(.scale.combined(with: .opacity))
+                    doneStep
+                        .transition(.opacity)
                 }
             }
-            .animation(.easeInOut(duration: 0.5), value: viewModel.step)
         }
+        .animation(.easeInOut(duration: 0.5), value: viewModel.step)
         .onAppear {
             viewModel.configure(repository: repository)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                focusedField = .nextButton
+            }
         }
     }
     
-    // MARK: - Step 1-3 (Unchanged)
+    // MARK: - Steps
     
-    var introStep: some View {
+    private var introStep: some View {
         VStack(spacing: 40) {
-            Image(systemName: "sparkles.tv.fill")
-                .font(.system(size: 100))
-                .foregroundColor(CinemeltTheme.accent)
-                .shadow(color: CinemeltTheme.accent.opacity(0.5), radius: 30)
-            
-            Text("Welcome to Cinemelt")
-                .font(CinemeltTheme.fontTitle(70))
-                .foregroundColor(CinemeltTheme.cream)
+            Image("CinemeltLogo")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(height: 200)
                 .cinemeltGlow()
             
-            Text("Let's personalize your cinema experience.\nTell us what you love, and we'll handle the rest.")
-                .font(CinemeltTheme.fontBody(32))
-                .foregroundColor(CinemeltTheme.cream.opacity(0.8))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 100)
+            VStack(spacing: 10) {
+                Text("Welcome to Cinemelt")
+                    .font(CinemeltTheme.fontTitle(60))
+                    .foregroundColor(CinemeltTheme.cream)
+                
+                Text("Let's personalize your experience.")
+                    .font(CinemeltTheme.fontBody(28))
+                    .foregroundColor(.gray)
+            }
             
             Button(action: { viewModel.nextStep() }) {
                 Text("Get Started")
-                    .font(CinemeltTheme.fontTitle(32))
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 60)
+                    .font(CinemeltTheme.fontTitle(28))
+                    .padding(.horizontal, 50)
                     .padding(.vertical, 20)
                     .background(CinemeltTheme.accent)
                     .cornerRadius(16)
+                    .foregroundColor(.black)
             }
             .buttonStyle(CinemeltCardButtonStyle())
+            .focused($focusedField, equals: .nextButton)
             .padding(.top, 40)
         }
     }
     
-    var moodsStep: some View {
-        StepContainer(
-            title: "What's the vibe?",
-            subtitle: "Select moods that resonate with you.",
-            onNext: { viewModel.nextStep() },
-            canProceed: !viewModel.selectedMoods.isEmpty
-        ) {
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 40)], spacing: 40) {
-                    ForEach(viewModel.availableMoods, id: \.self) { mood in
-                        SelectableCard(
-                            label: mood,
-                            isSelected: viewModel.selectedMoods.contains(mood),
-                            action: { viewModel.toggleMood(mood) }
-                        )
-                        .focused($focusedMood, equals: mood)
-                    }
-                }
-                .padding(60)
-            }
-        }
-    }
-    
-    var genresStep: some View {
-        StepContainer(
-            title: "Favorite Genres",
-            subtitle: "We'll prioritize these categories for you.",
-            onNext: { viewModel.nextStep() },
-            canProceed: !viewModel.selectedGenres.isEmpty
-        ) {
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 30)], spacing: 30) {
-                    ForEach(viewModel.availableGenres, id: \.self) { genre in
-                        SelectableCard(
-                            label: genre,
-                            isSelected: viewModel.selectedGenres.contains(genre),
-                            action: { viewModel.toggleGenre(genre) }
-                        )
-                        .focused($focusedGenre, equals: genre)
-                    }
-                }
-                .padding(60)
-            }
-        }
-    }
-    
-    // MARK: - Step 4: Favorites (Refined)
-    
-    var favoritesStep: some View {
-        StepContainer(
-            title: "Your Favorites",
-            subtitle: "Search and add shows you've watched. We'll find new seasons for you.",
-            buttonText: "Finish Setup",
-            onNext: { viewModel.nextStep() },
-            canProceed: true
-        ) {
-            HStack(alignment: .top, spacing: 60) {
-                // Left: Input & Search Results
-                VStack(spacing: 20) {
-                    GlassTextField(
-                        title: "Search TMDB",
-                        placeholder: "Enter show or movie name...",
-                        text: $viewModel.searchQuery,
-                        nextFocus: {}
-                    )
-                    
-                    if viewModel.isSearching {
-                        CinemeltLoadingIndicator().scaleEffect(0.5)
-                    }
-                    
-                    ScrollView {
-                        LazyVStack(spacing: 15) {
-                            ForEach(viewModel.searchResults) { item in
-                                Button(action: { viewModel.addFavorite(item) }) {
-                                    HStack(spacing: 15) {
-                                        AsyncImage(url: item.posterUrl) { img in
-                                            img.resizable().aspectRatio(contentMode: .fill)
-                                        } placeholder: { Color.gray.opacity(0.3) }
-                                        .frame(width: 40, height: 60)
-                                        .cornerRadius(4)
-                                        
-                                        VStack(alignment: .leading) {
-                                            Text(item.title)
-                                                .font(CinemeltTheme.fontBody(20))
-                                                .foregroundColor(CinemeltTheme.cream)
-                                            Text("\(item.type.uppercased()) • \(item.year)")
-                                                .font(CinemeltTheme.fontBody(16))
-                                                .foregroundColor(.gray)
-                                        }
-                                        Spacer()
-                                        
-                                        // Visual Check if already added
-                                        if viewModel.manualFavorites.contains(where: { $0.id == item.id }) {
-                                            Image(systemName: "checkmark")
-                                                .foregroundColor(.green)
-                                        } else {
-                                            Image(systemName: "plus.circle")
-                                                .foregroundColor(CinemeltTheme.accent)
-                                        }
-                                    }
-                                    .padding(12)
-                                    .background(Color.white.opacity(0.05))
-                                    .cornerRadius(12)
-                                }
-                                .buttonStyle(CinemeltCardButtonStyle())
-                            }
-                        }
-                    }
-                }
-                .frame(width: 500)
-                
-                // Right: Selected List (Interactive)
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("Selected (\(viewModel.manualFavorites.count))")
-                        .font(CinemeltTheme.fontTitle(24))
-                        .foregroundColor(CinemeltTheme.cream)
-                    
-                    if viewModel.manualFavorites.isEmpty {
-                        Text("Added shows will appear here.\nScroll here to manage your list.")
-                            .font(CinemeltTheme.fontBody(20))
-                            .foregroundColor(.gray)
-                            .padding(.top, 20)
-                    } else {
-                        ScrollView {
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 20)], spacing: 20) {
-                                ForEach(viewModel.manualFavorites) { fav in
-                                    Button(action: { viewModel.prepareEdit(fav) }) {
-                                        ZStack(alignment: .topTrailing) {
-                                            // Poster
-                                            AsyncImage(url: fav.item.posterUrl) { img in
-                                                img.resizable().aspectRatio(contentMode: .fill)
-                                            } placeholder: { Color.gray }
-                                            .frame(width: 140, height: 210)
-                                            .cornerRadius(12)
-                                            // Super Favourite Glow
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 12)
-                                                    .stroke(fav.isSuper ? Color.yellow : Color.clear, lineWidth: 4)
-                                                    .shadow(color: fav.isSuper ? Color.yellow.opacity(0.8) : .clear, radius: 10)
-                                            )
-                                            
-                                            // Super Icon
-                                            if fav.isSuper {
-                                                Image(systemName: "star.fill")
-                                                    .padding(6)
-                                                    .background(Circle().fill(Color.yellow))
-                                                    .foregroundColor(.black)
-                                                    .offset(x: 5, y: -5)
-                                                    .shadow(radius: 2)
-                                            }
-                                        }
-                                    }
-                                    .buttonStyle(CinemeltCardButtonStyle())
-                                }
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .padding(40)
-            // POPUP MENU FOR FAVORITES
-            .confirmationDialog(
-                "Manage '\(viewModel.editingFavorite?.item.title ?? "Show")'",
-                isPresented: $viewModel.showEditDialog,
-                titleVisibility: .visible
-            ) {
-                if let fav = viewModel.editingFavorite {
-                    Button(fav.isSuper ? "Remove Super Status" : "Make Super Favourite") {
-                        viewModel.toggleSuperFavorite()
-                    }
-                    Button("Remove from list", role: .destructive) {
-                        viewModel.removeFavorite()
-                    }
-                    Button("Cancel", role: .cancel) {}
-                }
-            }
-        }
-    }
-    
-    // MARK: - Steps 5-6 (Unchanged)
-    
-    var processingStep: some View {
-        VStack(spacing: 30) {
-            CinemeltLoadingIndicator()
-                .scaleEffect(1.5)
-            Text("Personalizing Library...")
-                .font(CinemeltTheme.fontTitle(40))
-                .foregroundColor(CinemeltTheme.cream)
-                .cinemeltGlow()
-        }
-    }
-    
-    var doneStep: some View {
+    private func selectionStep(title: String, subtitle: String, items: [String], selected: Set<String>, onToggle: @escaping (String) -> Void) -> some View {
         VStack(spacing: 40) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 100))
-                .foregroundColor(CinemeltTheme.accent)
-                .shadow(color: CinemeltTheme.accent.opacity(0.5), radius: 30)
-            
-            Text("All Set!")
-                .font(CinemeltTheme.fontTitle(60))
-                .foregroundColor(CinemeltTheme.cream)
-            
-            Button(action: onComplete) {
-                Text("Start Watching")
-                    .font(CinemeltTheme.fontTitle(32))
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 60)
-                    .padding(.vertical, 20)
-                    .background(CinemeltTheme.accent)
-                    .cornerRadius(16)
-            }
-            .buttonStyle(CinemeltCardButtonStyle())
-            .focused($isNextButtonFocused)
-            .onAppear { isNextButtonFocused = true }
-        }
-    }
-}
-
-// MARK: - UI Helpers
-
-struct StepContainer<Content: View>: View {
-    let title: String
-    let subtitle: String
-    var buttonText: String = "Continue"
-    let onNext: () -> Void
-    let canProceed: Bool
-    let content: () -> Content
-    
-    @FocusState private var isButtonFocused: Bool
-    
-    var body: some View {
-        VStack {
-            // Header
             VStack(spacing: 10) {
                 Text(title)
-                    .font(CinemeltTheme.fontTitle(50))
+                    .font(CinemeltTheme.fontTitle(48))
                     .foregroundColor(CinemeltTheme.cream)
-                    .cinemeltGlow()
                 Text(subtitle)
                     .font(CinemeltTheme.fontBody(24))
                     .foregroundColor(.gray)
             }
-            .padding(.top, 40)
             
-            // Content
-            content()
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 30) {
+                    ForEach(items, id: \.self) { item in
+                        Button(action: { onToggle(item) }) {
+                            Text(item)
+                                .font(CinemeltTheme.fontBody(22))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 20)
+                                .background(
+                                    selected.contains(item) ? CinemeltTheme.accent : Color.white.opacity(0.1)
+                                )
+                                .foregroundColor(selected.contains(item) ? .black : .white)
+                                .cornerRadius(12)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(CinemeltCardButtonStyle())
+                        .focused($focusedField, equals: .item(item))
+                    }
+                }
+                .padding(40)
+            }
+            .focusSection()
             
-            // Footer
-            Button(action: onNext) {
+            Button(action: { viewModel.nextStep() }) {
                 HStack {
-                    Text(buttonText)
+                    Text("Continue")
                     Image(systemName: "arrow.right")
                 }
-                .font(CinemeltTheme.fontTitle(28))
-                .foregroundColor(canProceed ? .black : .gray)
+                .font(CinemeltTheme.fontTitle(24))
                 .padding(.horizontal, 40)
-                .padding(.vertical, 15)
-                .background(canProceed ? CinemeltTheme.accent : Color.white.opacity(0.1))
+                .padding(.vertical, 16)
+                .background(Color.white.opacity(0.1))
                 .cornerRadius(12)
+                .foregroundColor(.white)
             }
             .buttonStyle(CinemeltCardButtonStyle())
-            .disabled(!canProceed)
-            .padding(.bottom, 40)
-            .focused($isButtonFocused)
+            .focused($focusedField, equals: .nextButton)
+            .disabled(viewModel.step == .genres && selected.count < 3)
+            .opacity(viewModel.step == .genres && selected.count < 3 ? 0.5 : 1.0)
         }
+        .padding(.vertical, 60)
     }
-}
-
-struct SelectableCard: View {
-    let label: String
-    let isSelected: Bool
-    let action: () -> Void
     
-    var body: some View {
-        Button(action: action) {
-            Text(label)
-                .font(CinemeltTheme.fontTitle(28))
-                .foregroundColor(isSelected ? .black : CinemeltTheme.cream)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 30)
-                .background(
-                    ZStack {
-                        if isSelected {
-                            CinemeltTheme.accent
-                        } else {
-                            CinemeltTheme.glassSurface
+    private var favoritesStep: some View {
+        HStack(spacing: 40) {
+            // LEFT: Search
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Add Favorites")
+                    .font(CinemeltTheme.fontTitle(36))
+                    .foregroundColor(CinemeltTheme.cream)
+                
+                GlassTextField(
+                    title: "Search movies & shows...",
+                    placeholder: "e.g. Inception",
+                    text: $viewModel.searchQuery,
+                    nextFocus: { }
+                )
+                .focused($focusedField, equals: .searchBar)
+                
+                ScrollView {
+                    LazyVGrid(columns: searchColumns, spacing: 30) {
+                        ForEach(viewModel.searchResults) { item in
+                            Button(action: { viewModel.addFavorite(item) }) {
+                                VStack {
+                                    AsyncImage(url: item.posterUrl) { img in
+                                        img.resizable().aspectRatio(contentMode: .fill)
+                                    } placeholder: {
+                                        Color.gray.opacity(0.3)
+                                    }
+                                    .frame(height: 240)
+                                    .cornerRadius(12)
+                                    
+                                    Text(item.title)
+                                        .font(CinemeltTheme.fontBody(18))
+                                        .lineLimit(1)
+                                        .foregroundColor(.white.opacity(0.8))
+                                }
+                            }
+                            .buttonStyle(CinemeltCardButtonStyle())
+                            .focused($focusedField, equals: .searchResult(item.id))
                         }
                     }
-                )
-                .cornerRadius(20)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(isSelected ? CinemeltTheme.accent : Color.white.opacity(0.2), lineWidth: 2)
-                )
+                    .padding(.top, 20)
+                    .padding(.bottom, 40)
+                }
+                .focusSection()
+            }
+            
+            Divider().background(Color.white.opacity(0.1))
+            
+            // RIGHT: Selected List
+            VStack(alignment: .leading, spacing: 20) {
+                HStack {
+                    Text("Your List")
+                        .font(CinemeltTheme.fontTitle(36))
+                        .foregroundColor(CinemeltTheme.cream)
+                    Spacer()
+                    Text("\(viewModel.manualFavorites.count) items")
+                        .font(CinemeltTheme.fontBody(20))
+                        .foregroundColor(CinemeltTheme.accent)
+                }
+                
+                ScrollView {
+                    LazyVGrid(columns: searchColumns, spacing: 30) {
+                        ForEach(viewModel.manualFavorites) { fav in
+                            Button(action: { viewModel.prepareEdit(fav) }) {
+                                ZStack(alignment: .topTrailing) {
+                                    AsyncImage(url: fav.item.posterUrl) { img in
+                                        img.resizable().aspectRatio(contentMode: .fill)
+                                    } placeholder: {
+                                        Color.gray.opacity(0.3)
+                                    }
+                                    .frame(height: 240)
+                                    .cornerRadius(12)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(fav.isSuper ? CinemeltTheme.accent : Color.clear, lineWidth: 3)
+                                    )
+                                    
+                                    if fav.isSuper {
+                                        Image(systemName: "star.fill")
+                                            .padding(8)
+                                            .background(CinemeltTheme.accent)
+                                            .foregroundColor(.black)
+                                            .clipShape(Circle())
+                                            .offset(x: 5, y: -5)
+                                    }
+                                }
+                            }
+                            .buttonStyle(CinemeltCardButtonStyle())
+                            .focused($focusedField, equals: .favoriteItem(fav.id))
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    viewModel.editingFavorite = fav
+                                    viewModel.removeFavorite()
+                                } label: { Label("Remove", systemImage: "trash") }
+                                
+                                Button {
+                                    viewModel.editingFavorite = fav
+                                    viewModel.toggleSuperFavorite()
+                                } label: { Label(fav.isSuper ? "Unmark Super Favorite" : "Mark as Super Favorite", systemImage: "star") }
+                            }
+                        }
+                    }
+                    .padding(.top, 20)
+                    .padding(.bottom, 40)
+                }
+                .focusSection()
+                
+                Button(action: { viewModel.nextStep() }) {
+                    Text("Finish Profile")
+                        .font(CinemeltTheme.fontTitle(24))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(CinemeltTheme.accent)
+                        .foregroundColor(.black)
+                        .cornerRadius(12)
+                }
+                .buttonStyle(CinemeltCardButtonStyle())
+                .focused($focusedField, equals: .nextButton)
+            }
+            .frame(width: 500)
         }
-        .buttonStyle(CinemeltCardButtonStyle())
+        .padding(50)
+        
+        // Edit Dialog
+        .confirmationDialog(
+            "Manage Favorite",
+            isPresented: $viewModel.showEditDialog,
+            presenting: viewModel.editingFavorite
+        ) { fav in
+            Button(fav.isSuper ? "Unmark as Super Favorite" : "Mark as Super Favorite") {
+                viewModel.toggleSuperFavorite()
+            }
+            Button("Remove from List", role: .destructive) {
+                viewModel.removeFavorite()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+    
+    private var processingStep: some View {
+        VStack(spacing: 30) {
+            CinemeltLoadingIndicator()
+                .scaleEffect(2.0)
+            
+            Text("Building your Taste Profile...")
+                .font(CinemeltTheme.fontTitle(32))
+                .foregroundColor(CinemeltTheme.cream)
+            
+            Text("Analyzing \(viewModel.selectedGenres.count) genres and \(viewModel.selectedMoods.count) moods.")
+                .font(CinemeltTheme.fontBody(20))
+                .foregroundColor(.gray)
+        }
+    }
+    
+    private var doneStep: some View {
+        VStack(spacing: 40) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 100))
+                .foregroundColor(.green)
+                .shadow(color: .green.opacity(0.5), radius: 30)
+            
+            Text("You're all set!")
+                .font(CinemeltTheme.fontTitle(50))
+                .foregroundColor(CinemeltTheme.cream)
+            
+            Button(action: onComplete) {
+                Text("Start Watching")
+                    .font(CinemeltTheme.fontTitle(28))
+                    .padding(.horizontal, 60)
+                    .padding(.vertical, 20)
+                    .background(CinemeltTheme.accent)
+                    .cornerRadius(16)
+                    .foregroundColor(.black)
+            }
+            .buttonStyle(CinemeltCardButtonStyle())
+            .focused($focusedField, equals: .nextButton)
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                focusedField = .nextButton
+            }
+        }
     }
 }

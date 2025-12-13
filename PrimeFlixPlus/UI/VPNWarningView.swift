@@ -9,7 +9,7 @@ struct VPNWarningView: View {
     var body: some View {
         ZStack {
             // 1. Dimmed Background
-            Color.black.opacity(0.9).ignoresSafeArea()
+            CinemeltTheme.mainBackground.opacity(0.95).ignoresSafeArea()
             
             // 2. Alert Card
             VStack(spacing: 40) {
@@ -30,12 +30,12 @@ struct VPNWarningView: View {
                 // Text Content
                 VStack(spacing: 15) {
                     Text("Connection Privacy")
-                        .font(CinemeltTheme.fontTitle(42))
+                        .font(CinemeltTheme.fontTitle(48))
                         .foregroundColor(CinemeltTheme.cream)
                         .cinemeltGlow()
                     
                     Text("No active VPN detected. Your streaming activity may be visible to your ISP.")
-                        .font(CinemeltTheme.fontBody(22))
+                        .font(CinemeltTheme.fontBody(26))
                         .foregroundColor(.gray)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 40)
@@ -49,22 +49,20 @@ struct VPNWarningView: View {
                             Image(systemName: "xmark.circle.fill")
                             Text("Cancel")
                         }
-                        .font(CinemeltTheme.fontTitle(24))
+                        .font(CinemeltTheme.fontBody(24))
                         .foregroundColor(CinemeltTheme.cream)
                         .padding(.horizontal, 30)
                         .padding(.vertical, 14)
-                        .background(Color.white.opacity(0.1))
-                        .cornerRadius(12)
                     }
                     .buttonStyle(CinemeltCardButtonStyle())
-                    .focused($focusedButton) // Default focus to Cancel for safety
+                    .focused($focusedButton) // Default focus
                     
                     Button(action: onProceed) {
                         HStack {
                             Text("Continue Anyway")
                             Image(systemName: "arrow.right")
                         }
-                        .font(CinemeltTheme.fontTitle(24))
+                        .font(CinemeltTheme.fontBody(24))
                         .foregroundColor(.black)
                         .padding(.horizontal, 30)
                         .padding(.vertical, 14)
@@ -81,7 +79,7 @@ struct VPNWarningView: View {
                     .fill(.ultraThinMaterial)
                     .overlay(
                         LinearGradient(
-                            colors: [CinemeltTheme.charcoal.opacity(0.9), Color.black],
+                            colors: [CinemeltTheme.charcoal.opacity(0.5), Color.black],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -93,7 +91,7 @@ struct VPNWarningView: View {
                     .stroke(Color.white.opacity(0.1), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.8), radius: 50)
-            .frame(maxWidth: 700)
+            .frame(maxWidth: 800)
         }
         .transition(.opacity.animation(.easeInOut(duration: 0.2)))
         .onAppear {

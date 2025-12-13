@@ -88,7 +88,7 @@ struct SettingsView: View {
                         .padding(40)
                         .cinemeltGlass()
                         
-                        // --- SECTION 2: PLAYER EXPERIENCE (NEW) ---
+                        // --- SECTION 2: PLAYER EXPERIENCE ---
                         VStack(alignment: .leading, spacing: 30) {
                             Text("Player Experience")
                                 .font(CinemeltTheme.fontTitle(32))
@@ -103,11 +103,6 @@ struct SettingsView: View {
                                     Text("Scrubbing Sensitivity")
                                         .font(CinemeltTheme.fontBody(22))
                                         .foregroundColor(CinemeltTheme.cream)
-                                    Spacer()
-                                    Text("\(Int(viewModel.scrubSensitivity * 100))%")
-                                        .font(CinemeltTheme.fontBody(22))
-                                        .fontWeight(.bold)
-                                        .foregroundColor(CinemeltTheme.accent)
                                 }
                                 
                                 ScrollView(.horizontal, showsIndicators: false) {
@@ -449,7 +444,7 @@ struct SettingsView: View {
                                         action: onSpeedTest
                                     )
                                     
-                                    // VPN Toggle (NEW)
+                                    // VPN Toggle
                                     Button(action: { viewModel.vpnAlertEnabled.toggle() }) {
                                         HStack {
                                             Image(systemName: viewModel.vpnAlertEnabled ? "lock.shield.fill" : "lock.slash.fill")

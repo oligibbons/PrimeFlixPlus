@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import CoreData
 
 // MARK: - Category Preferences Manager
 class CategoryPreferences {
@@ -108,8 +109,9 @@ class SettingsViewModel: ObservableObject {
     @AppStorage("autoHideForeign") var autoHideForeign: Bool = false
     @AppStorage("defaultPlaybackSpeed") var defaultPlaybackSpeed: Double = 1.0
     
-    // --- Player Customization (NEW) ---
-    @AppStorage("scrubSensitivity") var scrubSensitivity: Double = 0.2 // Default 20%
+    // --- Player Customization ---
+    // UPDATED: Default sensitivity reduced to 0.05 (5%)
+    @AppStorage("scrubSensitivity") var scrubSensitivity: Double = 0.05
     @AppStorage("subtitleScale") var subtitleScale: Double = 1.0        // 1.0 = Normal
     @AppStorage("areSubtitlesEnabled") var areSubtitlesEnabled: Bool = true
     @AppStorage("vpnAlertEnabled") var vpnAlertEnabled: Bool = true
@@ -129,13 +131,12 @@ class SettingsViewModel: ObservableObject {
     
     let availableResolutions = ["4K UHD", "1080p", "720p", "SD"]
     
-    // Sensitivity Presets
+    // Sensitivity Presets (Updated Scale)
     let sensitivityOptions: [(String, Double)] = [
-        ("Very Low (5%)", 0.05),
-        ("Low (10%)", 0.10),
-        ("Standard (20%)", 0.20),
-        ("High (30%)", 0.30),
-        ("Very High (40%)", 0.40)
+        ("Fine (2%)", 0.02),
+        ("Standard (5%)", 0.05),
+        ("Fast (10%)", 0.10),
+        ("Very Fast (20%)", 0.20)
     ]
     
     // Subtitle Sizes
@@ -149,9 +150,8 @@ class SettingsViewModel: ObservableObject {
     // Optimization Presets (RAM Allocations)
     let bufferOptions: [(String, Int)] = [
         ("Light (100 MB)", 100),
-        ("Standard (200 MB)", 200),
-        ("High (300 MB)", 300),
-        ("Ultra (500 MB)", 500)
+        ("Standard (300 MB)", 300),
+        ("Heavy (500 MB)", 500)
     ]
     
     let resolutionCaps = ["Unlimited", "1080p", "720p"]
@@ -192,12 +192,12 @@ class SettingsViewModel: ObservableObject {
     // --- Actions ---
     
     func applyStreamOptimize() {
-        // "Stream Optimize" - Maximum Performance Preset
-        // 400MB is safe for ATV 4K (has 3GB+ RAM), allows huge buffer for 1080p
-        self.bufferMemoryLimit = 400
+        // "Stream Optimize" - Safe Defaults for Stability
+        self.bufferMemoryLimit = 300
         self.useHardwareDecoding = true
-        self.maxStreamResolution = "1080p" // Prioritize smoothness over pixel count
+        self.maxStreamResolution = "1080p"
         self.defaultDeinterlace = true
+        self.scrubSensitivity = 0.05
         
         objectWillChange.send()
     }
@@ -230,10 +230,36 @@ class SettingsViewModel: ObservableObject {
     
     func nuclearResync() {
         guard let repo = repository else { return }
-        Task {
-            for playlist in playlists {
-                await repo.nuclearResync(playlist: playlist)
+        
+        // 1. Deep Clean: Delete all Data Entities
+        let context = repo.container.newBackgroundContext()
+        context.performAndWait {
+            let entities = ["Channel", "Programme", "MediaMetadata", "WatchProgress"]
+            for entity in entities {
+                let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: entity)
+                let delete = NSBatchDeleteRequest(fetchRequest: fetch)
+                _ = try? context.execute(delete)
             }
+            try? context.save()
+        }
+        
+        // 2. Clear User Settings (Optional, but "Nuclear" implies total reset)
+        if let bundleID = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: bundleID)
+        }
+        
+        // 3. Restore Default Preferences (since we wiped UserDefaults)
+        self.scrubSensitivity = 0.05
+        self.bufferMemoryLimit = 300
+        
+        // 4. Trigger Fresh Sync
+        Task {
+            await MainActor.run {
+                // Refresh UI state immediately
+                self.playlists = []
+                self.allCategories = []
+            }
+            await repo.syncAll(force: true)
         }
     }
     

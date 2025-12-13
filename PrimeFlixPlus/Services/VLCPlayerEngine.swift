@@ -110,11 +110,11 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         
         let useHardware = UserDefaults.standard.object(forKey: "useHardwareDecoding") as? Bool ?? true
         
-        // Calculate Subtitle Scale (Base 16px is standard relative size in VLC)
-        // 0.75 -> 12, 1.0 -> 16, 1.25 -> 20, 1.5 -> 24
+        // Calculate Subtitle Scale
+        // FIX: Reduced base from 16 to 10 to fix the "Doubled Size" issue.
         let scalePref = UserDefaults.standard.double(forKey: "subtitleScale")
         let effectiveScale = scalePref > 0 ? scalePref : 1.0
-        let fontSize = Int(16 * effectiveScale)
+        let fontSize = Int(10 * effectiveScale)
         
         var options: [String: Any] = [
             "network-caching": finalCacheMs,
@@ -123,7 +123,9 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             "http-reconnect": true,
             // Subtitle Styling
             "freetype-rel-fontsize": fontSize,
-            "freetype-bold": 1 // Make subs slightly bolder for readability
+            "freetype-bold": 1, // Make subs slightly bolder for readability
+            "freetype-color": 16777215, // White
+            "freetype-outline-thickness": 2 // Black outline
         ]
         
         if !useHardware {
@@ -233,7 +235,8 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
            let indexes = player.videoSubTitlesIndexes as? [Int] {
             
             // Check Global Subtitle Toggle
-            let areSubsEnabled = UserDefaults.standard.object(forKey: "areSubtitlesEnabled") as? Bool ?? true
+            // FIX: Ensure we respect the boolean setting strictly
+            let areSubsEnabled = UserDefaults.standard.object(forKey: "areSubtitlesEnabled") as? Bool ?? false
             
             if !areSubsEnabled {
                 // If disabled, force VLC to turn them off (-1)
@@ -246,7 +249,9 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             } else {
                 self.subtitleTracks = names
                 let internalId = Int(player.currentVideoSubTitleIndex)
-                if let found = indexes.firstIndex(of: internalId) { self.currentSubtitleIndex = found }
+                if let found = indexes.firstIndex(of: internalId) {
+                    self.currentSubtitleIndex = found
+                }
             }
         }
     }
@@ -258,6 +263,14 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
     
     func setSubtitleTrack(index: Int) {
+        if index == -1 {
+            // Explicit Disable
+            player.currentVideoSubTitleIndex = -1
+            self.currentSubtitleIndex = -1
+            // Optional: Persist this choice temporarily
+            return
+        }
+        
         guard let indexes = player.videoSubTitlesIndexes as? [Int], index < indexes.count else { return }
         player.currentVideoSubTitleIndex = Int32(indexes[index])
         self.currentSubtitleIndex = index
@@ -281,7 +294,7 @@ class VLCPlayerEngine: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             case .playing:
                 self.isBuffering = false
                 self.isPlaying = true
-                // Refresh tracks when playback starts to apply subtitle preferences
+                // FIX: Refresh tracks immediately upon start to enforce "Subtitles Off" preference
                 self.refreshTracks()
             case .paused:
                 self.isPlaying = false

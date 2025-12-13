@@ -20,6 +20,9 @@ struct PlayerView: View {
         case versionSelection
         case videoSettings
         case resumePrompt
+        
+        // NEW: Favorites Prompt
+        case favoritesPrompt
     }
     
     @FocusState private var focusedField: PlayerFocus?
@@ -30,7 +33,8 @@ struct PlayerView: View {
         viewModel.showTrackSelection ||
         viewModel.showVersionSelection ||
         viewModel.showVideoSettings ||
-        viewModel.showResumePrompt
+        viewModel.showResumePrompt ||
+        viewModel.showFavoritesPrompt // Added
     }
     
     var body: some View {
@@ -99,6 +103,7 @@ struct PlayerView: View {
                 viewModel.showVideoSettings = false
                 viewModel.showResumePrompt = false
                 viewModel.showAutoPlay = false
+                viewModel.showFavoritesPrompt = false // Added
             }
             // Return focus to the scrubber
             focusedField = .videoSurface
@@ -305,6 +310,26 @@ struct PlayerView: View {
                 .zIndex(60)
                 .focused($focusedField, equals: .autoPlayOverlay)
         }
+        
+        // NEW: Favorites Prompt (Triggers at End of Playback)
+        if viewModel.showFavoritesPrompt {
+            FavoritesPromptOverlay(
+                title: viewModel.videoTitle,
+                onAdd: {
+                    viewModel.toggleFavorite()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        withAnimation { viewModel.showFavoritesPrompt = false }
+                        focusedField = .videoSurface
+                    }
+                },
+                onDismiss: {
+                    withAnimation { viewModel.showFavoritesPrompt = false }
+                    focusedField = .videoSurface
+                }
+            )
+            .zIndex(61)
+            .focused($focusedField, equals: .favoritesPrompt)
+        }
     }
     
     private var errorOverlay: some View {
@@ -333,3 +358,104 @@ struct PlayerView: View {
     }
 }
 
+// MARK: - Helper: Favorites Prompt Overlay
+struct FavoritesPromptOverlay: View {
+    let title: String
+    let onAdd: () -> Void
+    let onDismiss: () -> Void
+    
+    @FocusState private var focusedAction: FocusAction?
+    
+    enum FocusAction {
+        case add
+        case cancel
+    }
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.85).ignoresSafeArea()
+            
+            VStack(spacing: 40) {
+                // Icon
+                Image(systemName: "heart.circle.fill")
+                    .font(.system(size: 100))
+                    .foregroundColor(CinemeltTheme.accent)
+                    .shadow(color: CinemeltTheme.accent.opacity(0.6), radius: 20)
+                
+                // Text
+                VStack(spacing: 15) {
+                    Text("Add to My List?")
+                        .font(CinemeltTheme.fontTitle(48))
+                        .foregroundColor(CinemeltTheme.cream)
+                        .cinemeltGlow()
+                    
+                    Text("Enjoyed watching \"\(title)\"?")
+                        .font(CinemeltTheme.fontBody(28))
+                        .foregroundColor(.gray)
+                    
+                    Text("Add it to your favorites for better recommendations.")
+                        .font(CinemeltTheme.fontBody(24))
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
+                
+                // Buttons
+                HStack(spacing: 60) {
+                    Button(action: onDismiss) {
+                        Text("No Thanks")
+                            .font(CinemeltTheme.fontBody(28))
+                            .foregroundColor(.gray)
+                            .padding(.horizontal, 40)
+                            .padding(.vertical, 20)
+                    }
+                    .buttonStyle(CinemeltCardButtonStyle())
+                    .focused($focusedAction, equals: .cancel)
+                    
+                    Button(action: onAdd) {
+                        HStack {
+                            Image(systemName: "plus")
+                            Text("Add to Favorites")
+                        }
+                        .font(CinemeltTheme.fontTitle(28))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 40)
+                        .padding(.vertical, 20)
+                        .background(CinemeltTheme.accent)
+                        .cornerRadius(16)
+                    }
+                    .buttonStyle(CinemeltCardButtonStyle())
+                    .focused($focusedAction, equals: .add)
+                }
+            }
+            .padding(80)
+            .background(.ultraThinMaterial)
+            .cornerRadius(40)
+            .overlay(
+                RoundedRectangle(cornerRadius: 40)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            )
+            .shadow(radius: 50)
+        }
+        .onAppear {
+            // Default focus to "Add" for convenience
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                focusedAction = .add
+            }
+        }
+    }
+}
+
+// MARK: - Helper: VLC Video Surface
+struct VLCVideoSurface: UIViewRepresentable {
+    @ObservedObject var viewModel: PlayerViewModel
+    
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .black
+        viewModel.assignView(view)
+        return view
+    }
+    
+    func updateUIView(_ uiView: UIView, context: Context) {}
+}

@@ -71,23 +71,22 @@ struct SplashView: View {
                         .scaleEffect(logoScale)
                         .opacity(logoOpacity)
                         
-                        // 3. Welcome Text
+                        // 3. Welcome Text (REBRANDED)
                         VStack(spacing: 15) {
-                            Text("PrimeFlix+")
-                                .font(CinemeltTheme.fontTitle(70))
+                            Text("Cinemelt")
+                                .font(CinemeltTheme.fontTitle(80)) // Increased size
                                 .foregroundColor(CinemeltTheme.cream)
                                 .shadow(color: CinemeltTheme.accent.opacity(0.5), radius: 10, x: 0, y: 5)
                             
                             Text("The Ultimate Streaming Experience")
-                                .font(CinemeltTheme.fontBody(28))
+                                .font(CinemeltTheme.fontBody(32)) // Increased size
                                 .foregroundColor(CinemeltTheme.cream.opacity(0.6))
-                                .tracking(2) // Cinematic letter spacing
+                                .tracking(2)
                         }
                         .opacity(textOpacity)
-                        .offset(y: textOpacity == 1.0 ? 0 : 20) // Slight slide-up effect
+                        .offset(y: textOpacity == 1.0 ? 0 : 20)
                     }
                 }
-                // Metal rendering for smooth 4K animation
                 .drawingGroup()
             }
         }
@@ -101,7 +100,6 @@ struct SplashView: View {
             }
             
             // 3. Handle UI Transition to App
-            // Note: If PrimeFlixPlusApp.swift controls the delay, this acts as a fallback or internal router
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                 withAnimation {
                     self.isActive = true
@@ -130,6 +128,7 @@ struct SplashView: View {
     }
     
     private func checkSyncStatus() {
+        // Simple polling to transition from Splash -> SmartLoading -> Home smoothly
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
             if repository.isInitialSync {
                 withAnimation { self.showSmartLoading = true }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SearchView: View {
-    @StateObject private var viewModel: SearchViewModel
+    @StateObject private var viewModel = SearchViewModel()
     @EnvironmentObject var repository: PrimeFlixRepository
     
     var onPlay: (Channel) -> Void
@@ -21,10 +21,11 @@ struct SearchView: View {
         GridItem(.adaptive(minimum: 280, maximum: 320), spacing: 40)
     ]
     
+    // Custom Init to handle callbacks
     init(repository: PrimeFlixRepository, onPlay: @escaping (Channel) -> Void, onBack: @escaping () -> Void) {
-        _viewModel = StateObject(wrappedValue: SearchViewModel(initialScope: .library))
         self.onPlay = onPlay
         self.onBack = onBack
+        // Note: ViewModel is initialized via StateObject, but we configure it in onAppear
     }
     
     var body: some View {
@@ -94,7 +95,6 @@ struct SearchView: View {
                 .zIndex(2)
                 
                 // MARK: - 2. Main Content Area
-                // FIX: ScrollViewReader allows programmatic scrolling if needed
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 50) {
@@ -139,7 +139,6 @@ struct SearchView: View {
                         .id("TopContent")
                     }
                     // FIX: FocusSection ensures scrolling within this view is prioritized
-                    // over jumping back up to the search bar.
                     .focusSection()
                 }
             }
@@ -224,28 +223,9 @@ struct SearchView: View {
                     LazyVGrid(columns: channelGridColumns, spacing: 50) {
                         ForEach(viewModel.liveChannels) { channel in
                             Button(action: { onPlay(channel) }) {
-                                VStack(spacing: 15) {
-                                    AsyncImage(url: URL(string: channel.cover ?? "")) { image in
-                                        image.resizable().aspectRatio(contentMode: .fit)
-                                    } placeholder: {
-                                        Image(systemName: "tv")
-                                            .font(.system(size: 40))
-                                            .foregroundColor(.gray.opacity(0.3))
-                                    }
-                                    .frame(width: 120, height: 120)
-                                    .background(Color.white.opacity(0.05))
-                                    .cornerRadius(20)
-                                    .shadow(radius: 5)
-                                    
-                                    Text(channel.title)
-                                        .font(CinemeltTheme.fontBody(18))
-                                        .foregroundColor(CinemeltTheme.cream)
-                                        .lineLimit(2)
-                                        .multilineTextAlignment(.center)
-                                }
+                                LiveChannelCard(channel: channel)
                             }
-                            .buttonStyle(.card) // Live channels use simple card
-                            .padding(10)
+                            .buttonStyle(CinemeltCardButtonStyle())
                         }
                     }
                 }
@@ -275,5 +255,83 @@ struct SearchView: View {
             Spacer()
         }
         .padding(.top, 80)
+    }
+}
+
+// MARK: - Helper Components (Internal)
+
+struct ResultSection: View {
+    let title: String
+    let items: [Channel]
+    let onPlay: (Channel) -> Void
+    
+    // Standard Grid for Posters
+    let columns = [
+        GridItem(.adaptive(minimum: 200, maximum: 240), spacing: 40)
+    ]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 25) {
+            Text(title)
+                .font(CinemeltTheme.fontTitle(32))
+                .foregroundColor(CinemeltTheme.cream)
+                .padding(.leading, CinemeltTheme.Layout.margin)
+            
+            LazyVGrid(columns: columns, spacing: 60) {
+                ForEach(items) { item in
+                    Button(action: { onPlay(item) }) {
+                        MovieCard(channel: item)
+                    }
+                    .buttonStyle(CinemeltCardButtonStyle())
+                }
+            }
+            .padding(.horizontal, CinemeltTheme.Layout.margin)
+        }
+    }
+}
+
+struct LiveChannelCard: View {
+    let channel: Channel
+    @Environment(\.isFocused) private var isFocused
+    
+    var body: some View {
+        VStack(spacing: 15) {
+            ZStack {
+                // Background Plate
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.white.opacity(0.05))
+                    .aspectRatio(16/9, contentMode: .fit)
+                
+                // Logo
+                if let logo = channel.cover, let url = URL(string: logo) {
+                    AsyncImage(url: url) { image in
+                        image.resizable().aspectRatio(contentMode: .fit).padding(20)
+                    } placeholder: {
+                        Image(systemName: "tv")
+                            .font(.system(size: 40))
+                            .foregroundColor(.gray.opacity(0.3))
+                    }
+                } else {
+                    Text(String(channel.title.prefix(1)))
+                        .font(.system(size: 50, weight: .bold))
+                        .foregroundColor(.white.opacity(0.2))
+                }
+            }
+            .cornerRadius(20)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(isFocused ? CinemeltTheme.accent : Color.clear, lineWidth: 3)
+            )
+            .shadow(color: isFocused ? CinemeltTheme.accent.opacity(0.4) : .black.opacity(0.2), radius: isFocused ? 15 : 5)
+            .scaleEffect(isFocused ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isFocused)
+            
+            Text(channel.title)
+                .font(CinemeltTheme.fontBody(18))
+                .foregroundColor(isFocused ? .white : CinemeltTheme.cream.opacity(0.8))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+        }
+        .padding(10)
     }
 }

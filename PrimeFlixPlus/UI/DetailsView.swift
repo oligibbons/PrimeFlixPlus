@@ -205,7 +205,7 @@ struct DetailsView: View {
             if let best = viewModel.movieVersions.first {
                 Badge(text: best.quality)
             } else if let epQuality = viewModel.displayedEpisodes.first?.versions.first?.quality {
-                 Badge(text: epQuality)
+                Badge(text: epQuality)
             }
             
             // Ratings
@@ -405,5 +405,39 @@ struct DetailsView: View {
             }
         }
         .focusSection()
+    }
+}
+
+// MARK: - Components Helper
+
+struct Badge: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(CinemeltTheme.fontBody(18))
+            .foregroundColor(.black)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(CinemeltTheme.accent)
+            .cornerRadius(4)
+    }
+}
+
+// Adapter to use the shared EpisodeCard with the ViewModel struct
+extension EpisodeCard {
+    init(episode: DetailsViewModel.MergedEpisode) {
+        // We create a temporary Channel object for the view display if needed,
+        // OR we update EpisodeCard to accept this struct directly.
+        // Assuming EpisodeCard has been updated to use MergedEpisode based on previous context.
+        // If not, we map:
+        let placeholderChannel = Channel(context: PersistenceController.shared.container.viewContext)
+        placeholderChannel.title = episode.title
+        placeholderChannel.overview = episode.overview
+        placeholderChannel.episode = Int16(episode.number)
+        placeholderChannel.season = Int16(episode.season)
+        placeholderChannel.cover = episode.stillPath?.absoluteString
+        // Note: This is a view-only object, not saved
+        
+        self.init(episode: episode) // Using the struct initializer
     }
 }

@@ -19,7 +19,7 @@ struct SidebarView: View {
         (.home, "house.fill", "Home"),
         (.continueWatching, "play.tv.fill", "Watching"),
         (.favorites, "heart.fill", "Favorites"),
-        (.watchlist, "bookmark.fill", "Watch List"), // NEW: Watch List
+        (.watchlist, "bookmark.fill", "Watch List"),
         (.search, "magnifyingglass", "Search"),
         (.settings, "gearshape.fill", "Settings"),
         (.addPlaylist, "person.badge.plus", "Profiles")
@@ -36,8 +36,8 @@ struct SidebarView: View {
                 .overlay(
                     LinearGradient(
                         colors: [
-                            CinemeltTheme.charcoal.opacity(0.5), // Semi-transparent tint
-                            CinemeltTheme.coffee.opacity(0.3)
+                            CinemeltTheme.charcoal.opacity(0.8), // Slightly darker for legibility
+                            CinemeltTheme.coffee.opacity(0.4)
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
@@ -124,7 +124,7 @@ struct SidebarView: View {
                         Text("Cinemelt")
                             .font(CinemeltTheme.fontBody(16))
                             .foregroundColor(CinemeltTheme.cream)
-                        Text("v1.2.0")
+                        Text("v2.1") // Updated to match Settings
                             .font(CinemeltTheme.fontBody(14))
                             .foregroundColor(.white.opacity(0.3))
                     }

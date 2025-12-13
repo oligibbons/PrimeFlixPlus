@@ -138,7 +138,7 @@ struct EpisodeCard: View {
             .background(.ultraThinMaterial)
         )
         .cornerRadius(12)
-        // Focus Effects handled by CinemeltCardButtonStyle, but we add the border here
+        // Focus Effects
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(
@@ -146,5 +146,11 @@ struct EpisodeCard: View {
                     lineWidth: isFocused ? 3 : 1
                 )
         )
+        // CRITICAL FIX: Ensure focused item sits ON TOP of neighbors
+        .zIndex(isFocused ? 100 : 1)
+        // Scale effect for the "Lift"
+        .scaleEffect(isFocused ? 1.05 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isFocused)
+        .buttonStyle(.card)
     }
 }

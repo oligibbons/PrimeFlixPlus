@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The central Design System for "Cinemelt" v2.1 (Visual Refinement Update).
-/// Refactored for tvOS 15.4+ with proper Focus Engines and Overscan protection.
+/// The central Design System for "Cinemelt" v2.2.
+/// Refactored for tvOS 15.4+.
 struct CinemeltTheme {
     
     // MARK: - Colors
@@ -9,7 +9,7 @@ struct CinemeltTheme {
     static let accentDim = Color(red: 180/255, green: 90/255, blue: 40/255) // Deep amber
     static let cream = Color(red: 245/255, green: 240/255, blue: 230/255) // Soft off-white
     
-    // Explicit White definition to fix build errors in other files
+    // Explicit White definition
     static let white = Color.white
     
     // Deep Backgrounds
@@ -56,21 +56,19 @@ struct CinemeltTheme {
         .ignoresSafeArea()
     }
     
-    // MARK: - Fonts (tvOS Optimized - Scaled Down)
+    // MARK: - Fonts (tvOS Optimized)
     
-    // Scaling Factor to reduce all text by ~25% globally
-    static let fontScale: CGFloat = 0.75
+    // UPDATED: Increased scale from 0.75 to 1.0 (approx +35% larger)
+    static let fontScale: CGFloat = 1.0
     
-    /// Returns a title font. Automatically upgrades small sizes to tvOS standards (scaled).
+    /// Returns a title font.
     static func fontTitle(_ size: CGFloat) -> Font {
-        // Was 38, now ~28 minimum
         let effectiveSize = (size < 30 ? 38 : size) * fontScale
         return .custom("Zain-Bold", size: effectiveSize)
     }
     
-    /// Returns a body font. Enforces minimum readability (scaled).
+    /// Returns a body font.
     static func fontBody(_ size: CGFloat) -> Font {
-        // Was 26, now ~19.5 minimum
         let effectiveSize = (size < 20 ? 26 : size) * fontScale
         return .custom("Zain-Regular", size: effectiveSize)
     }
@@ -80,14 +78,13 @@ struct CinemeltTheme {
         // Critical: Apple TV Safe Area margins (90pt standard).
         static let margin: CGFloat = 90
         
-        // Tightened spacing for smaller content
-        static let verticalSpacing: CGFloat = 45 // Was 60
-        static let gutter: CGFloat = 30          // Was 40
+        // Spacing
+        static let verticalSpacing: CGFloat = 50
+        static let gutter: CGFloat = 40
         
-        // Standardized Card Sizes (Reduced by ~25% for density)
-        // Was 250 x 375
-        static let posterWidth: CGFloat = 185
-        static let posterHeight: CGFloat = 278
+        // Standardized Card Sizes
+        static let posterWidth: CGFloat = 200
+        static let posterHeight: CGFloat = 300
     }
 }
 
@@ -116,8 +113,8 @@ struct CinemeltLoadingIndicator: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.white.opacity(0.1), lineWidth: 6) // Reduced stroke
-                .frame(width: 60, height: 60) // Reduced size
+                .stroke(Color.white.opacity(0.1), lineWidth: 6)
+                .frame(width: 60, height: 60)
             
             Circle()
                 .trim(from: 0, to: 0.6)
@@ -151,6 +148,7 @@ struct CinemeltGlassModifier: ViewModifier {
             .background(Color.white.opacity(0.03))
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .shadow(color: .black.opacity(0.4), radius: 15, x: 0, y: 10)
+            // Subtle border for definition, not focus
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(LinearGradient(
@@ -178,34 +176,21 @@ struct CinemeltCardButtonView: View {
     var body: some View {
         configuration.label
             // The "Lift" Effect
-            // FIX: Reduced scale from 1.15 to 1.10 to prevent cropping issues in grids
-            .scaleEffect(configuration.isPressed ? 0.95 : (isFocused ? 1.10 : 1.0))
-            .offset(y: isFocused ? -8 : 0) // Reduced offset
+            // Reduced scale to prevent cropping, removed y-offset to prevent misalignment
+            .scaleEffect(configuration.isPressed ? 0.98 : (isFocused ? 1.08 : 1.0))
             
-            // Ambilight Glow
+            // Ambilight Glow (Only on Focus)
             .shadow(
-                color: isFocused ? CinemeltTheme.accent.opacity(0.6) : .black.opacity(0.3),
-                radius: isFocused ? 25 : 5, // Tighter radius
+                color: isFocused ? CinemeltTheme.accent.opacity(0.5) : .black.opacity(0.3),
+                radius: isFocused ? 20 : 5,
                 x: 0,
-                y: isFocused ? 15 : 2
-            )
-            
-            // Background Plate
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.clear)
-            )
-            
-            // Focus Border
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(isFocused ? 0.8 : 0), lineWidth: 3)
-                    .blur(radius: isFocused ? 1 : 0)
+                y: isFocused ? 10 : 2
             )
             
             // Animation
             .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isFocused)
             .animation(.spring(response: 0.2, dampingFraction: 0.4), value: configuration.isPressed)
+            // Ensure focused items render above neighbors
             .zIndex(isFocused ? 1 : 0)
     }
 }
@@ -235,7 +220,6 @@ extension View {
         self.modifier(CinemeltTextGlow())
     }
     
-    // Default sizes applied here will be scaled by the 0.75 factor in the font methods
     func cinemeltTitle() -> some View {
         self.font(CinemeltTheme.fontTitle(40)).foregroundColor(CinemeltTheme.cream)
     }
@@ -247,7 +231,7 @@ extension View {
     /// Applies standard tvOS safe area padding.
     func standardSafePadding() -> some View {
         self.padding(.horizontal, CinemeltTheme.Layout.margin)
-            .padding(.vertical, 40) // Reduced vertical padding
+            .padding(.vertical, 40)
     }
     
     /// Applies the custom "Cinemelt" focus lift effect.

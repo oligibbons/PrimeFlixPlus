@@ -272,9 +272,12 @@ class OnboardingViewModel: ObservableObject {
         
         Task {
             // 1. Save Moods & Genres
-            preferencesRepo?.completeOnboarding(
-                moods: Array(selectedMoods),
-                genres: Array(selectedGenres)
+            // Convert Sets to Arrays for persistence
+            // CRITICAL: This is what powers the "Taste Breakers" exclusion logic
+            preferencesRepo?.saveProfile(
+                genres: selectedGenres.sorted().joined(separator: ","),
+                moods: selectedMoods.sorted().joined(separator: ","),
+                isComplete: true
             )
             
             // 2. Save Manual Favorites

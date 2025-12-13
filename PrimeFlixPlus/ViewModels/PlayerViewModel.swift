@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import SwiftUI
 import CoreData
+import UIKit // For lifecycle notifications
 
 @MainActor
 class PlayerViewModel: ObservableObject {
@@ -23,6 +24,9 @@ class PlayerViewModel: ObservableObject {
     @Published var showAutoPlay: Bool = false
     @Published var showResumePrompt: Bool = false
     @Published var showVideoSettings: Bool = false
+    
+    // NEW: End of Playback Prompt
+    @Published var showFavoritesPrompt: Bool = false
     
     // MARK: - Playback Data
     @Published var videoTitle: String = ""
@@ -67,11 +71,8 @@ class PlayerViewModel: ObservableObject {
     // Internal
     private var repository: PrimeFlixRepository?
     private let tmdbClient = TmdbClient()
-    private let omdbClient = OmdbClient()
     
-    // EPG Service for Live TV Metadata
     private var epgService: EpgService?
-    
     private var currentChannel: Channel?
     private var cancellables = Set<AnyCancellable>()
     private var controlHideTimer: Timer?
@@ -79,6 +80,7 @@ class PlayerViewModel: ObservableObject {
     
     private var isSeekingCommit: Bool = false
     private var lastSavedTime: Double = 0
+    private var hasShownFavPrompt: Bool = false
     
     // MARK: - Configuration
     
@@ -91,21 +93,25 @@ class PlayerViewModel: ObservableObject {
         self.qualityBadge = channel.quality ?? "HD"
         self.epgService = EpgService(context: repository.container.viewContext)
         
-        // Reset State for new video
+        // Reset State
         self.hasTriggeredAutoPlay = false
         self.showAutoPlay = false
+        self.showFavoritesPrompt = false
+        self.hasShownFavPrompt = false
         self.autoPlayCounter = 20
+        self.isBuffering = true
         
-        // 1. Read Global Playback Speed Default
+        // 1. Read Settings
         let speed = UserDefaults.standard.double(forKey: "defaultPlaybackSpeed")
         self.playbackRate = speed > 0 ? Float(speed) : 1.0
         
         setupEngineBindings()
+        setupLifecycleObservers()
         
-        // 2. Check for Resume Point
+        // 2. Resume Logic
         checkForResume(channel: channel)
         
-        // 3. Metadata & Logic
+        // 3. Metadata
         Task {
             if channel.type == "live" {
                 await fetchLiveMetadata(channel: channel)
@@ -122,7 +128,29 @@ class PlayerViewModel: ObservableObject {
         playerEngine.attach(to: view)
     }
     
-    // MARK: - Resume & Defaults Logic
+    // MARK: - Lifecycle Management (Fix for "Stuck" player)
+    
+    private func setupLifecycleObservers() {
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.handleAppResume()
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    private func handleAppResume() {
+        // If we were playing before, or if the view is active, ensure engine is alive
+        if self.currentTime > 0 && !self.isError {
+            // Re-assert playback state if needed
+            if self.isPlaying {
+                playerEngine.play()
+            }
+        }
+    }
+    
+    // MARK: - Resume Logic
     
     private func checkForResume(channel: Channel) {
         guard let repo = repository else { return }
@@ -141,8 +169,8 @@ class PlayerViewModel: ObservableObject {
             let savedPos = Double(progress.position) / 1000.0
             let savedDur = Double(progress.duration) / 1000.0
             
-            // Resume if > 1 min duration and between 3%-95%
-            if savedDur > 60 && savedPos > (savedDur * 0.03) && savedPos < (savedDur * 0.95) {
+            // Logic: Resume if > 1 minute watched and < 95% complete
+            if savedDur > 60 && savedPos > 60 && savedPos < (savedDur * 0.95) {
                 self.resumeTime = savedPos
                 self.showResumePrompt = true
             } else {
@@ -167,7 +195,7 @@ class PlayerViewModel: ObservableObject {
             startTime: time
         )
         
-        // 2. Apply User Defaults
+        // 2. Apply Defaults
         let defDeinterlace = UserDefaults.standard.bool(forKey: "defaultDeinterlace")
         let defRatio = UserDefaults.standard.string(forKey: "defaultAspectRatio") ?? "Default"
         
@@ -196,25 +224,42 @@ class PlayerViewModel: ObservableObject {
             if self.isScrubbing || self.isSeekingCommit { return }
             self.currentTime = time
             
-            // A. Auto-save progress every 10s
+            // Auto-save every 10s
             if abs(time - self.lastSavedTime) > 10 {
                 self.saveProgress()
             }
             
-            // B. Auto-Play Check (20 seconds remaining)
+            // 1. Auto-Play Trigger (Next Episode)
             if self.duration > 0 && !self.hasTriggeredAutoPlay && self.canPlayNext {
                 let remaining = self.duration - time
-                if remaining <= 20 && remaining > 0 {
+                // Trigger 20s before end
+                if remaining <= 20 && remaining > 5 {
                     self.triggerAutoPlay()
                 }
             }
+            
+            // 2. Favorites Prompt Trigger (Finished)
+            if self.duration > 0 && !self.hasShownFavPrompt && !self.isFavorite {
+                let progress = time / self.duration
+                if progress > 0.95 {
+                    // Only show if we are NOT auto-playing next ep
+                    if !self.showAutoPlay {
+                        self.hasShownFavPrompt = true
+                        self.showFavoritesPrompt = true
+                    }
+                }
+            }
+            
         }.store(in: &cancellables)
         
         playerEngine.$duration.receive(on: RunLoop.main).assign(to: \.duration, on: self).store(in: &cancellables)
         
+        // Updated: Handle "Stuck Pause Icon" by strictly syncing UI state
         playerEngine.$isPlaying.receive(on: RunLoop.main).sink { [weak self] playing in
             self?.isPlaying = playing
-            if !playing { self?.triggerControls(forceShow: true) }
+            if !playing {
+                self?.triggerControls(forceShow: true)
+            }
         }.store(in: &cancellables)
         
         playerEngine.$isBuffering.receive(on: RunLoop.main).assign(to: \.isBuffering, on: self).store(in: &cancellables)
@@ -237,13 +282,13 @@ class PlayerViewModel: ObservableObject {
         playerEngine.$subtitleDelay.assign(to: \.subtitleDelay, on: self).store(in: &cancellables)
     }
     
-    // MARK: - Actions
+    // MARK: - Actions (Scrubbing Fix)
     
     func togglePlayPause() { playerEngine.togglePlayPause(); triggerControls() }
     
     func seekForward() {
         let newTime = currentTime + 10
-        startScrubbing(translation: 0, screenWidth: 1)
+        startScrubbing(translation: 0, screenWidth: 1) // Dummy scrub
         self.currentTime = max(0, min(newTime, duration))
         endScrubbing()
     }
@@ -262,9 +307,10 @@ class PlayerViewModel: ObservableObject {
             let percent = Double(translation / screenWidth)
             let totalDuration = duration > 0 ? duration : 3600
             
-            // --- SENSITIVITY FIX ---
+            // --- SENSITIVITY FIX (Drastically Reduced) ---
+            // Old Default: 0.2 (way too fast). New Default: 0.05
             let userSensitivity = UserDefaults.standard.double(forKey: "scrubSensitivity")
-            let sensitivityFactor = userSensitivity > 0 ? userSensitivity : 0.2
+            let sensitivityFactor = userSensitivity > 0 ? userSensitivity : 0.05
             
             let delta = (totalDuration * sensitivityFactor) * percent
             
@@ -276,7 +322,12 @@ class PlayerViewModel: ObservableObject {
         isScrubbing = false
         isSeekingCommit = true
         playerEngine.seek(to: currentTime)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.isSeekingCommit = false }
+        
+        // Debounce to prevent UI jumping
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            self?.isSeekingCommit = false
+        }
+        
         if !playerEngine.isPlaying { playerEngine.play() }
     }
     
@@ -285,17 +336,9 @@ class PlayerViewModel: ObservableObject {
         playerEngine.setRate(speed)
     }
     
-    // FIX: Added argument label 'index:'
     func setAudioTrack(index: Int) { playerEngine.setAudioTrack(index: index) }
-    // FIX: Added argument label 'index:'
     func setSubtitleTrack(index: Int) { playerEngine.setSubtitleTrack(index: index) }
-    
-    // FIX: Expose refreshTracks
-    func refreshTracks() {
-        playerEngine.refreshTracks()
-    }
-    
-    // MARK: - Sync & Video Actions
+    func refreshTracks() { playerEngine.refreshTracks() }
     
     func setAudioDelay(_ ms: Int) { playerEngine.setAudioDelay(ms) }
     func setSubtitleDelay(_ ms: Int) { playerEngine.setSubtitleDelay(ms) }
@@ -315,12 +358,12 @@ class PlayerViewModel: ObservableObject {
         playerEngine.setAspectRatio(ratio)
     }
     
-    // MARK: - Navigation
-    
     func switchVersion(_ newChannel: Channel) {
         saveProgress()
         configure(repository: repository!, channel: newChannel)
         showVersionSelection = false
+        // Auto-start the new version
+        startPlayback(from: self.currentTime)
     }
     
     func restartPlayback() {
@@ -336,35 +379,67 @@ class PlayerViewModel: ObservableObject {
         autoPlayTimer?.invalidate()
     }
     
-    // MARK: - Metadata (Live EPG)
+    // MARK: - Auto Play & Favorites Logic
+    
+    func toggleFavorite() {
+        guard let channel = currentChannel else { return }
+        repository?.toggleFavorite(channel)
+        isFavorite.toggle()
+        showFavoritesPrompt = false // Close prompt if opened
+    }
+    
+    func triggerAutoPlay() {
+        guard canPlayNext, !hasTriggeredAutoPlay else { return }
+        self.hasTriggeredAutoPlay = true
+        self.showAutoPlay = true
+        self.autoPlayCounter = 20
+        
+        // FIX: Ensure Timer runs on RunLoop.main
+        autoPlayTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                if self.autoPlayCounter > 0 {
+                    self.autoPlayCounter -= 1
+                } else {
+                    self.confirmAutoPlay()
+                }
+            }
+        }
+    }
+    
+    func cancelAutoPlay() {
+        autoPlayTimer?.invalidate()
+        showAutoPlay = false
+        hasTriggeredAutoPlay = true // Prevent re-firing
+    }
+    
+    func confirmAutoPlay() {
+        autoPlayTimer?.invalidate()
+        showAutoPlay = false
+        
+        if let next = nextEpisode {
+            // Post notification for PlayerView to handle the transition (view rebuild)
+            NotificationCenter.default.post(name: NSNotification.Name("PlayNextEpisode"), object: next)
+        }
+    }
+    
+    // MARK: - Metadata & Internals
     
     private func fetchLiveMetadata(channel: Channel) async {
         guard let service = epgService else { return }
-        
         if let cover = channel.cover, let url = URL(string: cover) { self.posterImage = url }
-        
         await service.refreshEpg(for: [channel])
-        
         let map = service.getCurrentPrograms(for: [channel])
         if let program = map[channel.url] {
             await MainActor.run {
                 self.videoTitle = program.title
                 self.videoOverview = program.desc ?? "No description available."
-                
                 let f = DateFormatter()
                 f.timeStyle = .short
-                let timeStr = "\(f.string(from: program.start)) - \(f.string(from: program.end))"
-                self.videoYear = timeStr
-            }
-        } else {
-            await MainActor.run {
-                self.videoTitle = channel.title
-                self.videoOverview = "No program information available."
+                self.videoYear = "\(f.string(from: program.start)) - \(f.string(from: program.end))"
             }
         }
     }
-    
-    // MARK: - Metadata (VOD TMDB)
     
     private func fetchRichMetadata(channel: Channel) async {
         let info = TitleNormalizer.parse(rawTitle: channel.canonicalTitle ?? channel.title)
@@ -378,7 +453,6 @@ class PlayerViewModel: ObservableObject {
         if isSeries {
             let seasonNum = Int(channel.season)
             let episodeNum = Int(channel.episode)
-            
             if seasonNum > 0 {
                 if let seasonData = try? await tmdbClient.getTvSeason(tvId: match.id, seasonNumber: seasonNum) {
                     if let ep = seasonData.episodes.first(where: { $0.episodeNumber == episodeNum }) {
@@ -416,13 +490,10 @@ class PlayerViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Logic Helpers
-    
     func triggerControls(forceShow: Bool = false) {
         withAnimation { showControls = true }
         controlHideTimer?.invalidate()
         if (isPlaying || !forceShow) && !isError {
-            // FIX: Use Task MainActor to safely interact with published properties from timer
             controlHideTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self = self else { return }
@@ -436,26 +507,17 @@ class PlayerViewModel: ObservableObject {
     
     func checkForNextEpisode() async {
         guard let current = currentChannel, let repo = repository else { return }
-        
-        // FIX: Extract thread-unsafe objects (managed object) into thread-safe identifiers
         let objectID = current.objectID
         let container = repo.container
         
-        // Perform work in a detached task using a new background context
         Task.detached(priority: .userInitiated) {
             let bgContext = container.newBackgroundContext()
             let service = NextEpisodeService(context: bgContext)
             
-            // Re-fetch channel in background
             guard let bgChannel = try? bgContext.existingObject(with: objectID) as? Channel else { return }
-            
-            // Find next episode logic
             if let nextBg = service.findNextEpisode(currentChannel: bgChannel) {
                 let nextID = nextBg.objectID
-                
-                // Pass result back to MainActor
                 await MainActor.run {
-                    // Re-fetch on main context for UI usage
                     if let mainNext = try? container.viewContext.existingObject(with: nextID) as? Channel {
                         self.nextEpisode = mainNext
                         self.canPlayNext = true
@@ -478,45 +540,5 @@ class PlayerViewModel: ObservableObject {
         let pos = Int64(currentTime * 1000)
         let dur = Int64(duration * 1000)
         repo.saveProgress(url: channel.url, pos: pos, dur: dur)
-    }
-    
-    func toggleFavorite() {
-        guard let channel = currentChannel else { return }
-        repository?.toggleFavorite(channel)
-        isFavorite.toggle()
-    }
-    
-    func triggerAutoPlay() {
-        guard canPlayNext, !hasTriggeredAutoPlay else { return }
-        self.hasTriggeredAutoPlay = true
-        self.showAutoPlay = true
-        self.autoPlayCounter = 20
-        
-        // FIX: Use Task MainActor within Timer block
-        autoPlayTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self = self else { return }
-                if self.autoPlayCounter > 0 {
-                    self.autoPlayCounter -= 1
-                } else {
-                    self.confirmAutoPlay()
-                }
-            }
-        }
-    }
-    
-    func cancelAutoPlay() {
-        autoPlayTimer?.invalidate()
-        showAutoPlay = false
-        // Prevent re-triggering for this playback session
-        // (User explicitly cancelled)
-        hasTriggeredAutoPlay = true
-    }
-    
-    func confirmAutoPlay() {
-        autoPlayTimer?.invalidate()
-        if let next = nextEpisode {
-            NotificationCenter.default.post(name: NSNotification.Name("PlayNextEpisode"), object: next)
-        }
     }
 }
