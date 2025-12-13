@@ -12,7 +12,8 @@ class LiveTVViewModel: ObservableObject {
     @Published var allGroups: [String] = []
     
     // Lazy loaded content for lanes
-    @Published var channelsByGroup: [String: [Channel]] = []
+    // FIXED: Use [:] for empty dictionary, not []
+    @Published var channelsByGroup: [String: [Channel]] = [:]
     
     // EPG Data (Map: Channel URL -> Current Program)
     @Published var currentPrograms: [String: Programme] = [:]
@@ -62,19 +63,14 @@ class LiveTVViewModel: ObservableObject {
         // Load Groups in Background to prevent UI freeze
         Task.detached(priority: .userInitiated) {
             // We need a thread-safe way to get the playlist URL.
-            // Since we can't access repository on background easily without isolation,
-            // we assume the main repo has the data or we fetch via a new context if needed.
-            // For simplicity/safety, we'll ask for the URL on MainActor then detach.
-            
             let playlistUrl = await self.getLivePlaylistUrl()
             guard let plUrl = playlistUrl else {
                 await MainActor.run { self.isLoading = false }
                 return
             }
             
-            // Create a background context to fetch groups efficiently
-            // (Assuming Repository exposes a way to get a bg context, or we construct a simple fetch)
-            // Ideally, we ask the Repository to do this work.
+            // Fetch groups via repository (which handles context safety internally or is MainActor)
+            // Since Repository is MainActor, we await it.
             let rawGroups = await self.repository?.getGroups(playlistUrl: plUrl, type: .live) ?? []
             
             // Filter and Sort
@@ -136,7 +132,6 @@ class LiveTVViewModel: ObservableObject {
     }
     
     // MARK: - Optimized EPG Batching
-    // Fixes crash/stutter during fast scrolling by grouping API calls
     
     func onChannelFocused(_ channel: Channel) {
         queueEpgRefresh(for: [channel])
@@ -184,7 +179,6 @@ class LiveTVViewModel: ObservableObject {
     
     func toggleFavorite(_ channel: Channel) {
         repository?.toggleFavorite(channel)
-        // refreshLists() is triggered automatically via listener
     }
     
     func getProgram(for channel: Channel) -> Programme? {

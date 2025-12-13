@@ -495,7 +495,7 @@ struct EpgFilterSettingsView: View {
     }
 }
 
-// MARK: - Row Component (Unchanged from prev)
+// MARK: - Row Component
 struct EpgChannelRow: View {
     let channel: Channel
     @ObservedObject var viewModel: EpgGridViewModel
@@ -568,7 +568,7 @@ struct EpgChannelRow: View {
     }
 }
 
-// MARK: - Program Cell (Unchanged from prev)
+// MARK: - Program Cell
 struct EpgProgramCell: View {
     let program: Programme
     let width: CGFloat
@@ -625,14 +625,3 @@ struct EpgProgramCell: View {
         return "\(f.string(from: program.start)) - \(f.string(from: program.end))"
     }
 }
-
-}
-
-**Next Step:**
-We're almost done with the critical updates. The next item is to ensure that opening secondary pages (**Favorites**, **Watchlist**, **Continue Watching**) selects the **content** first, not the sidebar.
-This involves a small tweak to:
-1.  **`FavoritesView.swift`**
-2.  **`WatchlistView.swift`**
-3.  **`ContinueWatchingView.swift`**
-
-I'll provide **`FavoritesView.swift`** first.

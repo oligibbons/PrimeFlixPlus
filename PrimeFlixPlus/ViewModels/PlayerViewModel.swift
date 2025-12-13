@@ -8,7 +8,6 @@ class PlayerViewModel: ObservableObject {
     
     // MARK: - Engine
     private let playerEngine = VLCPlayerEngine()
-    private var nextEpisodeService: NextEpisodeService?
     
     // MARK: - UI State
     @Published var isPlaying: Bool = false
@@ -90,7 +89,6 @@ class PlayerViewModel: ObservableObject {
         self.isFavorite = channel.isFavorite
         self.currentUrl = channel.url
         self.qualityBadge = channel.quality ?? "HD"
-        self.nextEpisodeService = NextEpisodeService(context: repository.container.viewContext)
         self.epgService = EpgService(context: repository.container.viewContext)
         
         // Reset State for new video
@@ -245,8 +243,7 @@ class PlayerViewModel: ObservableObject {
     
     func seekForward() {
         let newTime = currentTime + 10
-        startScrubbing(translation: 0, screenWidth: 1) // Using 0 translation with manual logic handled by caller usually, but here checking helper
-        // Simplified seek for button press:
+        startScrubbing(translation: 0, screenWidth: 1)
         self.currentTime = max(0, min(newTime, duration))
         endScrubbing()
     }
@@ -266,13 +263,9 @@ class PlayerViewModel: ObservableObject {
             let totalDuration = duration > 0 ? duration : 3600
             
             // --- SENSITIVITY FIX ---
-            // Read user preference (default 0.2 / 20%)
             let userSensitivity = UserDefaults.standard.double(forKey: "scrubSensitivity")
             let sensitivityFactor = userSensitivity > 0 ? userSensitivity : 0.2
             
-            // Base calculation logic:
-            // "100%" swipe (full width) = sensitivityFactor * totalDuration
-            // e.g., 20% sensitivity on 1 hour video = 12 minutes max scrub per full swipe
             let delta = (totalDuration * sensitivityFactor) * percent
             
             self.currentTime = max(0, min(currentTime + delta, duration))
@@ -292,8 +285,15 @@ class PlayerViewModel: ObservableObject {
         playerEngine.setRate(speed)
     }
     
-    func setAudioTrack(index: Int) { playerEngine.setAudioTrack(index) }
-    func setSubtitleTrack(index: Int) { playerEngine.setSubtitleTrack(index) }
+    // FIX: Added argument label 'index:'
+    func setAudioTrack(index: Int) { playerEngine.setAudioTrack(index: index) }
+    // FIX: Added argument label 'index:'
+    func setSubtitleTrack(index: Int) { playerEngine.setSubtitleTrack(index: index) }
+    
+    // FIX: Expose refreshTracks
+    func refreshTracks() {
+        playerEngine.refreshTracks()
+    }
     
     // MARK: - Sync & Video Actions
     
@@ -422,23 +422,45 @@ class PlayerViewModel: ObservableObject {
         withAnimation { showControls = true }
         controlHideTimer?.invalidate()
         if (isPlaying || !forceShow) && !isError {
+            // FIX: Use Task MainActor to safely interact with published properties from timer
             controlHideTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
-                guard let self = self else { return }
-                if self.isPlaying && !self.isScrubbing && !self.showMiniDetails {
-                    withAnimation { self.showControls = false }
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    if self.isPlaying && !self.isScrubbing && !self.showMiniDetails {
+                        withAnimation { self.showControls = false }
+                    }
                 }
             }
         }
     }
     
     func checkForNextEpisode() async {
-        guard let current = currentChannel, let service = nextEpisodeService else { return }
-        if let next = await Task(priority: .userInitiated, operation: {
-            return service.findNextEpisode(currentChannel: current)
-        }).value {
-            await MainActor.run {
-                self.nextEpisode = next
-                self.canPlayNext = true
+        guard let current = currentChannel, let repo = repository else { return }
+        
+        // FIX: Extract thread-unsafe objects (managed object) into thread-safe identifiers
+        let objectID = current.objectID
+        let container = repo.container
+        
+        // Perform work in a detached task using a new background context
+        Task.detached(priority: .userInitiated) {
+            let bgContext = container.newBackgroundContext()
+            let service = NextEpisodeService(context: bgContext)
+            
+            // Re-fetch channel in background
+            guard let bgChannel = try? bgContext.existingObject(with: objectID) as? Channel else { return }
+            
+            // Find next episode logic
+            if let nextBg = service.findNextEpisode(currentChannel: bgChannel) {
+                let nextID = nextBg.objectID
+                
+                // Pass result back to MainActor
+                await MainActor.run {
+                    // Re-fetch on main context for UI usage
+                    if let mainNext = try? container.viewContext.existingObject(with: nextID) as? Channel {
+                        self.nextEpisode = mainNext
+                        self.canPlayNext = true
+                    }
+                }
             }
         }
     }
@@ -470,12 +492,15 @@ class PlayerViewModel: ObservableObject {
         self.showAutoPlay = true
         self.autoPlayCounter = 20
         
+        // FIX: Use Task MainActor within Timer block
         autoPlayTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            if self.autoPlayCounter > 0 {
-                self.autoPlayCounter -= 1
-            } else {
-                self.confirmAutoPlay()
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                if self.autoPlayCounter > 0 {
+                    self.autoPlayCounter -= 1
+                } else {
+                    self.confirmAutoPlay()
+                }
             }
         }
     }
