@@ -1,5 +1,6 @@
 import Foundation
 import SystemConfiguration.CaptiveNetwork
+import Combine
 
 struct VPNStatus {
     let isActive: Bool
@@ -7,10 +8,47 @@ struct VPNStatus {
     let interfaceName: String?
 }
 
-class VPNDetector {
+class VPNDetector: ObservableObject {
     
+    // MARK: - Singleton & Observable State
+    static let shared = VPNDetector()
+    
+    @Published var isVPNActive: Bool = false
+    @Published var currentStatus: VPNStatus = VPNStatus(isActive: false, method: "Inactive", interfaceName: nil)
+    
+    private var timer: Timer?
+    
+    private init() {
+        // Start polling immediately
+        startMonitoring()
+    }
+    
+    deinit {
+        timer?.invalidate()
+    }
+    
+    private func startMonitoring() {
+        refresh()
+        // Poll every 5 seconds to update UI
+        timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.refresh()
+        }
+    }
+    
+    func refresh() {
+        let status = Self.checkVPNStatus()
+        DispatchQueue.main.async {
+            // Only publish changes to minimize UI redraws
+            if self.isVPNActive != status.isActive {
+                self.isVPNActive = status.isActive
+            }
+            self.currentStatus = status
+        }
+    }
+    
+    // MARK: - Detection Logic
     /// Checks for the presence of ACTIVE, ROUTABLE VPN interfaces.
-    static func checkVPNStatus() -> VPNStatus {
+    private static func checkVPNStatus() -> VPNStatus {
         // 1. Check System Proxy Settings (Highest Confidence for App VPNs)
         // VPN apps on tvOS usually register a scoped proxy configuration.
         if let dict = CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any] {
